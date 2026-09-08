@@ -1,4 +1,5 @@
-﻿#include "NatPortMapping.h"
+#include "ServerLog/ServerLog.h"
+#include "NatPortMapping/NatPortMapping.h"
 
 #include "Net.h"
 
@@ -596,7 +597,7 @@ EResult Start(uint16_t Port, bool bTcp)
 			return Result;
 		}
 	}
-	std::printf("[NAT] 공유기 발견: %s\n", LocationUrl.c_str());
+	ServerLog::Print("[NAT] 공유기 발견: %s\n", LocationUrl.c_str());
 
 	// 2~3. 제어 URL
 	{
@@ -606,7 +607,7 @@ EResult Start(uint16_t Port, bool bTcp)
 			return Result;
 		}
 	}
-	std::printf("[NAT] 제어 URL: %s (%s)\n", GControlUrl.c_str(), GServiceType.c_str());
+	ServerLog::Print("[NAT] 제어 URL: %s (%s)\n", GControlUrl.c_str(), GServiceType.c_str());
 
 	// 4. 외부 IP — CGNAT 판별
 	{
@@ -618,14 +619,14 @@ EResult Start(uint16_t Port, bool bTcp)
 			{
 				// 공유기의 "외부" IP 가 사설 대역이면 그 위에 통신사 NAT 이 한 겹 더 있다.
 				// 포트를 열어봐야 통신사 장비에서 막히므로 시도할 이유가 없다.
-				std::printf("[NAT] 공유기의 외부 IP 가 사설 대역이다 (%s).\n", GExternalIp.c_str());
+				ServerLog::Print("[NAT] 공유기의 외부 IP 가 사설 대역이다 (%s).\n", GExternalIp.c_str());
 				return EResult::CarrierGradeNat;
 			}
-			std::printf("[NAT] 외부 IP: %s\n", GExternalIp.empty() ? "(확인 못함)" : GExternalIp.c_str());
+			ServerLog::Print("[NAT] 외부 IP: %s\n", GExternalIp.empty() ? "(확인 못함)" : GExternalIp.c_str());
 		}
 		else
 		{
-			std::printf("[NAT] 외부 IP 를 확인하지 못했다. 매핑은 계속 시도한다.\n");
+			ServerLog::Print("[NAT] 외부 IP 를 확인하지 못했다. 매핑은 계속 시도한다.\n");
 		}
 	}
 
@@ -639,7 +640,7 @@ EResult Start(uint16_t Port, bool bTcp)
 		GLocalIp = LocalIpTowardGateway(GatewayHost);
 		if (GLocalIp.empty())
 		{
-			std::printf("[NAT] 내 LAN IP 를 찾지 못했다.\n");
+			ServerLog::Print("[NAT] 내 LAN IP 를 찾지 못했다.\n");
 			return EResult::NetworkError;
 		}
 	}
@@ -675,7 +676,7 @@ EResult Start(uint16_t Port, bool bTcp)
 		if (Result == EResult::Success)
 		{
 			GMappedPort = External;
-			std::printf("[NAT] 매핑 성공: 외부 %u -> %s:%u (%s)\n",
+			ServerLog::Print("[NAT] 매핑 성공: 외부 %u -> %s:%u (%s)\n",
 				static_cast<unsigned>(External), GLocalIp.c_str(),
 				static_cast<unsigned>(Port), Protocol);
 			return EResult::Success;
@@ -686,7 +687,7 @@ EResult Start(uint16_t Port, bool bTcp)
 			return Result;
 		}
 
-		std::printf("[NAT] 외부 포트 %u 가 사용 중이다. 다음 번호로 시도한다.\n",
+		ServerLog::Print("[NAT] 외부 포트 %u 가 사용 중이다. 다음 번호로 시도한다.\n",
 			static_cast<unsigned>(External));
 	}
 
@@ -714,11 +715,11 @@ void Stop()
 	if (Result == EResult::Success ||
 		std::atoi(ExtractTag(Body, "errorCode").c_str()) == 714)
 	{
-		std::printf("[NAT] 매핑 해제: 외부 %u\n", static_cast<unsigned>(GMappedPort));
+		ServerLog::Print("[NAT] 매핑 해제: 외부 %u\n", static_cast<unsigned>(GMappedPort));
 	}
 	else
 	{
-		std::printf("[NAT] 매핑 해제 실패(%s). 공유기에 외부 포트 %u 가 남았을 수 있다.\n",
+		ServerLog::Print("[NAT] 매핑 해제 실패(%s). 공유기에 외부 포트 %u 가 남았을 수 있다.\n",
 			ResultText(Result), static_cast<unsigned>(GMappedPort));
 	}
 

@@ -3,7 +3,8 @@
 리슨서버와 **별개의 프로세스**로 상시 가동되는 채팅/계정 서버.
 호스트가 게임을 종료해도 이 프로세스는 살아있으므로 채팅 로그와 점수가 유지된다.
 
-현재 범위는 **1~3단계**다.
+아래 단계 표는 초기 개발 기록이다. 현재 코드의 구성과 검증 방법은
+[STRUCTURE.md](STRUCTURE.md)를 기준으로 한다.
 
 | 단계 | 내용 | 상태 |
 |---|---|---|
@@ -17,7 +18,9 @@
 | 8 | 리슨서버 → 채팅서버 미러링 | 미구현 |
 | 9 | 귓속말 | 미구현 |
 
-프로토콜은 현재 **v6** 이다. 자세한 내용과 언리얼 연동은 `SERVER_INTEGRATION.md` 를 본다.
+프로토콜은 현재 **v11** 이다. 자세한 내용과 언리얼 연동은 `SERVER_INTEGRATION.md` 를 본다.
+
+현재 책임별 폴더와 빌드·검증 방법은 [STRUCTURE.md](STRUCTURE.md)를 참고한다.
 
 ## 구조
 
@@ -27,9 +30,12 @@ MOU_Server/
     ChatProtocol.h   패킷 정의. 언리얼 클라이언트에서도 그대로 include 한다.
     Net.h            플랫폼별 소켓 API 래퍼
     Framing.h/.cpp   길이 프리픽스 프레이밍 (핵심)
-  Server/
-    Session.h/.cpp   ClientSession + SessionManager
-    Server.cpp       accept 루프, 패킷 핸들러, 채널 라우팅
+  Code/
+    Server/Server.cpp           main 진입점
+    Session/Session.h/.cpp       ClientSession + SessionManager
+    ServerApp/ServerApp.h/.cpp   서버 실행과 연결 수명
+    PacketDispatcher/PacketDispatcher.h/.cpp   패킷 분배
+    (나머지 모듈은 STRUCTURE.md 참고)
   TestClient/
     TestClient.cpp   검증용 콘솔 클라이언트
 ```
@@ -48,7 +54,7 @@ cmake -S . -B build && cmake --build build --config Debug
 CMake 없이 직접 컴파일하려면 개발자 명령 프롬프트에서:
 
 ```bash
-cl /std:c++17 /EHsc /utf-8 /Fe:Server.exe Server\Server.cpp Server\Session.cpp Shared\Framing.cpp /IShared /IServer
+build_server.bat
 ```
 
 `/utf-8` 은 소스에 한글 문자열이 있으므로 필수다.

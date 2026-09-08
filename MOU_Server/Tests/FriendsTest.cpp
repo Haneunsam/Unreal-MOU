@@ -17,9 +17,9 @@
 //   ./FriendsTest        (현재 디렉터리에 m2.db 를 만들었다 지운다)
 //
 //   종료 코드 0 = 전부 통과. CI 에 걸 때 그대로 쓸 수 있다.
-#include "Accounts.h"
-#include "DirectMessages.h"
-#include "Friends.h"
+#include "Accounts/Accounts.h"
+#include "DirectMessages/DirectMessages.h"
+#include "Friends/Friends.h"
 
 #include <cstdio>
 #include <cstdlib>

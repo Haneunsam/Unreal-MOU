@@ -1,7 +1,8 @@
-#include "Accounts.h"
+#include "ServerLog/ServerLog.h"
+#include "Accounts/Accounts.h"
 
 #include "ChatProtocol.h"
-#include "Crypto.h"
+#include "Crypto/Crypto.h"
 #include "sqlite3.h"
 
 #include <cstdio>
@@ -22,7 +23,7 @@ namespace
 		char* ErrMsg = nullptr;
 		if (sqlite3_exec(GDb, Sql, nullptr, nullptr, &ErrMsg) != SQLITE_OK)
 		{
-			std::printf("[계정] SQL 실패: %s\n", ErrMsg ? ErrMsg : "?");
+			ServerLog::Print("[계정] SQL 실패: %s\n", ErrMsg ? ErrMsg : "?");
 			sqlite3_free(ErrMsg);
 			return false;
 		}
@@ -56,7 +57,7 @@ bool Start(const char* DbPath)
 
 	if (sqlite3_open(DbPath, &GDb) != SQLITE_OK)
 	{
-		std::printf("[계정] DB 열기 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[계정] DB 열기 실패: %s\n", sqlite3_errmsg(GDb));
 		sqlite3_close(GDb);
 		GDb = nullptr;
 		return false;
@@ -86,7 +87,7 @@ bool Start(const char* DbPath)
 		return false;
 	}
 
-	std::printf("[계정] %s 준비 완료\n", DbPath);
+	ServerLog::Print("[계정] %s 준비 완료\n", DbPath);
 	return true;
 }
 
@@ -133,7 +134,7 @@ EAccountResult Create(const std::string& LoginId, const std::string& Password,
 
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[계정] INSERT 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[계정] INSERT 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return EAccountResult::DbError;
 	}
 
@@ -152,7 +153,7 @@ EAccountResult Create(const std::string& LoginId, const std::string& Password,
 		{
 			return EAccountResult::DuplicateId;
 		}
-		std::printf("[계정] INSERT 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[계정] INSERT 실패: %s\n", sqlite3_errmsg(GDb));
 		return EAccountResult::DbError;
 	}
 
@@ -178,7 +179,7 @@ EAccountResult Authenticate(const std::string& LoginId, const std::string& Passw
 	const char* Sql = "SELECT id, pw_salt, pw_hash, nickname FROM accounts WHERE login_id = ?;";
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[계정] SELECT 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[계정] SELECT 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return EAccountResult::DbError;
 	}
 	sqlite3_bind_text(St, 1, LoginId.c_str(), static_cast<int>(LoginId.size()), SQLITE_TRANSIENT);
@@ -204,7 +205,7 @@ EAccountResult Authenticate(const std::string& LoginId, const std::string& Passw
 	if (!Crypto::FromHex(SaltHex, Salt, sizeof(Salt)) ||
 	    !Crypto::FromHex(HashHex, Stored, sizeof(Stored)))
 	{
-		std::printf("[계정] 저장된 해시 형식이 깨졌다: login_id=%s\n", LoginId.c_str());
+		ServerLog::Print("[계정] 저장된 해시 형식이 깨졌다: login_id=%s\n", LoginId.c_str());
 		return EAccountResult::DbError;
 	}
 
@@ -235,7 +236,7 @@ bool GetNickname(uint64_t UserId, std::string& OutNickname)
 
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[계정] 닉네임 조회 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[계정] 닉네임 조회 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return false;
 	}
 

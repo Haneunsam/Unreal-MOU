@@ -1,4 +1,5 @@
-#include "DirectMessages.h"
+#include "ServerLog/ServerLog.h"
+#include "DirectMessages/DirectMessages.h"
 
 #include "ChatProtocol.h"
 #include "sqlite3.h"
@@ -21,7 +22,7 @@ namespace
 		char* ErrMsg = nullptr;
 		if (sqlite3_exec(GDb, Sql, nullptr, nullptr, &ErrMsg) != SQLITE_OK)
 		{
-			std::printf("[메신저] SQL 실패: %s\n", ErrMsg ? ErrMsg : "?");
+			ServerLog::Print("[메신저] SQL 실패: %s\n", ErrMsg ? ErrMsg : "?");
 			sqlite3_free(ErrMsg);
 			return false;
 		}
@@ -63,7 +64,7 @@ bool Start(const char* DbPath)
 
 	if (sqlite3_open(DbPath, &GDb) != SQLITE_OK)
 	{
-		std::printf("[메신저] DB 열기 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[메신저] DB 열기 실패: %s\n", sqlite3_errmsg(GDb));
 		sqlite3_close(GDb);
 		GDb = nullptr;
 		return false;
@@ -107,7 +108,7 @@ bool Start(const char* DbPath)
 		return false;
 	}
 
-	std::printf("[메신저] %s 준비 완료 (페이지 %u개)\n", DbPath, kDmPageSize);
+	ServerLog::Print("[메신저] %s 준비 완료 (페이지 %u개)\n", DbPath, kDmPageSize);
 	return true;
 }
 
@@ -142,7 +143,7 @@ bool Send(uint64_t FromId, uint64_t ToId, const char* Text, uint32_t TextLen,
 
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[메신저] INSERT 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[메신저] INSERT 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return false;
 	}
 
@@ -156,7 +157,7 @@ bool Send(uint64_t FromId, uint64_t ToId, const char* Text, uint32_t TextLen,
 
 	if (Step != SQLITE_DONE)
 	{
-		std::printf("[메신저] INSERT 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[메신저] INSERT 실패: %s\n", sqlite3_errmsg(GDb));
 		return false;
 	}
 
@@ -211,7 +212,7 @@ bool GetHistory(uint64_t UserId, uint64_t PeerId, uint64_t BeforeMessageId,
 
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[메신저] 기록 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[메신저] 기록 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return false;
 	}
 
@@ -258,7 +259,7 @@ bool MarkRead(uint64_t ReaderId, uint64_t PeerId)
 
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[메신저] 읽음 처리 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[메신저] 읽음 처리 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return false;
 	}
 
@@ -270,7 +271,7 @@ bool MarkRead(uint64_t ReaderId, uint64_t PeerId)
 
 	if (Step != SQLITE_DONE)
 	{
-		std::printf("[메신저] 읽음 처리 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[메신저] 읽음 처리 실패: %s\n", sqlite3_errmsg(GDb));
 		return false;
 	}
 
@@ -296,7 +297,7 @@ bool GetUnreadCounts(uint64_t UserId, std::vector<UnreadCount>& Out)
 
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[메신저] 안읽음 집계 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[메신저] 안읽음 집계 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return false;
 	}
 
@@ -340,7 +341,7 @@ bool GetPending(uint64_t UserId, uint32_t Limit, std::vector<DmRow>& Out)
 
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[메신저] 밀린 메시지 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[메신저] 밀린 메시지 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return false;
 	}
 

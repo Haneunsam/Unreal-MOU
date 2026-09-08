@@ -1,4 +1,5 @@
-#include "UdpRelay.h"
+#include "ServerLog/ServerLog.h"
+#include "UdpRelay/UdpRelay.h"
 
 #include "Net.h"
 
@@ -669,14 +670,14 @@ namespace MOU
 							AcceptedRegistrations_.fetch_add(1, std::memory_order_relaxed);
 							char Address[INET_ADDRSTRLEN] = {};
 							(void)::inet_ntop(AF_INET, &From.sin_addr, Address, sizeof(Address));
-							std::printf("[릴레이] route=%llu %s 등록: %s:%u\n",
+							ServerLog::Print("[릴레이] route=%llu %s 등록: %s:%u\n",
 								static_cast<unsigned long long>(Entry.Route->Id),
 								Entry.Peer == EUdpRelayPeer::Host ? "host" : "guest",
 								Address[0] != '\0' ? Address : "<unknown>",
 								static_cast<unsigned>(::ntohs(From.sin_port)));
 							if (bBecameReady)
 							{
-								std::printf("[릴레이] route=%llu 양쪽 등록 완료. UE UDP 전달을 시작한다.\n",
+								ServerLog::Print("[릴레이] route=%llu 양쪽 등록 완료. UE UDP 전달을 시작한다.\n",
 									static_cast<unsigned long long>(Entry.Route->Id));
 							}
 						}

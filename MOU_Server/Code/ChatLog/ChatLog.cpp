@@ -1,4 +1,5 @@
-#include "ChatLog.h"
+#include "ServerLog/ServerLog.h"
+#include "ChatLog/ChatLog.h"
 
 #include "sqlite3.h"
 
@@ -55,7 +56,7 @@ namespace
 		char* ErrMsg = nullptr;
 		if (sqlite3_exec(GDb, Sql, nullptr, nullptr, &ErrMsg) != SQLITE_OK)
 		{
-			std::printf("[채팅로그] SQL 실패: %s (%s)\n", ErrMsg ? ErrMsg : "?", Sql);
+			ServerLog::Print("[채팅로그] SQL 실패: %s (%s)\n", ErrMsg ? ErrMsg : "?", Sql);
 			sqlite3_free(ErrMsg);
 			return false;
 		}
@@ -99,7 +100,7 @@ namespace
 			}
 			else
 			{
-				std::printf("[채팅로그] INSERT 실패: %s\n", sqlite3_errmsg(GDb));
+				ServerLog::Print("[채팅로그] INSERT 실패: %s\n", sqlite3_errmsg(GDb));
 			}
 		}
 		sqlite3_reset(GInsertStmt);
@@ -161,7 +162,7 @@ bool Start(const char* DbPath)
 
 	if (sqlite3_open(DbPath, &GDb) != SQLITE_OK)
 	{
-		std::printf("[채팅로그] DB 열기 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[채팅로그] DB 열기 실패: %s\n", sqlite3_errmsg(GDb));
 		sqlite3_close(GDb);
 		GDb = nullptr;
 		return false;
@@ -201,7 +202,7 @@ bool Start(const char* DbPath)
 
 	if (sqlite3_prepare_v2(GDb, kInsert, -1, &GInsertStmt, nullptr) != SQLITE_OK)
 	{
-		std::printf("[채팅로그] INSERT 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[채팅로그] INSERT 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		sqlite3_close(GDb);
 		GDb = nullptr;
 		return false;
@@ -210,7 +211,7 @@ bool Start(const char* DbPath)
 	GStopping = false;
 	GWriterThread = std::thread(WriterLoop);
 
-	std::printf("[채팅로그] %s 에 기록한다 (SQLite %s)\n", DbPath, sqlite3_libversion());
+	ServerLog::Print("[채팅로그] %s 에 기록한다 (SQLite %s)\n", DbPath, sqlite3_libversion());
 	return true;
 }
 
@@ -241,7 +242,7 @@ void Enqueue(int64_t Timestamp, uint64_t SenderUserId, const std::string& Sender
 			if (!GWarnedOverflow)
 			{
 				GWarnedOverflow = true;
-				std::printf("[채팅로그] 큐가 상한(%zu)에 도달해 기록을 버리기 시작한다."
+				ServerLog::Print("[채팅로그] 큐가 상한(%zu)에 도달해 기록을 버리기 시작한다."
 				            " 디스크가 채팅 속도를 못 따라가고 있다.\n", kMaxQueuedEntries);
 			}
 			return;
@@ -274,7 +275,7 @@ void Stop()
 	{
 		sqlite3_close(GDb);
 		GDb = nullptr;
-		std::printf("[채팅로그] 종료. 기록 %llu줄, 유실 %llu줄\n",
+		ServerLog::Print("[채팅로그] 종료. 기록 %llu줄, 유실 %llu줄\n",
 		            static_cast<unsigned long long>(GWritten.load()),
 		            static_cast<unsigned long long>(GDropped.load()));
 	}

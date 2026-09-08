@@ -1,4 +1,5 @@
-#include "Friends.h"
+#include "ServerLog/ServerLog.h"
+#include "Friends/Friends.h"
 
 #include "sqlite3.h"
 
@@ -19,7 +20,7 @@ namespace
 		char* ErrMsg = nullptr;
 		if (sqlite3_exec(GDb, Sql, nullptr, nullptr, &ErrMsg) != SQLITE_OK)
 		{
-			std::printf("[친구] SQL 실패: %s\n", ErrMsg ? ErrMsg : "?");
+			ServerLog::Print("[친구] SQL 실패: %s\n", ErrMsg ? ErrMsg : "?");
 			sqlite3_free(ErrMsg);
 			return false;
 		}
@@ -59,7 +60,7 @@ namespace
 
 		if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 		{
-			std::printf("[친구] SELECT 준비 실패: %s\n", sqlite3_errmsg(GDb));
+			ServerLog::Print("[친구] SELECT 준비 실패: %s\n", sqlite3_errmsg(GDb));
 			return Row;
 		}
 
@@ -86,7 +87,7 @@ namespace
 
 		if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 		{
-			std::printf("[친구] COUNT 준비 실패: %s\n", sqlite3_errmsg(GDb));
+			ServerLog::Print("[친구] COUNT 준비 실패: %s\n", sqlite3_errmsg(GDb));
 			return -1;
 		}
 
@@ -130,7 +131,7 @@ namespace
 
 		if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 		{
-			std::printf("[친구] 닉네임 조회 준비 실패: %s\n", sqlite3_errmsg(GDb));
+			ServerLog::Print("[친구] 닉네임 조회 준비 실패: %s\n", sqlite3_errmsg(GDb));
 			return EFriendResult::DbError;
 		}
 
@@ -171,7 +172,7 @@ bool Start(const char* DbPath)
 
 	if (sqlite3_open(DbPath, &GDb) != SQLITE_OK)
 	{
-		std::printf("[친구] DB 열기 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[친구] DB 열기 실패: %s\n", sqlite3_errmsg(GDb));
 		sqlite3_close(GDb);
 		GDb = nullptr;
 		return false;
@@ -211,7 +212,7 @@ bool Start(const char* DbPath)
 		return false;
 	}
 
-	std::printf("[친구] %s 준비 완료 (상한 %u명)\n", DbPath, kMaxFriends);
+	ServerLog::Print("[친구] %s 준비 완료 (상한 %u명)\n", DbPath, kMaxFriends);
 	return true;
 }
 
@@ -275,7 +276,7 @@ EFriendResult Add(uint64_t RequesterId, const std::string& Query,
 
 		if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 		{
-			std::printf("[친구] 맞신청 UPDATE 준비 실패: %s\n", sqlite3_errmsg(GDb));
+			ServerLog::Print("[친구] 맞신청 UPDATE 준비 실패: %s\n", sqlite3_errmsg(GDb));
 			return EFriendResult::DbError;
 		}
 
@@ -287,7 +288,7 @@ EFriendResult Add(uint64_t RequesterId, const std::string& Query,
 
 		if (Step != SQLITE_DONE)
 		{
-			std::printf("[친구] 맞신청 UPDATE 실패: %s\n", sqlite3_errmsg(GDb));
+			ServerLog::Print("[친구] 맞신청 UPDATE 실패: %s\n", sqlite3_errmsg(GDb));
 			return EFriendResult::DbError;
 		}
 
@@ -319,7 +320,7 @@ EFriendResult Add(uint64_t RequesterId, const std::string& Query,
 
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[친구] INSERT 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[친구] INSERT 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return EFriendResult::DbError;
 	}
 
@@ -338,7 +339,7 @@ EFriendResult Add(uint64_t RequesterId, const std::string& Query,
 		{
 			return EFriendResult::AlreadyPending;
 		}
-		std::printf("[친구] INSERT 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[친구] INSERT 실패: %s\n", sqlite3_errmsg(GDb));
 		return EFriendResult::DbError;
 	}
 
@@ -400,7 +401,7 @@ EFriendResult Respond(uint64_t UserId, uint64_t FromUserId, bool bAccept)
 
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[친구] 응답 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[친구] 응답 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return EFriendResult::DbError;
 	}
 
@@ -412,7 +413,7 @@ EFriendResult Respond(uint64_t UserId, uint64_t FromUserId, bool bAccept)
 
 	if (Step != SQLITE_DONE)
 	{
-		std::printf("[친구] 응답 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[친구] 응답 실패: %s\n", sqlite3_errmsg(GDb));
 		return EFriendResult::DbError;
 	}
 
@@ -440,7 +441,7 @@ EFriendResult Remove(uint64_t UserId, uint64_t TargetId)
 
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[친구] DELETE 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[친구] DELETE 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return EFriendResult::DbError;
 	}
 
@@ -452,7 +453,7 @@ EFriendResult Remove(uint64_t UserId, uint64_t TargetId)
 
 	if (Step != SQLITE_DONE)
 	{
-		std::printf("[친구] DELETE 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[친구] DELETE 실패: %s\n", sqlite3_errmsg(GDb));
 		return EFriendResult::DbError;
 	}
 
@@ -488,7 +489,7 @@ bool GetList(uint64_t UserId, std::vector<FriendRow>& Out)
 
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[친구] 목록 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[친구] 목록 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return false;
 	}
 
@@ -547,7 +548,7 @@ bool GetFriendIds(uint64_t UserId, std::vector<uint64_t>& Out)
 
 	if (sqlite3_prepare_v2(GDb, Sql, -1, &St, nullptr) != SQLITE_OK)
 	{
-		std::printf("[친구] id 목록 준비 실패: %s\n", sqlite3_errmsg(GDb));
+		ServerLog::Print("[친구] id 목록 준비 실패: %s\n", sqlite3_errmsg(GDb));
 		return false;
 	}
 
