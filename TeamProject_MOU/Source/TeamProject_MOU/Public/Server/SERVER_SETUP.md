@@ -103,7 +103,7 @@ MOU.Chat.SetServer
 ## 6. 주의
 
 - 코드에 주소를 다시 적지 말 것. `ULoginWidgetBase::ServerHost`,
-  `ATeamProject_MOUPlayerController::ServerHostOverride` 는 **비워두는 것이 정상**이며,
+  `ALobbyPlayerController::ServerHostOverride` 는 **비워두는 것이 정상**이며,
   비어 있을 때만 위 설정이 적용된다. 여기에 `127.0.0.1` 을 넣으면 문제가 그대로 재발한다.
 - WBP/BP 에서 `ServerHost` 를 눈으로 확인할 때 비어 있다고 놀라지 말 것. 정상이다.
 - 게임 방(리슨서버) 접속 주소는 이 설정과 무관하다. 서버가 각 클라이언트의 실제 IP 를
