@@ -4,6 +4,7 @@
 #include "Components/StatusComponent.h"
 #include "AbilitySystemComponent.h"
 #include "Base/PackageBase.h"
+#include "Item/HealingMeleeWeapon.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
 UMainAnimInstance::UMainAnimInstance()
@@ -61,6 +62,7 @@ void UMainAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	// 5. 물품 들고 있는지(Carrying) 여부 + 무거운 택배 1인/2인 구분
 	UCarryingComponent* CarryingComp = MainCharacter->GetCarryingComponent();
 	bIsCarrying = (CarryingComp != nullptr) && CarryingComp->IsCarrying();
+	bIsHoldingHealingMelee = CarryingComp && Cast<AHealingMeleeWeapon>(CarryingComp->GetCarriedActor()) != nullptr;
 
 	// [Heavy 전용] 무거운 택배 1인 단독 운반 vs 2인 협동 구분
 	bIsHeavySingleCarry = false;
@@ -115,7 +117,7 @@ void UMainAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		bIsEmoting = EmoteTag.IsValid() && ASC->HasMatchingGameplayTag(EmoteTag);
 	}
 
-	bool bShouldBlockAO = (MainCharacter->bIsDead || MainCharacter->bIsGroggy || MainCharacter->IsStunned() || bIsStunned || bIsHeld || bIsEmoting || bIsPushing);
+	bool bShouldBlockAO = (MainCharacter->bIsDead || MainCharacter->bIsGroggy || MainCharacter->IsStunned() || bIsStunned || bIsHeld || bIsEmoting || bIsPushing || bIsHoldingHealingMelee);
 
 	if (bShouldBlockAO)
 	{
