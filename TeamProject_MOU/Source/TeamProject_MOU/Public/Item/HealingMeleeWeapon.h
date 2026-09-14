@@ -17,13 +17,8 @@ public:
 	AHealingMeleeWeapon();
 	virtual void Tick(float DeltaSeconds) override;
 	virtual bool CanBeDropped() const override { return !IsInUse(); }
-	virtual bool ShouldCenterOnCarrySocket() const override { return false; }
-	virtual FName GetCarrySocketOverride() const override { return HandSocketName; }
 
 protected:
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Healing Melee|Animation")
-	FName HandSocketName = TEXT("SpannerSocket");
-
 	virtual void Fire() override;
 	// 서버에서 쿨다운/소유자를 검사한 뒤 직접 차감한다.
 	virtual bool ShouldConsumeUseOnFire() const override { return false; }
@@ -33,11 +28,15 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Healing Melee", meta = (ClampMin = "0.0"))
 	float HealAmount = 25.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Healing Melee", meta = (ClampMin = "1.0", Units = "cm"))
-	float SwingRange = 180.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Healing Melee", meta = (ClampMin = "1.0", Units = "cm"))
+	float SwingRange = 260.0f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Healing Melee", meta = (ClampMin = "1.0", Units = "cm"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Healing Melee", meta = (ClampMin = "1.0", Units = "cm"))
 	float SwingRadius = 45.0f;
+
+	// PIE에서 든 무기의 후보 탐색 범위(노랑), 대상 중심 거리 제한(파랑)을 표시한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Healing Melee|Debug")
+	bool bShowSwingRange = false;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Healing Melee", meta = (ClampMin = "0.01", Units = "s"))
 	float SwingCooldown = 0.7f;

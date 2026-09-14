@@ -81,7 +81,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Boomerang")
 	float CatchRadius = 120.0f;
 
-	// 잡혔을 때 손에 재부착할 소켓 이름 (CarryingComponent의 CarrySocketName과 동일 기본값)
+	// 공통 HandSocketName이 None일 때만 사용하는 기존 회수 소켓.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Boomerang")
 	FName CatchSocketName = TEXT("CarrySocket");
 #pragma endregion

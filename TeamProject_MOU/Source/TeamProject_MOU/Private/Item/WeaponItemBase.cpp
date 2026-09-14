@@ -5,6 +5,17 @@
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "EngineUtils.h"
+#include "Engine/World.h"
+
+bool AWeaponItemBase::TraceWeaponObstacle(const FVector& Start, const FVector& End, float Radius, FHitResult& Hit) const
+{
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(WeaponObstacle), false, this);
+	if (LastOwner) Params.AddIgnoredActor(LastOwner);
+	for (TActorIterator<APawn> It(GetWorld()); It; ++It) Params.AddIgnoredActor(*It);
+	return GetWorld()->SweepSingleByChannel(Hit, Start, End, FQuat::Identity,
+		ECC_Visibility, FCollisionShape::MakeSphere(FMath::Max(Radius, 0.1f)), Params);
+}
 
 AWeaponItemBase::AWeaponItemBase()
 {
@@ -237,7 +248,7 @@ void AWeaponItemBase::OnMeleeOverlap(UPrimitiveComponent* OverlappedComp, AActor
 // [WEAPON-003] 즉발 트레이스 발사 (피아식별은 IsValidTarget 코드 판정)
 // Pawn 채널로 멀티 트레이스 → 벽/바닥(WorldStatic)이 앞을 막으면 거기서 멈추고,
 // 캐릭터들 중 첫 유효 타겟(본인 제외 등)에게만 효과.
-bool AWeaponItemBase::FireHitscan(const FVector& Start, const FVector& End, FHitResult& OutHit)
+bool AWeaponItemBase::FireHitscan(const FVector& Start, const FVector& End, FHitResult& OutHit, bool bApplyHit)
 {
 	FCollisionQueryParams Params;
 	Params.AddIgnoredActor(this);
@@ -288,7 +299,7 @@ bool AWeaponItemBase::FireHitscan(const FVector& Start, const FVector& End, FHit
 		if (IsValidTarget(HitActor))
 		{
 			OutHit = Hit;
-			ApplyWeaponHit(HitActor, Hit);
+			if (bApplyHit) ApplyWeaponHit(HitActor, Hit);
 			return true;
 		}
 		// 유효 타겟 아닌 캐릭터(본인 등)는 통과해서 뒤의 대상 계속 검사

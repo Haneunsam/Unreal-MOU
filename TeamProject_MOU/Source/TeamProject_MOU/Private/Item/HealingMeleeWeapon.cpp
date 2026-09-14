@@ -5,6 +5,7 @@
 #include "Base/BaseAttributeSet.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "DrawDebugHelpers.h"
 #include "GameplayEffect.h"
 #include "Player/MainCharacter.h"
 
@@ -20,6 +21,27 @@ AHealingMeleeWeapon::AHealingMeleeWeapon()
 void AHealingMeleeWeapon::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+#if ENABLE_DRAW_DEBUG
+	if (bShowSwingRange && !IsHidden())
+	{
+		if (const AMainCharacter* Wielder = Cast<AMainCharacter>(GetOwningPawn()))
+		{
+			if (GetAttachParentActor() == Wielder)
+			{
+				const FVector Start = Wielder->GetActorLocation();
+				const FVector Forward = Wielder->GetBaseAimRotation().Vector();
+				const float Range = FMath::Max(1.0f, SwingRange);
+				const float Radius = FMath::Max(1.0f, SwingRadius);
+				DrawDebugCapsule(GetWorld(), Start + Forward * Range * 0.5f,
+					Range * 0.5f + Radius, Radius, FQuat::FindBetweenNormals(FVector::UpVector, Forward),
+					FColor::Yellow, false, -1.0f, 0, 1.5f);
+				DrawDebugSphere(GetWorld(), Start, Range, 32, FColor::Blue, false, -1.0f);
+				DrawDebugDirectionalArrow(GetWorld(), Start, Start + Forward * Range, 15.0f,
+					FColor::Yellow, false, -1.0f);
+			}
+		}
+	}
+#endif
 	if (HasAuthority() && bSwingHitPending && GetWorld()->GetTimeSeconds() >= SwingHitTime)
 	{
 		bSwingHitPending = false;

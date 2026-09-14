@@ -149,7 +149,15 @@ void ABoomerang::Tick(float DeltaTime)
 		//}
 
 		// 휜 방향으로 전진
-		SetActorLocation(CurrentLoc + FlightDirection * FlightSpeed * DeltaTime);
+		const FVector NextLoc = CurrentLoc + FlightDirection * FlightSpeed * DeltaTime;
+		FHitResult WallHit;
+		if (TraceWeaponObstacle(CurrentLoc, NextLoc, 5.0f, WallHit))
+		{
+			SetActorLocation(WallHit.Location);
+			BeginReturn();
+			return;
+		}
+		SetActorLocation(NextLoc);
 
 		// 최대 사거리 or 시간 초과 → 되돌아오기
 		const float DistFromStart = FVector::Dist(GetActorLocation(), FlightStartLocation);
@@ -167,7 +175,15 @@ void ABoomerang::Tick(float DeltaTime)
 			return;
 		}
 
-		const FVector OwnerLoc = LastOwner->GetActorLocation();
+		FVector OwnerLoc = LastOwner->GetActorLocation();
+		if (const ACharacter* OwnerCharacter = Cast<ACharacter>(LastOwner))
+		{
+			if (const USkeletalMeshComponent* OwnerMesh = OwnerCharacter->GetMesh())
+			{
+				const FName Socket = GetCarrySocketOverride().IsNone() ? CatchSocketName : GetCarrySocketOverride();
+				OwnerLoc = OwnerMesh->GetSocketTransform(Socket).TransformPosition(GetCarryLocationOffset());
+			}
+		}
 		const FVector ToOwner = OwnerLoc - CurrentLoc;
 
 		// 충분히 가까우면 잡힘
@@ -326,7 +342,10 @@ void ABoomerang::MulticastCatch_Implementation()
 	{
 		if (USkeletalMeshComponent* OwnerMesh = OwnerCharacter->GetMesh())
 		{
-			AttachToComponent(OwnerMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, CatchSocketName);
+			const FName Socket = GetCarrySocketOverride().IsNone() ? CatchSocketName : GetCarrySocketOverride();
+			AttachToComponent(OwnerMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, Socket);
+			SetActorRelativeLocation(GetCarryLocationOffset());
+			SetActorRelativeRotation(GetCarryRotationOffset());
 		}
 	}
 

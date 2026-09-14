@@ -200,6 +200,17 @@ protected:
 
 private:
 #pragma region [GRAB] 잡기 상태
+	// 발사 순간의 조준 목표를 공유한다. 접히는 동안에도 같은 목표 방향을 유지한다.
+	UPROPERTY(Replicated)
+	FVector ShotAimTarget = FVector::ZeroVector;
+
+	UPROPERTY(Replicated)
+	bool bShotAimActive = false;
+
+	FQuat RestLinkageRotation = FQuat::Identity;
+	void UpdateShotAim();
+	void CaptureShotAim();
+
 	// 현재 이 그래버가 집고 있는 대상. 서버 권한에서만 갱신, 재발사 토글 판단에 사용.
 	UPROPERTY(Replicated)
 	TObjectPtr<ACharacterBase> GrabbedTarget;

@@ -97,6 +97,7 @@ void AGrabGun::OnConstruction(const FTransform& Transform)
 void AGrabGun::BeginPlay()
 {
 	Super::BeginPlay();
+	RestLinkageRotation = LinkageRoot->GetRelativeRotation().Quaternion();
 
 	// 총몸(body_shell)이 커서 플레이어가 그 위에 올라타는 문제 방지:
 	// ItemBase::BeginPlay가 강제한 ECC_Pawn=Block을 Ignore로 덮어 캐릭터가 총을 관통하게 한다.
@@ -126,6 +127,8 @@ void AGrabGun::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 	DOREPLIFETIME(AGrabGun, GrabbedTarget);
 	DOREPLIFETIME(AGrabGun, TargetExtendAlpha);
 	DOREPLIFETIME(AGrabGun, bOwnerInputLocked);
+	DOREPLIFETIME(AGrabGun, ShotAimTarget);
+	DOREPLIFETIME(AGrabGun, bShotAimActive);
 }
 
 // =============================================================================
@@ -450,6 +453,54 @@ void AGrabGun::UpdateLinkagePose(float Alpha)
 	}
 }
 
+void AGrabGun::CaptureShotAim()
+{
+	APawn* Wielder = GetOwningPawn();
+	FVector ViewLocation = GetActorLocation();
+	FRotator ViewRotation = GetActorRotation();
+	if (Wielder && Wielder->GetController())
+	{
+		Wielder->GetController()->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	}
+	else if (Wielder)
+	{
+		Wielder->GetActorEyesViewPoint(ViewLocation, ViewRotation);
+	}
+
+	ShotAimTarget = ViewLocation + ViewRotation.Vector() * FMath::Max(GrabRange, 1.0f);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GrabGunAim), false, this);
+	if (Wielder) Params.AddIgnoredActor(Wielder);
+	FHitResult Hit;
+	if (GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation, ShotAimTarget, ECC_Visibility, Params))
+	{
+		ShotAimTarget = Hit.ImpactPoint;
+	}
+	bShotAimActive = true;
+	UpdateShotAim();
+	ForceNetUpdate();
+}
+
+void AGrabGun::UpdateShotAim()
+{
+	if (!LinkageRoot || bBrokenApart) return;
+	if (!bShotAimActive && CurrentExtendAlpha <= 0.001f)
+	{
+		LinkageRoot->SetRelativeRotation(RestLinkageRotation);
+		return;
+	}
+
+	// ロ컬 +X 방향으로 펼쳐지는 링크만 회전시켜 손잡이 위치는 유지한다.
+	const FTransform ParentTransform = LinkageRoot->GetAttachParent()->GetComponentTransform();
+	const FVector Direction = ParentTransform.InverseTransformVector(
+		ShotAimTarget - LinkageRoot->GetComponentLocation()).GetSafeNormal();
+	if (!Direction.IsNearlyZero())
+	{
+		const FVector RestForward = RestLinkageRotation.RotateVector(FVector::ForwardVector);
+		const FQuat AimDelta = FQuat::FindBetweenNormals(RestForward, Direction);
+		LinkageRoot->SetRelativeRotation((AimDelta * RestLinkageRotation).GetNormalized());
+	}
+}
+
 void AGrabGun::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -461,11 +512,32 @@ void AGrabGun::Tick(float DeltaTime)
 		MeshComponent->SetRelativeRotation(MeshOrientationFix);
 	}
 
+	UpdateShotAim();
+
 	// 목표치로 부드럽게 보간 (시각 표현이라 서버/클라 각자 로컬 계산)
 	const bool bWasMoving = !FMath::IsNearlyEqual(CurrentExtendAlpha, TargetExtendAlpha, 0.001f);
 	if (bWasMoving)
 	{
-		CurrentExtendAlpha = FMath::FInterpConstantTo(CurrentExtendAlpha, TargetExtendAlpha, DeltaTime, ExtendSpeed);
+		float NextAlpha = FMath::FInterpConstantTo(CurrentExtendAlpha, TargetExtendAlpha, DeltaTime, ExtendSpeed);
+		if (HasAuthority() && bGrabArmed && !GrabbedTarget && JawGrabCollider && NextAlpha > CurrentExtendAlpha)
+		{
+			const float OldAngle = FMath::DegreesToRadians(FMath::Lerp(FoldedAngleDeg, ExtendedAngleDeg, CurrentExtendAlpha));
+			const float NewAngle = FMath::DegreesToRadians(FMath::Lerp(FoldedAngleDeg, ExtendedAngleDeg, NextAlpha));
+			const float Travel = CellPivots.Num() * 2.0f * LinkHalfLength * (FMath::Cos(NewAngle) - FMath::Cos(OldAngle));
+			const FVector Start = JawGrabCollider->GetComponentLocation();
+			const FVector End = Start + LinkageRoot->GetComponentTransform().TransformVector(FVector(Travel, 0, 0));
+			FHitResult WallHit;
+			if (TraceWeaponObstacle(Start, End, JawGrabCollider->GetScaledSphereRadius(), WallHit))
+			{
+				bGrabArmed = false;
+				SetJawColliderActive(false);
+				TargetExtendAlpha = 0.0f;
+				bPulling = true;
+				NextAlpha = CurrentExtendAlpha;
+				ForceNetUpdate();
+			}
+		}
+		CurrentExtendAlpha = NextAlpha;
 		UpdateLinkagePose(CurrentExtendAlpha);
 	}
 
@@ -500,6 +572,8 @@ void AGrabGun::Fire()
 	{
 		return;
 	}
+
+	CaptureShotAim();
 
 	// 뻗기 시작: 링크가 쫙 펴지고, 집게 콜라이더 ON. 뻗는 동안 대상과 닿으면 잡는다.
 	TargetExtendAlpha = 1.0f;
@@ -727,6 +801,8 @@ void AGrabGun::ReleaseTarget()
 
 	GrabbedTarget = nullptr;
 	TargetExtendAlpha = 0.0f; // 링크 접힘 유지
+	bShotAimActive = false;
+	ForceNetUpdate();
 
 	// 사용자 이동+카메라 잠금 해제 (시퀀스 종료)
 	SetOwnerInputLocked(false);

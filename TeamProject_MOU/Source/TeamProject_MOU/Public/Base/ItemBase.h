@@ -112,6 +112,8 @@ public:
 	// 손잡이 피벗을 그대로 소켓에 맞추는 아이템은 false를 반환한다.
 	virtual bool ShouldCenterOnCarrySocket() const { return true; }
 	virtual FName GetCarrySocketOverride() const { return NAME_None; }
+	virtual FVector GetCarryLocationOffset() const { return FVector::ZeroVector; }
+	virtual FRotator GetCarryRotationOffset() const { return FRotator::ZeroRotator; }
 
 	// ---------------------------------------------------------
 	// [핵심 행동 함수]

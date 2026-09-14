@@ -22,7 +22,7 @@
 | 항목 | 값 | 설명 |
 | --- | --- | --- |
 | HealAmount | 25 | 1회 회복량 |
-| SwingRange | 180cm | 전방 판정 거리 |
+| SwingRange | C++ 기본 260cm | 전방 판정 거리, 기존 BP 오버라이드 확인 필요 |
 | SwingRadius | 45cm | 구체 스윕 반경 |
 | SwingCooldown | C++ 기본 0.7초 / Spener BP 0.8초 | 공격 간격 |
 | SwingHitDelay | 0.3초 | 휘두르기 시작 후 치유 판정 시점 |
@@ -137,3 +137,22 @@
 6. 2인 PIE에서 회복량·판정 거리·벽 가림·연타 제한 및 클라이언트 동기화를 확인한다.
 
 손잡이 위치는 무기 생성자의 기본 위치보다 **SpannerSocket의 상대 Transform**을 기준으로 조정하면 된다.
+
+### 판정 범위 실시간 조절
+
+`SwingRange` 기본값을 180cm에서 260cm로 늘렸다. `SwingRadius`는 45cm를 유지한다. 두 값과 `Show Swing Range`는 배치된 인스턴스에서도 편집할 수 있다. PIE에서 스패너를 든 뒤 서버/Standalone 월드의 해당 Spener 액터를 선택해 조절한다. 클라이언트에서만 바꾸면 서버 판정에는 반영되지 않는다.
+
+`Show Swing Range`를 켜면 노란 캡슐은 구체 스윕의 후보 탐색 영역, 파란 구는 대상 액터 중심까지의 최대 거리 제한을 나타낸다. 실제 적용은 전방 여부·거리·벽 가림·대상 유효성 검사도 통과해야 한다. 표시는 개발 빌드에서만 사용한다. PIE에서 수정한 값은 종료 후 사라지므로 결정한 값을 BP Class Defaults에 옮겨 저장한다. 기존 BP가 SwingRange를 별도 저장했다면 직접 260으로 변경하거나 기본값으로 재설정한다.
+
+## 7. 모든 무기의 오른손 소켓 공통 적용
+
+- `HandSocketName`과 소켓 선택·중심 보정 재정의를 `AHealingMeleeWeapon`에서 `AWeaponItemBase`로 이동했다.
+- 모든 파생 무기는 기본적으로 `hand_r` 하위의 기존 `SpannerSocket`을 사용하며, 집기·인벤토리 재장착 모두 같은 설정을 따른다.
+- 무기 BP의 `Weapon|Animation → HandSocketName`에서 소켓을 지정할 수 있다. 대상 캐릭터 스켈레톤에 해당 소켓이 있어야 한다.
+- 일반 아이템의 기존 운반 소켓과 중심 보정 동작은 유지한다. 무기별 그립 위치와 PIE 시각 검증은 별도로 필요하다.
+
+### 무기별 장착 위치·회전
+
+`MeshComponent`가 루트이므로 무기 BP의 컴포넌트 Transform에서 상대 위치·회전을 직접 편집할 수 없다. 대신 무기 BP의 Class Defaults에서 `Weapon|Animation`의 `HandLocationOffset`, `HandRotationOffset`을 설정한다. 두 값은 소켓 기준이며 집기·재장착 직후 적용된다. 기본값은 0이고 기존 메시 스케일은 유지한다. 공유 소켓을 수정하지 않고 무기별 그립을 맞출 수 있다.
+
+`HandLocalRotationOffset`은 기본 자세에서 무기 로컬 축으로 추가 회전하는 값이다. 최종 회전은 `기본 Quaternion * 추가 Quaternion`으로 합성한다. 기본값 0은 기존 자세를 유지하며, 기본 Pitch가 ±90도일 때도 추가 회전을 0에서 조절할 수 있다. 추가 회전 자체를 ±90도 Pitch로 설정하면 Euler 입력의 축 중첩이 다시 생길 수 있으므로 작은 각도로 한 축씩 조절한다. 예를 들어 기본 `X=90, Y=-90, Z=90`을 유지한 채 추가 `Y=15`와 `Y=-15`를 비교한다. 화면 방향은 손 소켓 자세에 따라 달라 PIE에서 확인해야 한다.

@@ -47,7 +47,20 @@ void ATaserGun::Fire()
 	// 피아식별 트레이스는 부모(WeaponItemBase)에 위임.
 	// TargetTeam 채널로만 트레이스하고, 맞으면 ApplyWeaponHit(=기절)을 내부에서 호출.
 	FHitResult Hit;
-	const bool bHit = FireHitscan(TraceStart, TraceEnd, Hit);
+	// 총구가 벽 뒤에 있는 경우에는 카메라에서 보이는 대상에게도 효과를 적용하지 않는다.
+	bool bHit = FireHitscan(TraceStart, TraceEnd, Hit, false);
+	const FVector AimEnd = Hit.GetActor() ? Hit.ImpactPoint : TraceEnd;
+	FHitResult MuzzleWall;
+	const FVector MuzzleStart = MuzzlePoint ? MuzzlePoint->GetComponentLocation() : TraceStart;
+	if (TraceWeaponObstacle(MuzzleStart, AimEnd, 0.1f, MuzzleWall))
+	{
+		Hit = MuzzleWall;
+		bHit = false;
+	}
+	else if (bHit)
+	{
+		ApplyWeaponHit(Hit.GetActor(), Hit);
+	}
 
 	// [DEBUG-TASER] 트레이스 선 시각화 (맞으면 초록/빨강, 히트 지점에 구) - 확인 후 제거
 	/*DrawDebugLine(GetWorld(), TraceStart, TraceEnd, bHit ? FColor::Green : FColor::Red, false, 2.0f, 0, 1.5f);
@@ -63,7 +76,7 @@ void ATaserGun::Fire()
 
 	// VFX 시작점은 총구(MuzzlePoint), 끝점은 트레이스 도착지점(히트면 히트, 아니면 최대거리)
 	const FVector FxStart = MuzzlePoint ? MuzzlePoint->GetComponentLocation() : TraceStart;
-	const FVector FxEnd = bHit ? Hit.ImpactPoint : TraceEnd;
+	const FVector FxEnd = Hit.GetActor() ? Hit.ImpactPoint : TraceEnd;
 	MulticastPlayFireEffect(FxStart, FxEnd, bHit);
 
 	// 발사 쿨다운 동안 "사용 중" 유지 → FireCooldown 후 슬롯 변경 다시 허용 [WEAPON-017]

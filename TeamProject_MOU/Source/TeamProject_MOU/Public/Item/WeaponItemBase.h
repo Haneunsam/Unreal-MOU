@@ -50,7 +50,34 @@ class TEAMPROJECT_MOU_API AWeaponItemBase : public AItemBase
 public:
 	AWeaponItemBase();
 
+	// 모든 무기는 오른손 소켓을 사용하고 바운딩박스 중심 보정을 생략한다.
+	virtual bool ShouldCenterOnCarrySocket() const override { return false; }
+	virtual FName GetCarrySocketOverride() const override { return HandSocketName; }
+	virtual FVector GetCarryLocationOffset() const override { return HandLocationOffset; }
+	virtual FRotator GetCarryRotationOffset() const override
+	{
+		// 기본 자세를 기준으로 무기 로컬 축의 추가 회전을 합성한다.
+		return (HandRotationOffset.Quaternion() * HandLocalRotationOffset.Quaternion()).GetNormalized().Rotator();
+	}
+
 protected:
+	// 기존 hand_r 하위 소켓을 공통 기본값으로 사용한다. 무기 BP에서 조정 가능.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation")
+	FName HandSocketName = TEXT("SpannerSocket");
+
+	// 손에 장착할 때만 적용되는 소켓 기준 위치/회전. 메시 스케일은 유지한다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation", meta = (Units = "cm"))
+	FVector HandLocationOffset = FVector::ZeroVector;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation")
+	FRotator HandRotationOffset = FRotator::ZeroRotator;
+
+	// 기본 장착 자세에서 무기 자체의 축을 기준으로 추가 회전한다.
+	// 기본 회전의 Pitch가 +/-90도여도 추가 회전은 0에서부터 독립적으로 조절 가능하다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon|Animation",
+		meta = (ToolTip = "Additional rotation around the weapon local axes after setting the base grip. Start at zero and adjust one axis at a time."))
+	FRotator HandLocalRotationOffset = FRotator::ZeroRotator;
+
 	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -76,6 +103,7 @@ protected:
 
 	// [WEAPON-007] 실제 발사 로직. 자식이 override (테이저=트레이스, 칼=콜라이더 등)
 	virtual void Fire();
+	bool TraceWeaponObstacle(const FVector& Start, const FVector& End, float Radius, FHitResult& Hit) const;
 
 	// [WEAPON-013] 이 발사에서 내구도(CurrentDurability)를 차감할지 여부.
 	// 기본 true(소모). 발사 시점에 소모하지 않는 무기(예: 적중 시에만 닳는 부메랑)는 false로 override한다.
@@ -149,7 +177,7 @@ protected:
 	// [WEAPON-003] 즉발 트레이스 발사. TargetTeam 채널로 트레이스해 피아식별. 맞으면 ApplyWeaponHit.
 	// 반환: 명중했으면 true, HitResult 채워짐
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Ranged")
-	bool FireHitscan(const FVector& Start, const FVector& End, FHitResult& OutHit);
+	bool FireHitscan(const FVector& Start, const FVector& End, FHitResult& OutHit, bool bApplyHit = true);
 #pragma endregion
 
 #pragma region [WEAPON] 공통 히트 처리

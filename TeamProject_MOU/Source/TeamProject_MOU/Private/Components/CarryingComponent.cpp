@@ -266,6 +266,8 @@ void UCarryingComponent::GrabOrDrop()
 					{
 						const FName Socket = HitItem->GetCarrySocketOverride().IsNone() ? CarrySocketName : HitItem->GetCarrySocketOverride();
 						HitItem->AttachToComponent(Character->GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, Socket);
+						HitItem->SetActorRelativeLocation(HitItem->GetCarryLocationOffset());
+						HitItem->SetActorRelativeRotation(HitItem->GetCarryRotationOffset());
 
 						if (APackageBase* Package = Cast<APackageBase>(HitItem))
 						{
@@ -504,6 +506,11 @@ void UCarryingComponent::MulticastEquipItem_Implementation(AActor* ItemToEquip)
 		const AItemBase* CarryItem = Cast<AItemBase>(ItemToEquip);
 		const FName Socket = CarryItem && !CarryItem->GetCarrySocketOverride().IsNone() ? CarryItem->GetCarrySocketOverride() : CarrySocketName;
 		ItemToEquip->AttachToComponent(Character->GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, Socket);
+		if (CarryItem)
+		{
+			ItemToEquip->SetActorRelativeLocation(CarryItem->GetCarryLocationOffset());
+			ItemToEquip->SetActorRelativeRotation(CarryItem->GetCarryRotationOffset());
+		}
 
 		// 중심점 오프셋 적용
 		FVector BoxCenter = ItemToEquip->GetComponentsBoundingBox().GetCenter();
