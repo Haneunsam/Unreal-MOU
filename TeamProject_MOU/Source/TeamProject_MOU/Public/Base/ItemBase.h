@@ -108,6 +108,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Item|Action")
 	virtual bool CanBeDropped() const { return true; }
 
+	// 손 소켓에 붙인 후 바운딩박스 중심 보정을 적용할지 여부.
+	// 손잡이 피벗을 그대로 소켓에 맞추는 아이템은 false를 반환한다.
+	virtual bool ShouldCenterOnCarrySocket() const { return true; }
+	virtual FName GetCarrySocketOverride() const { return NAME_None; }
+
 	// ---------------------------------------------------------
 	// [핵심 행동 함수]
 	// ---------------------------------------------------------
