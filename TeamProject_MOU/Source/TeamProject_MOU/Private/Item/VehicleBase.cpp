@@ -63,7 +63,7 @@ void AVehicleBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 
 	// 좌석 점유 상태를 모든 클라이언트에 복제한다.
 	DOREPLIFETIME(AVehicleBase, Seats);
-	DOREPLIFETIME(AVehicleBase, bDrifting);
+	DOREPLIFETIME(AVehicleBase, DriftDirection);
 }
 
 void AVehicleBase::BeginPlay()
@@ -73,6 +73,7 @@ void AVehicleBase::BeginPlay()
 	if (const UChaosWheeledVehicleMovementComponent* Wheeled = Cast<UChaosWheeledVehicleMovementComponent>(GetVehicleMovementComponent()))
 	{
 		BaseEngineMaxTorque = Wheeled->EngineSetup.MaxTorque;
+		bDefaultReverseAsBrake = Wheeled->bReverseAsBrake;
 		for (const FChaosWheelSetup& Setup : Wheeled->WheelSetups)
 		{
 			const UChaosVehicleWheel* Wheel = Setup.WheelClass ? Setup.WheelClass->GetDefaultObject<UChaosVehicleWheel>() : nullptr;
@@ -319,7 +320,8 @@ void AVehicleBase::UnseatCharacter(ACharacterBase* Character, int32 SeatIndex)
 	const bool bWasDriver = Seat.bIsDriverSeat;
 	if (bWasDriver)
 	{
-		bDrifting = false;
+		ThrottleAxis = 0.0f;
+		DriftDirection = 0.0f;
 	}
 
 	// 운전자였다면 조종 입력을 0으로 정리한 뒤 컨트롤러를 캐릭터로 되돌린다.
@@ -478,21 +480,10 @@ void AVehicleBase::OnThrottleInput(const FInputActionValue& Value)
 	// 그래서 입력이 들어올 때마다 명시적으로 깨우고 주차를 해제한다.
 	Movement->SetSleeping(false);
 	Movement->SetParked(false);
-	Movement->SetHandbrakeInput(bLocalDriftRequested);
 
 	const float Axis = Value.Get<float>();
-
-	// Axis > 0 : 전진(스로틀), Axis < 0 : 후진(브레이크/리버스)
-	if (Axis >= 0.0f)
-	{
-		Movement->SetThrottleInput(Axis);
-		Movement->SetBrakeInput(0.0f);
-	}
-	else
-	{
-		Movement->SetThrottleInput(0.0f);
-		Movement->SetBrakeInput(-Axis);
-	}
+	ThrottleAxis = FMath::Clamp(Axis, -1.0f, 1.0f);
+	ApplyDrivingInput();
 
 	// [임시 진단] 스로틀 설정 후 실제 물리 상태 확인.
 	// - HasAuthority / IsLocallyControlled: 이 머신이 물리 시뮬레이션 권한이 있는지
@@ -518,9 +509,10 @@ void AVehicleBase::OnThrottleInput(const FInputActionValue& Value)
 // [VEHICLE-062] A/D : 조향. 누르는 동안 Triggered 로 값이 계속 들어온다.
 void AVehicleBase::OnSteerInput(const FInputActionValue& Value)
 {
+	SteeringAxis = FMath::Clamp(Value.Get<float>(), -1.0f, 1.0f);
 	if (UChaosVehicleMovementComponent* Movement = GetVehicleMovementComponent())
 	{
-		Movement->SetSteeringInput(Value.Get<float>());
+		Movement->SetSteeringInput(SteeringAxis);
 	}
 }
 
@@ -534,9 +526,59 @@ void AVehicleBase::OnExitInput()
 	}
 }
 
-void AVehicleBase::ServerSetDrifting_Implementation(bool bEnabled)
+void AVehicleBase::ApplyDrivingInput()
 {
-	bDrifting = bEnabled && GetDriver() != nullptr;
+	UChaosVehicleMovementComponent* Movement = GetVehicleMovementComponent();
+	const APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!Movement || !PC || !PC->IsLocalController())
+	{
+		return;
+	}
+	// Space requests a powered slide, not a wheel-locking brake.
+	Movement->bReverseAsBrake = bDefaultReverseAsBrake;
+	Movement->SetThrottleInput(FMath::Max(ThrottleAxis, 0.0f));
+	Movement->SetBrakeInput(FMath::Max(-ThrottleAxis, 0.0f));
+	Movement->SetHandbrakeInput(false);
+	const float Requested = PC->IsInputKeyDown(EKeys::SpaceBar) && ThrottleAxis >= 0.0f ? SteeringAxis : 0.0f;
+	if (!FMath::IsNearlyEqual(Requested, LocalDriftDirection, 0.01f))
+	{
+		LocalDriftDirection = Requested;
+		ServerSetDriftDirection(Requested);
+	}
+}
+
+void AVehicleBase::ServerSetDriftDirection_Implementation(float Direction)
+{
+	DriftDirection = GetDriver() && FMath::IsFinite(Direction) ? FMath::Clamp(Direction, -1.0f, 1.0f) : 0.0f;
+}
+
+void AVehicleBase::UpdateDrift(float DeltaTime)
+{
+	UChaosWheeledVehicleMovementComponent* Movement = Cast<UChaosWheeledVehicleMovementComponent>(GetVehicleMovementComponent());
+	if (!Movement || !GetMesh()) return;
+	int32 ContactCount = 0;
+	for (int32 Index = 0; Index < Movement->Wheels.Num(); ++Index)
+	{
+		ContactCount += Movement->GetWheelState(Index).bInContact ? 1 : 0;
+	}
+	const float Direction = IsLocallyControlled() ? LocalDriftDirection : DriftDirection;
+	const bool bActive = GetDriver() && ContactCount >= 2 && GetActorUpVector().Z > 0.5f
+		&& Movement->GetForwardSpeed() > 400.0f && FMath::Abs(Direction) > 0.1f;
+	DriftBlend = FMath::FInterpTo(DriftBlend, bActive ? 1.0f : 0.0f, DeltaTime, bActive ? 8.0f : 4.0f);
+	// This project's wheel order is FL, FR, BL, BR.
+	for (int32 Index = 2; Index < FMath::Min(4, Movement->Wheels.Num()); ++Index)
+	{
+		if (DefaultWheelGrip.IsValidIndex(Index))
+			Movement->SetWheelFrictionMultiplier(Index, DefaultWheelGrip[Index] * FMath::Lerp(1.0f, DriftRearGripScale, DriftBlend));
+	}
+	if (bActive && (HasAuthority() || IsLocallyControlled()))
+	{
+		const FVector Up = GetActorUpVector();
+		const float YawRate = FVector::DotProduct(GetMesh()->GetPhysicsAngularVelocityInRadians(), Up);
+		const float TargetRate = FMath::DegreesToRadians(DriftYawRateDegrees) * Direction;
+		const float Acceleration = FMath::Clamp((TargetRate - YawRate) * 4.0f, -2.5f, 2.5f);
+		GetMesh()->AddTorqueInRadians(Up * Acceleration * DriftBlend, NAME_None, true);
+	}
 }
 
 void AVehicleBase::Tick(float DeltaTime)
@@ -547,30 +589,18 @@ void AVehicleBase::Tick(float DeltaTime)
 	{
 		if (IsLocallyControlled())
 		{
-			const APlayerController* PC = Cast<APlayerController>(GetController());
-			const bool bRequested = PC && PC->IsInputKeyDown(EKeys::SpaceBar)
-				&& GetDriver() && Wheeled->GetForwardSpeed() > 300.0f;
-			if (bRequested != bLocalDriftRequested)
-			{
-				bLocalDriftRequested = bRequested;
-				ServerSetDrifting(bRequested);
-			}
-			Wheeled->SetHandbrakeInput(bRequested);
+			ApplyDrivingInput();
 		}
 		else
 		{
-			bLocalDriftRequested = false;
+			ThrottleAxis = 0.0f;
+			SteeringAxis = 0.0f;
+			LocalDriftDirection = 0.0f;
+			Wheeled->bReverseAsBrake = bDefaultReverseAsBrake;
 		}
 
-		const bool bApplyDrift = IsLocallyControlled() ? bLocalDriftRequested : bDrifting;
-		for (int32 Index = 2; Index < FMath::Min(4, Wheeled->Wheels.Num()); ++Index)
-		{
-			if (DefaultWheelGrip.IsValidIndex(Index))
-			{
-				Wheeled->SetWheelFrictionMultiplier(Index, DefaultWheelGrip[Index] * (bApplyDrift ? DriftRearGripScale : 1.0f));
-			}
-		}
 		const float TorqueMultiplier = Wheeled->GetCurrentGear() > 0 ? 1.8f : 1.0f;
 		Wheeled->SetMaxEngineTorque(BaseEngineMaxTorque * TorqueMultiplier);
+		UpdateDrift(DeltaTime);
 	}
 }

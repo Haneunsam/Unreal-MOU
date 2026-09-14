@@ -162,17 +162,26 @@ protected:
 
 private:
 	UPROPERTY(EditDefaultsOnly, Category = "Vehicle|Drift", meta = (ClampMin = "0.05", ClampMax = "1.0"))
-	float DriftRearGripScale = 0.45f;
+	float DriftRearGripScale = 0.25f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Vehicle|Drift", meta = (ClampMin = "0.0", ClampMax = "90.0"))
+	float DriftYawRateDegrees = 55.0f;
 
 	UPROPERTY(Replicated)
-	bool bDrifting = false;
+	float DriftDirection = 0.0f;
 
 	UFUNCTION(Server, Reliable)
-	void ServerSetDrifting(bool bEnabled);
+	void ServerSetDriftDirection(float Direction);
 
-	// Current vehicle layout: front wheels 0/1, rear wheels 2/3.
+	void UpdateDrift(float DeltaTime);
 	TArray<float> DefaultWheelGrip;
-	bool bLocalDriftRequested = false;
+	float LocalDriftDirection = 0.0f;
+	float DriftBlend = 0.0f;
+	float SteeringAxis = 0.0f;
+
+	void ApplyDrivingInput();
+	float ThrottleAxis = 0.0f;
+	bool bDefaultReverseAsBrake = true;
 
 	// BP의 엔진 토크를 기준으로 전진 기어에서만 구동력을 높인다.
 	float BaseEngineMaxTorque = 0.0f;
