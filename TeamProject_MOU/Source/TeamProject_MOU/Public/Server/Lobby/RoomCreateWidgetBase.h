@@ -10,9 +10,9 @@
 //     ULobbyWidgetBase (메인메뉴)
 //       ├─ URoomCreateWidgetBase   ← 이 파일. 방을 "만드는" 쪽
 //       └─ URoomListWidgetBase        방에 "들어가는" 쪽
-//   서버와 직접 대화하지 않는다. UServerSubsystem 하고만 대화한다.
-//     보낼 때: UServerSubsystem::CreateRoom()
-//     받을 때: UServerSubsystem::OnRoomCreated
+//   서버 응답의 수명은 ULobbyFlowCoordinator 가 관리한다.
+//     보낼 때: ULobbyFlowCoordinator::CreateRoom()
+//     받을 때: ULobbyFlowCoordinator::OnRoomCreateCompleted
 //   대응하는 서버 코드: MOU_Server/Server/Server.cpp 의 RoomCreateReq 핸들러,
 //                       MOU_Server/Server/Rooms.cpp 의 Rooms::Create()
 //
@@ -40,9 +40,10 @@ class UButton;
 class UEditableTextBox;
 class UTextBlock;
 class UServerSubsystem;
+class ULobbyFlowCoordinator;
 
 /**
- * 방 생성이 끝났을 때 C++ 소유자에게 알리는 통로 (ULobbyWidgetBase 가 받는다).
+ * 방 생성이 끝났을 때 선택적인 C++ 소유자에게 알리는 호환 통로.
  *
  * 블루프린트는 이 델리게이트 대신 OnRoomCreateSucceeded 이벤트를 쓴다.
  * 다이나믹 델리게이트가 아닌 이유: 소유자-자식 사이의 1:1 연결이라
@@ -142,7 +143,7 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "MOU|Lobby")
 	void OnRoomCreateSucceeded(int32 RoomId, const FString& RoomPassword);
 
-	// --- C++ 소유자용 (ULobbyWidgetBase 가 바인딩한다) ----------------------
+	// --- C++ 소유자용 호환 델리게이트 ------------------------------------
 
 	FOnRoomCreateFinished  OnRoomCreateFinished;
 	FOnRoomCreateCancelled OnRoomCreateCancelled;
@@ -170,10 +171,9 @@ protected:
 	TObjectPtr<UTextBlock> MessageText;
 
 private:
-	// --- 델리게이트 수신부 (AddDynamic 대상이라 전부 UFUNCTION) --------------
+	// --- 흐름 관리자 / UI 델리게이트 수신부 -------------------------------
 
-	UFUNCTION()
-	void HandleRoomCreated(bool bSuccess, int32 RoomId, EMOURoomResultBP Result);
+	void HandleRoomCreated(bool bSuccess, int32 RoomId, EMOURoomResultBP Result, const FString& RoomPassword);
 
 	UFUNCTION()
 	void HandleCreateClicked();
@@ -210,6 +210,7 @@ private:
 	void SetBusy(bool bBusy);
 
 	UServerSubsystem* GetServerSubsystem() const;
+	ULobbyFlowCoordinator* GetFlowCoordinator() const;
 
 	/** 응답 대기 중인지. */
 	bool bBusy = false;
@@ -230,14 +231,7 @@ private:
 	/** 사용자가 방 만들기를 눌렀지만 외부 도달성 프로브가 아직 진행 중인가. */
 	bool bCreateWaitingForProbe = false;
 
-	/** 검사를 통과한 방 제목. 매핑을 기다리는 동안 들고 있어야 한다. */
+	/** 검사를 통과한 방 정보. 매핑을 기다리는 동안 들고 있어야 한다. */
 	FString SubmittedTitle;
-
-	/**
-	 * 요청할 때 쓴 방 비밀번호.
-	 *
-	 * RoomCreateAck 에는 비밀번호가 실려오지 않으므로(서버가 되돌려줄 이유가 없다)
-	 * 성공 시 소유자에게 넘겨주려면 클라이언트가 기억하고 있어야 한다.
-	 */
 	FString SubmittedPassword;
 };

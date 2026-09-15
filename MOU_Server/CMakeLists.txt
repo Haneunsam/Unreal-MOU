@@ -97,3 +97,9 @@ add_executable(FriendsTest
 )
 target_include_directories(FriendsTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Code)
 target_link_libraries(FriendsTest PRIVATE mou_shared sqlite3)
+
+enable_testing()
+add_executable(RoomSlotsTest Tests/RoomSlotsTest.cpp Code/Rooms/Rooms.cpp)
+target_include_directories(RoomSlotsTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Code)
+target_link_libraries(RoomSlotsTest PRIVATE mou_shared)
+add_test(NAME RoomSlotsTest COMMAND RoomSlotsTest)

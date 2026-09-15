@@ -1,11 +1,12 @@
 ﻿// MOU 로비 - 방 목록 / 참여 UI 구현.
 //
-// 이 파일은 소켓/패킷을 전혀 모른다. UServerSubsystem 하고만 대화한다.
-//   보낼 때: UServerSubsystem::RequestRoomList() / JoinRoom()
-//   받을 때: UServerSubsystem::OnRoomListReceived / OnRoomJoinCompleted
+// 이 파일은 소켓/패킷을 전혀 모른다.
+//   보낼 때/받을 때: ULobbyFlowCoordinator
+//   로그인 상태 조회: UServerSubsystem
 
 #include "Server/Lobby/RoomListWidgetBase.h"
 
+#include "Server/Lobby/LobbyFlowCoordinator.h"
 #include "Server/ServerSubsystem.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -179,10 +180,10 @@ void URoomListWidgetBase::NativeConstruct()
 	// NativeConstruct 는 뷰포트에 다시 붙을 때마다 불릴 수 있어 중복 구독을 막는다.
 	if (!bSubscribed)
 	{
-		if (UServerSubsystem* Chat = GetServerSubsystem())
+		if (ULobbyFlowCoordinator* Flow = GetFlowCoordinator())
 		{
-			Chat->OnRoomListReceived.AddDynamic(this, &URoomListWidgetBase::HandleRoomListReceived);
-			Chat->OnRoomJoinCompleted.AddDynamic(this, &URoomListWidgetBase::HandleRoomJoinCompleted);
+			Flow->OnRoomListReceived.AddUObject(this, &URoomListWidgetBase::HandleRoomListReceived);
+			Flow->OnRoomJoinCompleted.AddUObject(this, &URoomListWidgetBase::HandleRoomJoinCompleted);
 			bSubscribed = true;
 		}
 	}
@@ -224,10 +225,10 @@ void URoomListWidgetBase::NativeDestruct()
 
 	if (bSubscribed)
 	{
-		if (UServerSubsystem* Chat = GetServerSubsystem())
+		if (ULobbyFlowCoordinator* Flow = GetFlowCoordinator())
 		{
-			Chat->OnRoomListReceived.RemoveDynamic(this, &URoomListWidgetBase::HandleRoomListReceived);
-			Chat->OnRoomJoinCompleted.RemoveDynamic(this, &URoomListWidgetBase::HandleRoomJoinCompleted);
+			Flow->OnRoomListReceived.RemoveAll(this);
+			Flow->OnRoomJoinCompleted.RemoveAll(this);
 		}
 		bSubscribed = false;
 	}
@@ -373,6 +374,15 @@ UServerSubsystem* URoomListWidgetBase::GetServerSubsystem() const
 	return nullptr;
 }
 
+ULobbyFlowCoordinator* URoomListWidgetBase::GetFlowCoordinator() const
+{
+	if (const UGameInstance* GameInstance = GetGameInstance())
+	{
+		return GameInstance->GetSubsystem<ULobbyFlowCoordinator>();
+	}
+	return nullptr;
+}
+
 void URoomListWidgetBase::RefreshRoomList()
 {
 	UServerSubsystem* Chat = GetServerSubsystem();
@@ -389,7 +399,11 @@ void URoomListWidgetBase::RefreshRoomList()
 		return;
 	}
 
-	Chat->RequestRoomList();
+	ULobbyFlowCoordinator* Flow = GetFlowCoordinator();
+	if (Flow == nullptr || !Flow->RequestRoomList())
+	{
+		SetStatus(TEXT("로비 흐름 관리자를 찾을 수 없습니다."), true);
+	}
 }
 
 void URoomListWidgetBase::HandleRoomListReceived(const TArray<FMOURoomInfo>& Rooms)
@@ -523,22 +537,23 @@ void URoomListWidgetBase::CancelPasswordPrompt()
 
 void URoomListWidgetBase::SendJoinRequest(int32 RoomId, const FString& RoomPassword)
 {
-	UServerSubsystem* Chat = GetServerSubsystem();
-	if (Chat == nullptr)
+	ULobbyFlowCoordinator* Flow = GetFlowCoordinator();
+	if (Flow == nullptr)
 	{
-		SetStatus(TEXT("채팅 시스템을 찾을 수 없습니다."), true);
+		SetStatus(TEXT("로비 흐름 관리자를 찾을 수 없습니다."), true);
 		return;
 	}
 
-	// 승인되면 이 값을 여행 URL 에 다시 실어야 한다. 서버는 되돌려주지 않는다.
-	SubmittedPassword = RoomPassword;
-
 	SetBusy(true);
 	SetStatus(FString::Printf(TEXT("방 #%d 에 참여하는 중..."), RoomId), false);
-	Chat->JoinRoom(RoomId, RoomPassword);
+	if (!Flow->JoinRoom(RoomId, RoomPassword))
+	{
+		SetBusy(false);
+		SetStatus(TEXT("다른 방 요청이 처리 중입니다."), true);
+	}
 }
 
-void URoomListWidgetBase::HandleRoomJoinCompleted(const FMOURoomJoinResult& Result)
+void URoomListWidgetBase::HandleRoomJoinCompleted(const FMOURoomJoinResult& Result, const FString& RoomPassword)
 {
 	SetBusy(false);
 
@@ -553,7 +568,6 @@ void URoomListWidgetBase::HandleRoomJoinCompleted(const FMOURoomJoinResult& Resu
 			PendingJoinRoomId = 0;
 			ShowPasswordPrompt(false);
 		}
-		SubmittedPassword.Empty();
 		return;
 	}
 
@@ -563,11 +577,8 @@ void URoomListWidgetBase::HandleRoomJoinCompleted(const FMOURoomJoinResult& Resu
 	ShowPasswordPrompt(false);
 
 	// 여행은 소유자/블루프린트의 몫이다. 언제 떠날지는 게임 흐름이 정한다.
-	const FString UsedPassword = SubmittedPassword;
-	SubmittedPassword.Empty();
-
-	OnRoomJoinApproved(Result, UsedPassword);
-	OnRoomJoinApprovedNative.ExecuteIfBound(Result, UsedPassword);
+	OnRoomJoinApproved(Result, RoomPassword);
+	OnRoomJoinApprovedNative.ExecuteIfBound(Result, RoomPassword);
 
 	if (bRemoveOnSuccess)
 	{
@@ -577,6 +588,15 @@ void URoomListWidgetBase::HandleRoomJoinCompleted(const FMOURoomJoinResult& Resu
 
 void URoomListWidgetBase::CloseList()
 {
+	if (const ULobbyFlowCoordinator* Flow = GetFlowCoordinator())
+	{
+		if (Flow->GetOperation() == EMOULobbyFlowOperation::JoiningRoom)
+		{
+			SetStatus(TEXT("방 참여 응답을 기다리는 중에는 닫을 수 없습니다."), false);
+			return;
+		}
+	}
+
 	OnRoomListClosed.ExecuteIfBound();
 	RemoveFromParent();
 }
@@ -617,6 +637,14 @@ void URoomListWidgetBase::SetBusy(bool bInBusy)
 	if (JoinConfirmButton != nullptr)
 	{
 		JoinConfirmButton->SetIsEnabled(!bInBusy);
+	}
+	if (RefreshButton != nullptr)
+	{
+		RefreshButton->SetIsEnabled(!bInBusy);
+	}
+	if (CloseButton != nullptr)
+	{
+		CloseButton->SetIsEnabled(!bInBusy);
 	}
 	for (const TObjectPtr<URoomListEntryWidget>& Entry : EntryWidgets)
 	{

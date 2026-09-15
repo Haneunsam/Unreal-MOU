@@ -18,6 +18,7 @@ namespace
 		uint64_t    UserId = 0;
 		std::string Name;
 		bool        bReady = false;
+		uint8_t     SlotIndex = 0;
 	};
 
 	struct Room
@@ -221,6 +222,15 @@ ERoomResult Join(uint32_t RoomId, uint64_t UserId, const std::string& Name,
 	NewMember.UserId = UserId;
 	NewMember.Name   = Name;
 	NewMember.bReady = false;   // 들어오면 준비 안 된 상태로 시작한다
+	for (uint8_t Slot = 0; Slot < R.MaxPlayers; ++Slot)
+	{
+		if (std::none_of(R.Members.begin(), R.Members.end(),
+			[Slot](const Member& M) { return M.SlotIndex == Slot; }))
+		{
+			NewMember.SlotIndex = Slot;
+			break;
+		}
+	}
 	R.Members.push_back(std::move(NewMember));
 
 	OutCandidates = R.Candidates;
@@ -461,6 +471,7 @@ bool GetMembers(uint32_t RoomId, std::vector<RoomMemberInfo>& OutMembers,
 		Info.UserId  = M.UserId;
 		Info.bIsHost = (M.UserId == R.HostUserId) ? 1 : 0;
 		Info.bReady  = M.bReady ? 1 : 0;
+		Info.SlotIndex = M.SlotIndex;
 		CopyFixedString(Info.Name, kMaxNameLen, M.Name);
 		OutMembers.push_back(Info);
 

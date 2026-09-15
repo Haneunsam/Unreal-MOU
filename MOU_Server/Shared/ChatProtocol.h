@@ -49,7 +49,8 @@ namespace MOU
 	//  10 -> 11: 직접 연결이 끝내 성립하지 않는 NAT 를 위한 자체 UDP 릴레이 폴백을
 	//            추가했다. 릴레이는 UE 게임 패킷을 해석하지 않고 그대로 전달하며,
 	//            방장/참여자는 실제 게임 소켓에서 일회성 capability 로만 등록한다.
-	constexpr uint16_t kProtocolVersion = 11;
+	// v12: RoomMemberInfo에 고정 좌석 SlotIndex 추가. 서버/클라이언트 함께 갱신.
+	constexpr uint16_t kProtocolVersion = 12;
 
 	// BodySize 가 이 값을 넘으면 악성 패킷으로 보고 연결을 끊는다.
 	constexpr uint32_t kMaxBodySize = 4096;
@@ -606,6 +607,7 @@ namespace MOU
 		char     Name[kMaxNameLen];
 		uint8_t  bIsHost;
 		uint8_t  bReady;                       // 호스트는 항상 1 로 채워 보낸다
+		uint8_t  SlotIndex;                    // 0부터 시작하는 고정 좌석
 	};
 
 	// 뒤에 Count 개의 RoomMemberInfo 가 이어붙는다.
@@ -956,7 +958,7 @@ namespace MOU
 	static_assert(sizeof(RoomJoinReqBody)   ==  8, "RoomJoinReqBody 에 패딩이 끼었다");
 	static_assert(sizeof(RoomJoinAckBody)   == 68, "RoomJoinAckBody 에 패딩이 끼었다");
 	static_assert(sizeof(RoomStateUpdateBody) == 6, "RoomStateUpdateBody 에 패딩이 끼었다");
-	static_assert(sizeof(RoomMemberInfo)     == 42, "RoomMemberInfo 에 패딩이 끼었다");
+	static_assert(sizeof(RoomMemberInfo)     == 43, "RoomMemberInfo 에 패딩이 끼었다");
 	static_assert(sizeof(RoomMemberListBody) ==  6, "RoomMemberListBody 에 패딩이 끼었다");
 	static_assert(sizeof(RoomReadyReqBody)   ==  1, "RoomReadyReqBody 에 패딩이 끼었다");
 	static_assert(sizeof(RoomClosedBody)     ==  5, "RoomClosedBody 에 패딩이 끼었다");

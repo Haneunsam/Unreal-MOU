@@ -2,7 +2,8 @@
 //
 // 이 파일은 소켓/패킷을 전혀 모른다.
 //   상태 조회: UServerSubsystem (연결 상태 / 내 신원 / 방 번호 / 대기실 명단)
-//   서버 왕복: 방에 들어가기 전에는 자식 창이, 들어간 뒤에는 서브시스템 API 가 한다.
+//   서버 왕복: 방에 들어가기 전에는 ULobbyFlowCoordinator 가 응답 수명을 관리하고,
+//              들어간 뒤의 방 동작은 UServerSubsystem API 가 한다.
 //
 // [화면을 바꾸는 곳은 RefreshUI() 하나뿐이다]
 //   버튼 라벨, 활성화 여부, 명단 표시를 전부 거기서 결정한다.
@@ -11,10 +12,12 @@
 
 #include "Server/Lobby/LobbyWidgetBase.h"
 
-#include "Server/ServerSubsystem.h"
+#include "Server/Lobby/LobbyFlowCoordinator.h"
+#include "Server/Lobby/LobbyPageWidgetBase.h"
 #include "Server/Lobby/RoomCreateWidgetBase.h"
 #include "Server/Lobby/RoomListWidgetBase.h"
 #include "Server/Net/NatPortMappingSubsystem.h"
+#include "Server/ServerSubsystem.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -24,6 +27,7 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Components/WidgetSwitcher.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -49,41 +53,37 @@ void ULobbyWidgetBase::NativeOnInitialized()
 	{
 		BuildDefaultLayout();
 	}
+	else if (WidgetTree != nullptr && LobbyScreenStack == nullptr)
+	{
+		// 구형 WBP의 단일 패널은 새 페이지 구조와 함께 쓸 수 없다. 디자이너가
+		// LobbyScreenStack을 추가하기 전까지 런타임 스택을 루트로 사용한다.
+		LobbyScreenStack = WidgetTree->ConstructWidget<UWidgetSwitcher>(
+			UWidgetSwitcher::StaticClass(), TEXT("LobbyScreenStack_Runtime"));
+		WidgetTree->RootWidget = LobbyScreenStack;
+	}
 }
 
 void ULobbyWidgetBase::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	if (PrimaryButton != nullptr)
-	{
-		PrimaryButton->OnClicked.AddUniqueDynamic(this, &ULobbyWidgetBase::HandlePrimaryClicked);
-	}
-	if (SecondaryButton != nullptr)
-	{
-		SecondaryButton->OnClicked.AddUniqueDynamic(this, &ULobbyWidgetBase::HandleSecondaryClicked);
-	}
-	if (TertiaryButton != nullptr)
-	{
-		TertiaryButton->OnClicked.AddUniqueDynamic(this, &ULobbyWidgetBase::HandleTertiaryClicked);
-	}
-
 	// NativeConstruct 는 뷰포트에 다시 붙을 때마다 불릴 수 있어 중복 구독을 막는다.
 	if (!bSubscribed)
 	{
-		if (UServerSubsystem* Chat = GetServerSubsystem())
+		if (const UGameInstance* GameInstance = GetGameInstance())
 		{
-			Chat->OnChatStateChanged.AddDynamic(this, &ULobbyWidgetBase::HandleChatStateChanged);
-			Chat->OnChatLoginCompleted.AddDynamic(this, &ULobbyWidgetBase::HandleLoginCompleted);
-			Chat->OnRoomMembersChanged.AddDynamic(this, &ULobbyWidgetBase::HandleRoomMembersChanged);
-			Chat->OnRoomClosed.AddDynamic(this, &ULobbyWidgetBase::HandleRoomClosed);
-			Chat->OnRoomGameStarted.AddDynamic(this, &ULobbyWidgetBase::HandleGameStarted);
-			Chat->OnRoomHostReady.AddDynamic(this, &ULobbyWidgetBase::HandleHostReady);
-
-			// 접속 실패를 화면에 그대로 띄운다. UFUNCTION 이 아니라 순수 델리게이트라
-			// AddDynamic 이 아니라 AddUObject 를 쓴다.
-			TravelFailedHandle = Chat->OnTravelFailed.AddUObject(this, &ULobbyWidgetBase::HandleTravelFailed);
-			bSubscribed = true;
+			if (ULobbyFlowCoordinator* Flow = GameInstance->GetSubsystem<ULobbyFlowCoordinator>())
+			{
+				Flow->OnConnectionStateChanged.AddUObject(this, &ULobbyWidgetBase::HandleChatStateChanged);
+				Flow->OnLoginCompleted.AddUObject(this, &ULobbyWidgetBase::HandleLoginCompleted);
+				Flow->OnRoomMembersChanged.AddUObject(this, &ULobbyWidgetBase::HandleRoomMembersChanged);
+				Flow->OnRoomClosed.AddUObject(this, &ULobbyWidgetBase::HandleRoomClosed);
+				Flow->OnGameStarted.AddUObject(this, &ULobbyWidgetBase::HandleGameStarted);
+				Flow->OnHostReady.AddUObject(this, &ULobbyWidgetBase::HandleHostReady);
+				Flow->OnTravelFailed.AddUObject(this, &ULobbyWidgetBase::HandleTravelFailed);
+				Flow->OnRoomEntered.AddUObject(this, &ULobbyWidgetBase::HandleFlowRoomEntered);
+				bSubscribed = true;
+			}
 		}
 	}
 
@@ -119,29 +119,28 @@ void ULobbyWidgetBase::NativeConstruct()
 			: EMOULobbyUIState::MainMenu;
 	}
 
+	InitializePageStack();
 	RefreshUI();
 }
 
 void ULobbyWidgetBase::NativeDestruct()
 {
-	// 로비가 사라질 때 열려 있던 자식 창도 같이 정리한다.
-	CloseChildWidgets();
+	ResetPageStack();
 
 	if (bSubscribed)
 	{
-		if (UServerSubsystem* Chat = GetServerSubsystem())
+		if (const UGameInstance* GameInstance = GetGameInstance())
 		{
-			Chat->OnChatStateChanged.RemoveDynamic(this, &ULobbyWidgetBase::HandleChatStateChanged);
-			Chat->OnChatLoginCompleted.RemoveDynamic(this, &ULobbyWidgetBase::HandleLoginCompleted);
-			Chat->OnRoomMembersChanged.RemoveDynamic(this, &ULobbyWidgetBase::HandleRoomMembersChanged);
-			Chat->OnRoomClosed.RemoveDynamic(this, &ULobbyWidgetBase::HandleRoomClosed);
-			Chat->OnRoomGameStarted.RemoveDynamic(this, &ULobbyWidgetBase::HandleGameStarted);
-			Chat->OnRoomHostReady.RemoveDynamic(this, &ULobbyWidgetBase::HandleHostReady);
-
-			if (TravelFailedHandle.IsValid())
+			if (ULobbyFlowCoordinator* Flow = GameInstance->GetSubsystem<ULobbyFlowCoordinator>())
 			{
-				Chat->OnTravelFailed.Remove(TravelFailedHandle);
-				TravelFailedHandle.Reset();
+				Flow->OnConnectionStateChanged.RemoveAll(this);
+				Flow->OnLoginCompleted.RemoveAll(this);
+				Flow->OnRoomMembersChanged.RemoveAll(this);
+				Flow->OnRoomClosed.RemoveAll(this);
+				Flow->OnGameStarted.RemoveAll(this);
+				Flow->OnHostReady.RemoveAll(this);
+				Flow->OnTravelFailed.RemoveAll(this);
+				Flow->OnRoomEntered.RemoveAll(this);
 			}
 		}
 		bSubscribed = false;
@@ -176,72 +175,134 @@ void ULobbyWidgetBase::NativeDestruct()
 
 void ULobbyWidgetBase::BuildDefaultLayout()
 {
-	UCanvasPanel* RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("LobbyRootCanvas"));
-	WidgetTree->RootWidget = RootCanvas;
+	LobbyScreenStack = WidgetTree->ConstructWidget<UWidgetSwitcher>(
+		UWidgetSwitcher::StaticClass(), TEXT("LobbyScreenStack"));
+	WidgetTree->RootWidget = LobbyScreenStack;
+}
 
-	UBorder* Panel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("LobbyPanel"));
-	Panel->SetBrushColor(FLinearColor(0.02f, 0.02f, 0.04f, 0.92f));
-	Panel->SetPadding(FMargin(20.f));
-
-	UCanvasPanelSlot* PanelSlot = RootCanvas->AddChildToCanvas(Panel);
-	PanelSlot->SetAnchors(FAnchors(0.5f, 0.5f, 0.5f, 0.5f));
-	PanelSlot->SetAlignment(FVector2D(0.5f, 0.5f));
-	PanelSlot->SetAutoSize(false);
-	PanelSlot->SetPosition(FVector2D::ZeroVector);
-	PanelSlot->SetSize(FVector2D(380.f, 420.f));
-
-	UVerticalBox* MainBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LobbyMainBox"));
-	Panel->AddChild(MainBox);
-
-	auto AddRow = [&](UWidget* Widget, float BottomPadding)
+void ULobbyWidgetBase::InitializePageStack()
+{
+	if (LobbyScreenStack == nullptr)
 	{
-		if (UVerticalBoxSlot* Row = MainBox->AddChildToVerticalBox(Widget))
-		{
-			Row->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-			Row->SetPadding(FMargin(0.f, 0.f, 0.f, BottomPadding));
-		}
-	};
+		return;
+	}
 
-	TitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TitleText"));
-	TitleText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-	AddRow(TitleText, 6.f);
-
-	StatusText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StatusText"));
-	StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.85f, 1.f)));
-	AddRow(StatusText, 12.f);
-
-	MemberListBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("MemberListBox"));
-	AddRow(MemberListBox, 12.f);
-
-	auto MakeButton = [&](const TCHAR* Name, UTextBlock** OutLabel) -> UButton*
+	if (PageStack.Num() != 0)
 	{
-		UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
-		UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), *(FString(Name) + TEXT("Label")));
-		Button->AddChild(Label);
-		AddRow(Button, 8.f);
+		return;
+	}
 
-		if (OutLabel != nullptr)
-		{
-			*OutLabel = Label;
-		}
-		return Button;
-	};
+	MainLobbyWidget = CreateMainLobbyPage();
+	if (MainLobbyWidget == nullptr)
+	{
+		return;
+	}
+	PushPage(MainLobbyWidget);
 
-	// 라벨 글자는 여기서 정하지 않는다. 상태에 따라 달라지므로 RefreshUI() 가 채운다.
-	UTextBlock* Label1 = nullptr;
-	UTextBlock* Label2 = nullptr;
-	UTextBlock* Label3 = nullptr;
-	PrimaryButton   = MakeButton(TEXT("PrimaryButton"),   &Label1);
-	SecondaryButton = MakeButton(TEXT("SecondaryButton"), &Label2);
-	TertiaryButton  = MakeButton(TEXT("TertiaryButton"),  &Label3);
-	PrimaryButtonLabel   = Label1;
-	SecondaryButtonLabel = Label2;
-	TertiaryButtonLabel  = Label3;
+	if (UIState == EMOULobbyUIState::WaitingRoom)
+	{
+		RoomLobbyWidget = CreateRoomLobbyPage();
+		PushPage(RoomLobbyWidget);
+	}
+}
 
-	MessageText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("MessageText"));
-	MessageText->SetAutoWrapText(true);
-	MessageText->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.75f, 0.75f)));
-	AddRow(MessageText, 0.f);
+ULobbyMainWidgetBase* ULobbyWidgetBase::CreateMainLobbyPage()
+{
+	APlayerController* PC = GetOwningPlayer();
+	if (PC == nullptr)
+	{
+		return nullptr;
+	}
+	UClass* PageClass = MainLobbyWidgetClass ? MainLobbyWidgetClass.Get() : ULobbyMainWidgetBase::StaticClass();
+	ULobbyMainWidgetBase* Page = CreateWidget<ULobbyMainWidgetBase>(PC, PageClass);
+	if (Page != nullptr)
+	{
+		Page->OnCreateRoom.BindUObject(this, &ULobbyWidgetBase::OpenRoomCreate);
+		Page->OnJoinRoom.BindUObject(this, &ULobbyWidgetBase::OpenRoomList);
+		Page->OnOpenSettings.BindUObject(this, &ULobbyWidgetBase::OpenSettings);
+		Page->OnQuitGame.BindUObject(this, &ULobbyWidgetBase::QuitGame);
+	}
+	return Page;
+}
+
+URoomLobbyWidgetBase* ULobbyWidgetBase::CreateRoomLobbyPage()
+{
+	APlayerController* PC = GetOwningPlayer();
+	if (PC == nullptr)
+	{
+		return nullptr;
+	}
+	UClass* PageClass = RoomLobbyWidgetClass ? RoomLobbyWidgetClass.Get() : URoomLobbyWidgetBase::StaticClass();
+	URoomLobbyWidgetBase* Page = CreateWidget<URoomLobbyWidgetBase>(PC, PageClass);
+	if (Page != nullptr)
+	{
+		Page->OnToggleReady.BindUObject(this, &ULobbyWidgetBase::ToggleReady);
+		Page->OnStartGame.BindUObject(this, &ULobbyWidgetBase::RequestStartGame);
+		Page->OnCustomize.BindUObject(this, &ULobbyWidgetBase::OpenCustomize);
+		Page->OnLeaveRoom.BindUObject(this, &ULobbyWidgetBase::LeaveRoom);
+	}
+	return Page;
+}
+
+void ULobbyWidgetBase::PushPage(UUserWidget* Page)
+{
+	if (LobbyScreenStack == nullptr || Page == nullptr || IsTopPage(Page))
+	{
+		return;
+	}
+	if (Page->GetParent() != LobbyScreenStack)
+	{
+		LobbyScreenStack->AddChild(Page);
+	}
+	PageStack.Add(Page);
+	LobbyScreenStack->SetActiveWidget(Page);
+}
+
+bool ULobbyWidgetBase::PopPage()
+{
+	if (LobbyScreenStack == nullptr || PageStack.Num() <= 1)
+	{
+		return false;
+	}
+	if (UUserWidget* Top = PageStack.Pop())
+	{
+		Top->RemoveFromParent();
+	}
+	LobbyScreenStack->SetActiveWidget(PageStack.Last());
+	return true;
+}
+
+void ULobbyWidgetBase::PopToMainMenu()
+{
+	while (PageStack.Num() > 1)
+	{
+		PopPage();
+	}
+	RoomCreateWidget = nullptr;
+	RoomListWidget = nullptr;
+	RoomLobbyWidget = nullptr;
+	SettingsWidget = nullptr;
+	CustomizeWidget = nullptr;
+}
+
+void ULobbyWidgetBase::ResetPageStack()
+{
+	if (LobbyScreenStack != nullptr)
+	{
+		LobbyScreenStack->ClearChildren();
+	}
+	PageStack.Reset();
+	RoomCreateWidget = nullptr;
+	RoomListWidget = nullptr;
+	RoomLobbyWidget = nullptr;
+	SettingsWidget = nullptr;
+	CustomizeWidget = nullptr;
+	MainLobbyWidget = nullptr;
+}
+
+bool ULobbyWidgetBase::IsTopPage(const UUserWidget* Page) const
+{
+	return Page != nullptr && PageStack.Num() > 0 && PageStack.Last() == Page;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,167 +320,24 @@ UServerSubsystem* ULobbyWidgetBase::GetServerSubsystem() const
 
 void ULobbyWidgetBase::RefreshUI()
 {
-	UServerSubsystem* Chat = GetServerSubsystem();
-
-	const bool bLoggedIn = (Chat != nullptr) && (Chat->GetConnectionState() == EChatConnectionState::LoggedIn);
-	const bool bInRoom   = (UIState == EMOULobbyUIState::WaitingRoom);
-	const bool bIsHost   = bInRoom && Chat != nullptr && Chat->IsRoomHost();
-
-	auto SetLabel = [](UTextBlock* Label, const FString& Text)
-	{
-		if (Label != nullptr)
-		{
-			Label->SetText(FText::FromString(Text));
-		}
-	};
-	auto SetEnabled = [](UButton* Button, bool bEnabled)
-	{
-		if (Button != nullptr)
-		{
-			Button->SetIsEnabled(bEnabled);
-		}
-	};
-
-	if (TitleText != nullptr)
-	{
-		TitleText->SetText(FText::FromString(bInRoom ? TEXT("대기실") : TEXT("MOU 로비")));
-	}
-
-	if (!bInRoom)
-	{
-		// --- 메인메뉴 ---
-		SetLabel(PrimaryButtonLabel,   TEXT("방 만들기"));
-		SetLabel(SecondaryButtonLabel, TEXT("참여하기"));
-		SetLabel(TertiaryButtonLabel,  TEXT("게임 종료"));
-
-		// 로그인 전에는 서버가 거부하므로 눌러봐야 소용없다. 아예 잠근다.
-		SetEnabled(PrimaryButton,   bLoggedIn);
-		SetEnabled(SecondaryButton, bLoggedIn);
-		SetEnabled(TertiaryButton,  true);
-	}
-	else if (bIsHost)
-	{
-		// --- 대기실 (방장) ---
-		// 게임 시작은 참여자가 전원 준비했을 때만 켜진다. 판정은 서버가 내려준 값이다.
-		const bool bAllReady = (Chat != nullptr) && Chat->AreAllMembersReady();
-
-		SetLabel(PrimaryButtonLabel,   bAllReady ? TEXT("게임 시작") : TEXT("게임 시작 (준비 대기 중)"));
-		SetLabel(SecondaryButtonLabel, TEXT("커스터마이징"));
-		SetLabel(TertiaryButtonLabel,  TEXT("나가기"));
-
-		SetEnabled(PrimaryButton,   bAllReady);
-		SetEnabled(SecondaryButton, true);
-		SetEnabled(TertiaryButton,  true);
-	}
-	else
-	{
-		// --- 대기실 (참여자) ---
-		const bool bReady = (Chat != nullptr) && Chat->IsSelfReady();
-
-		SetLabel(PrimaryButtonLabel,   bReady ? TEXT("준비 해제") : TEXT("준비하기"));
-		SetLabel(SecondaryButtonLabel, TEXT("커스터마이징"));
-		SetLabel(TertiaryButtonLabel,  TEXT("나가기"));
-
-		SetEnabled(PrimaryButton,   true);
-		SetEnabled(SecondaryButton, true);
-		SetEnabled(TertiaryButton,  true);
-	}
-
-	// 상태줄
-	if (StatusText != nullptr)
-	{
-		FString Status;
-		if (Chat == nullptr)
-		{
-			Status = TEXT("채팅 시스템을 찾을 수 없습니다.");
-		}
-		else if (bInRoom)
-		{
-			Status = FString::Printf(TEXT("방 #%d — %s"),
-				Chat->GetCurrentRoomId(), bIsHost ? TEXT("방장") : TEXT("참여자"));
-		}
-		else
-		{
-			switch (Chat->GetConnectionState())
-			{
-			case EChatConnectionState::LoggedIn:
-				Status = FString::Printf(TEXT("%s 님으로 접속 중"), *Chat->GetLoginResult().Name);
-				break;
-			case EChatConnectionState::Connected:
-				Status = TEXT("서버에 연결됨. 로그인 대기 중...");
-				break;
-			case EChatConnectionState::Connecting:
-				Status = TEXT("서버에 연결하는 중...");
-				break;
-			default:
-				Status = TEXT("서버에 연결되어 있지 않습니다.");
-				break;
-			}
-		}
-		StatusText->SetText(FText::FromString(Status));
-	}
-
-	RebuildMemberList();
+	const UServerSubsystem* Server = GetServerSubsystem();
+	if (MainLobbyWidget != nullptr) { MainLobbyWidget->Refresh(Server); }
+	if (RoomLobbyWidget != nullptr) { RoomLobbyWidget->Refresh(Server); }
 }
 
 void ULobbyWidgetBase::RebuildMemberList()
 {
-	if (MemberListBox == nullptr)
-	{
-		return;
-	}
-
-	// 메인메뉴에서는 자리까지 접는다. Hidden 은 빈 공간을 남긴다.
-	if (UIState != EMOULobbyUIState::WaitingRoom)
-	{
-		MemberListBox->ClearChildren();
-		MemberListBox->SetVisibility(ESlateVisibility::Collapsed);
-		return;
-	}
-	MemberListBox->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-
-	// 명단은 최대 4명(kMaxPlayersInRoom)이라 매번 다시 만들어도 부담이 없다.
-	// 재사용 로직을 두면 나간 사람의 줄이 남는 종류의 버그가 생긴다.
-	MemberListBox->ClearChildren();
-
-	const UServerSubsystem* Chat = GetServerSubsystem();
-	if (Chat == nullptr)
-	{
-		return;
-	}
-
-	const TArray<FMOURoomMember> Members = Chat->GetRoomMembers();
-	for (const FMOURoomMember& Member : Members)
-	{
-		UTextBlock* Line = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-
-		// 방장은 준비 여부를 묻지 않으므로 체크 대신 역할을 보여준다.
-		const FString Mark = Member.bIsHost ? TEXT("★") : (Member.bReady ? TEXT("●") : TEXT("○"));
-		const FString Role = Member.bIsHost ? TEXT(" (방장)") : (Member.bReady ? TEXT(" — 준비완료") : TEXT(" — 대기중"));
-		Line->SetText(FText::FromString(FString::Printf(TEXT("%s %s%s"), *Mark, *Member.Name, *Role)));
-
-		Line->SetColorAndOpacity(FSlateColor(Member.bIsHost
-			? FLinearColor(1.f, 0.85f, 0.4f)
-			: (Member.bReady ? FLinearColor(0.5f, 1.f, 0.5f) : FLinearColor(0.7f, 0.7f, 0.7f))));
-
-		if (UVerticalBoxSlot* Row = MemberListBox->AddChildToVerticalBox(Line))
-		{
-			Row->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-			Row->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
-		}
-	}
+	if (RoomLobbyWidget != nullptr) { RoomLobbyWidget->Refresh(GetServerSubsystem()); }
 }
 
 void ULobbyWidgetBase::SetMessage(const FString& Text, bool bIsError)
 {
-	if (MessageText == nullptr)
+	if (RoomLobbyWidget != nullptr && IsTopPage(RoomLobbyWidget))
 	{
+		RoomLobbyWidget->SetMessage(Text, bIsError);
 		return;
 	}
-	MessageText->SetText(FText::FromString(Text));
-	MessageText->SetColorAndOpacity(FSlateColor(bIsError
-		? FLinearColor(1.f, 0.45f, 0.45f)
-		: FLinearColor(0.75f, 0.75f, 0.75f)));
+	if (MainLobbyWidget != nullptr) { MainLobbyWidget->SetMessage(Text, bIsError); }
 }
 
 // ---------------------------------------------------------------------------
@@ -517,9 +435,25 @@ void ULobbyWidgetBase::LeaveRoom()
 
 void ULobbyWidgetBase::OpenCustomize()
 {
-	// 화면이 아직 없다. 훅만 부르고 사용자에게는 솔직하게 알린다.
+	if (!IsTopPage(RoomLobbyWidget))
+	{
+		return;
+	}
+	APlayerController* PC = GetOwningPlayer();
+	if (PC == nullptr)
+	{
+		return;
+	}
+	UClass* WidgetClass = CustomizeWidgetClass ? CustomizeWidgetClass.Get() : ULobbyCustomizeWidgetBase::StaticClass();
+	CustomizeWidget = CreateWidget<ULobbyCustomizeWidgetBase>(PC, WidgetClass);
+	if (CustomizeWidget == nullptr)
+	{
+		SetMessage(TEXT("커스터마이징 화면을 만들지 못했습니다."), true);
+		return;
+	}
+	CustomizeWidget->OnBack.BindUObject(this, &ULobbyWidgetBase::HandleCustomizeClosed);
+	PushPage(CustomizeWidget);
 	OnCustomizeRequested();
-	SetMessage(TEXT("커스터마이징은 아직 준비 중입니다."), false);
 }
 
 void ULobbyWidgetBase::QuitGame()
@@ -551,7 +485,11 @@ void ULobbyWidgetBase::EnterWaitingRoom(int32 RoomId, bool bIsHost)
 		Chat->RegisterGameEndpoint(HostPort);
 	}
 
-	SetPanelVisible(true);
+	if (RoomLobbyWidget == nullptr)
+	{
+		RoomLobbyWidget = CreateRoomLobbyPage();
+		PushPage(RoomLobbyWidget);
+	}
 	RefreshUI();
 
 	OnEnteredWaitingRoom(RoomId, bIsHost);
@@ -579,7 +517,7 @@ void ULobbyWidgetBase::ReturnToMainMenu(bool bRoomClosed)
 	// 참여자는 방장의 리슨서버가 실제로 뜬 뒤에 오는 신호를 받고서야 떠나고,
 	// 방을 나가면 서버가 그 신호를 보내지 않기 때문이다.
 
-	SetPanelVisible(true);
+	PopToMainMenu();
 	RefreshUI();
 
 	OnLeftWaitingRoom(bRoomClosed);
@@ -655,22 +593,12 @@ void ULobbyWidgetBase::HandleHostReady(const FMOURoomJoinResult& Host)
 }
 
 // ---------------------------------------------------------------------------
-// 자식 창 열고 닫기
+// 스택 페이지 열고 닫기
 // ---------------------------------------------------------------------------
-
-void ULobbyWidgetBase::SetPanelVisible(bool bVisible)
-{
-	if (!bHideWhileChildOpen)
-	{
-		return;
-	}
-	// Collapsed 로 접으면 클릭도 가지 않는다. 자식 창 뒤의 버튼이 눌리는 것을 막는다.
-	SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-}
 
 void ULobbyWidgetBase::OpenRoomCreate()
 {
-	if (UIState != EMOULobbyUIState::MainMenu || RoomCreateWidget != nullptr)
+	if (UIState != EMOULobbyUIState::MainMenu || !IsTopPage(MainLobbyWidget))
 	{
 		return;
 	}
@@ -691,20 +619,17 @@ void ULobbyWidgetBase::OpenRoomCreate()
 
 	// 커서는 로비가 이미 관리하고 있다. 자식이 또 만지면 닫힐 때 커서가 사라진다.
 	RoomCreateWidget->bManageMouseCursor = false;
-	// 성공 통지를 받으면 로비는 참조를 버린다. 자식이 스스로 닫지 않으면
-	// 아무도 소유하지 않는 창이 화면에 남는다.
-	RoomCreateWidget->bRemoveOnSuccess = true;
+	// 성공 뒤에도 스택 기록으로 남겨두고, 방에서 나갈 때 PopToMainMenu 한다.
+	RoomCreateWidget->bRemoveOnSuccess = false;
 	RoomCreateWidget->HostPort = HostPort;
-	RoomCreateWidget->OnRoomCreateFinished.BindUObject(this, &ULobbyWidgetBase::HandleRoomCreateFinished);
 	RoomCreateWidget->OnRoomCreateCancelled.BindUObject(this, &ULobbyWidgetBase::HandleRoomCreateCancelled);
 
-	RoomCreateWidget->AddToViewport();
-	SetPanelVisible(false);
+	PushPage(RoomCreateWidget);
 }
 
 void ULobbyWidgetBase::OpenRoomList()
 {
-	if (UIState != EMOULobbyUIState::MainMenu || RoomListWidget != nullptr)
+	if (UIState != EMOULobbyUIState::MainMenu || !IsTopPage(MainLobbyWidget))
 	{
 		return;
 	}
@@ -724,81 +649,121 @@ void ULobbyWidgetBase::OpenRoomList()
 	}
 
 	RoomListWidget->bManageMouseCursor = false;
-	RoomListWidget->bRemoveOnSuccess   = true;   // 위와 같은 이유
-	RoomListWidget->OnRoomJoinApprovedNative.BindUObject(this, &ULobbyWidgetBase::HandleRoomJoinApproved);
+	RoomListWidget->bRemoveOnSuccess = false;
 	RoomListWidget->OnRoomListClosed.BindUObject(this, &ULobbyWidgetBase::HandleRoomListClosed);
 
-	RoomListWidget->AddToViewport();
-	SetPanelVisible(false);
+	PushPage(RoomListWidget);
 }
 
-void ULobbyWidgetBase::CloseChildWidgets()
+void ULobbyWidgetBase::OpenSettings()
 {
-	if (RoomCreateWidget != nullptr)
+	if (UIState != EMOULobbyUIState::MainMenu || !IsTopPage(MainLobbyWidget))
 	{
-		// 델리게이트를 먼저 끊는다. RemoveFromParent 가 취소 통지를 유발하면
-		// 여기서 다시 CloseChildWidgets 로 들어올 수 있다.
-		RoomCreateWidget->OnRoomCreateFinished.Unbind();
-		RoomCreateWidget->OnRoomCreateCancelled.Unbind();
-		RoomCreateWidget->RemoveFromParent();
-		RoomCreateWidget = nullptr;
+		return;
 	}
-	if (RoomListWidget != nullptr)
+	APlayerController* PC = GetOwningPlayer();
+	if (PC == nullptr)
 	{
-		RoomListWidget->OnRoomJoinApprovedNative.Unbind();
-		RoomListWidget->OnRoomListClosed.Unbind();
-		RoomListWidget->RemoveFromParent();
-		RoomListWidget = nullptr;
+		return;
 	}
+	UClass* WidgetClass = SettingsWidgetClass ? SettingsWidgetClass.Get() : ULobbySettingsWidgetBase::StaticClass();
+	SettingsWidget = CreateWidget<ULobbySettingsWidgetBase>(PC, WidgetClass);
+	if (SettingsWidget == nullptr)
+	{
+		SetMessage(TEXT("환경설정 화면을 만들지 못했습니다."), true);
+		return;
+	}
+	SettingsWidget->OnBack.BindUObject(this, &ULobbyWidgetBase::HandleSettingsClosed);
+	PushPage(SettingsWidget);
+}
+
+bool ULobbyWidgetBase::NavigateBack()
+{
+	if (IsTopPage(RoomCreateWidget))
+	{
+		RoomCreateWidget->CancelCreate();
+		return true;
+	}
+	if (IsTopPage(RoomListWidget))
+	{
+		RoomListWidget->CloseList();
+		return true;
+	}
+	if (IsTopPage(SettingsWidget))
+	{
+		HandleSettingsClosed();
+		return true;
+	}
+	if (IsTopPage(CustomizeWidget))
+	{
+		HandleCustomizeClosed();
+		return true;
+	}
+	if (IsTopPage(RoomLobbyWidget))
+	{
+		LeaveRoom();
+		return true;
+	}
+	return false;
 }
 
 // ---------------------------------------------------------------------------
-// 자식 창에서 올라오는 결과
+// 흐름 관리자와 자식 창에서 올라오는 결과
 // ---------------------------------------------------------------------------
 
-void ULobbyWidgetBase::HandleRoomCreateFinished(int32 RoomId, const FString& RoomPassword)
+void ULobbyWidgetBase::HandleFlowRoomEntered(int32 RoomId, bool bIsHost, const FString& RoomPassword)
 {
-	// 자식은 스스로 뷰포트에서 빠졌다(bRemoveOnSuccess). 참조만 정리한다.
-	RoomCreateWidget = nullptr;
-	MyRoomPassword   = RoomPassword;
-
-	// ★ 서브시스템에도 넘긴다. 리슨서버 URL 에 실릴 값이고, 그 일을 하는 시점에는
-	//   이 위젯이 이미 사라졌을 수 있다.
-	if (UServerSubsystem* Chat = GetServerSubsystem())
+	if (bIsHost)
 	{
-		Chat->SetRoomPassword(RoomPassword);
+		MyRoomPassword = RoomPassword;
+		JoinedRoomPassword.Empty();
+	}
+	else
+	{
+		JoinedRoomPassword = RoomPassword;
+		MyRoomPassword.Empty();
 	}
 
-	EnterWaitingRoom(RoomId, /*bIsHost=*/true);
-	SetMessage(TEXT("방을 열었습니다. 참여자가 모두 준비하면 시작할 수 있습니다."), false);
+	EnterWaitingRoom(RoomId, bIsHost);
+	SetMessage(bIsHost
+		? TEXT("방을 열었습니다. 참여자가 모두 준비하면 시작할 수 있습니다.")
+		: TEXT("방에 들어왔습니다. 준비를 누르면 방장이 시작할 수 있습니다."), false);
 }
 
 void ULobbyWidgetBase::HandleRoomCreateCancelled()
 {
-	RoomCreateWidget = nullptr;
-	SetPanelVisible(true);
-}
-
-void ULobbyWidgetBase::HandleRoomJoinApproved(const FMOURoomJoinResult& Result, const FString& RoomPassword)
-{
-	RoomListWidget     = nullptr;
-	JoinedRoomPassword = RoomPassword;
-
-	// ★ 방장 쪽과 같은 이유. ClientTravel URL 에 실릴 값인데, 그때 이 위젯이
-	//   남아 있으리라는 보장이 없다.
-	if (UServerSubsystem* Chat = GetServerSubsystem())
+	if (IsTopPage(RoomCreateWidget))
 	{
-		Chat->SetRoomPassword(RoomPassword);
+		PopPage();
 	}
-
-	EnterWaitingRoom(Result.RoomId, /*bIsHost=*/false);
-	SetMessage(TEXT("방에 들어왔습니다. 준비를 누르면 방장이 시작할 수 있습니다."), false);
+	RoomCreateWidget = nullptr;
 }
 
 void ULobbyWidgetBase::HandleRoomListClosed()
 {
+	if (IsTopPage(RoomListWidget))
+	{
+		PopPage();
+	}
 	RoomListWidget = nullptr;
-	SetPanelVisible(true);
+}
+
+void ULobbyWidgetBase::HandleSettingsClosed()
+{
+	if (IsTopPage(SettingsWidget))
+	{
+		PopPage();
+	}
+	SettingsWidget = nullptr;
+}
+
+void ULobbyWidgetBase::HandleCustomizeClosed()
+{
+	if (IsTopPage(CustomizeWidget))
+	{
+		PopPage();
+	}
+	CustomizeWidget = nullptr;
 }
 
 // ---------------------------------------------------------------------------
