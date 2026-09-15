@@ -1,4 +1,4 @@
-#include "Item/SprayItem.h"
+﻿#include "Item/SprayItem.h"
 #include "Components/CarryingComponent.h"
 #include "Components/DecalComponent.h"
 #include "Components/PrimitiveComponent.h"
@@ -10,6 +10,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/MainCharacter.h"
+#include "DrawDebugHelpers.h" // [DEBUG-SPRAY] 트레이스 시각화용 (디버그 끝나면 제거)
 
 // [SPRAY-000] 기본 분사 주기와 용량 설정.
 ASprayItem::ASprayItem()
@@ -181,16 +182,46 @@ void ASprayItem::SetSpraying(bool bActive)
 void ASprayItem::SpraySurface()
 {
 	APawn* Holder = Cast<APawn>(GetOwner());
-	if (!Holder || !Holder->GetController() || !DecalMaterial) return;
+	if (!Holder || !Holder->GetController() || !DecalMaterial)
+	{
+		// [DEBUG-SPRAY] 사전 조건 실패 (소유자/컨트롤러/DecalMaterial 중 하나 없음)
+		UE_LOG(LogTemp, Warning, TEXT("[DEBUG-SPRAY] 사전조건 실패: Holder=%d Controller=%d DecalMaterial=%d"),
+			Holder != nullptr ? 1 : 0, (Holder && Holder->GetController()) ? 1 : 0, DecalMaterial != nullptr ? 1 : 0);
+		return;
+	}
 	FVector Start;
 	FRotator Rotation;
 	Holder->GetController()->GetPlayerViewPoint(Start, Rotation);
+	const FVector End = Start + Rotation.Vector() * FMath::Max(SprayRange, 1.f);
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(SpraySurface), true, this);
 	Params.AddIgnoredActor(Holder);
 	FHitResult Hit;
-	if (!GetWorld()->LineTraceSingleByChannel(Hit, Start, Start + Rotation.Vector() * FMath::Max(SprayRange, 1.f), ECC_Visibility, Params)) return;
+
+	//// [DEBUG-SPRAY] 트레이스 방향/시작·끝점 로그 + 화면에 선 그리기(빨강)
+	//UE_LOG(LogTemp, Warning, TEXT("[DEBUG-SPRAY] Start=%s Dir=%s End=%s Range=%.0f"),
+	//	*Start.ToString(), *Rotation.Vector().ToString(), *End.ToString(), SprayRange);
+	//DrawDebugLine(GetWorld(), Start, End, FColor::Red, false, 2.0f, 0, 1.0f);
+
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+	{
+		// [DEBUG-SPRAY] 트레이스가 아무것도 안 맞음 (Visibility Block 표면이 없음)
+		/*UE_LOG(LogTemp, Warning, TEXT("[DEBUG-SPRAY] 트레이스 히트 없음 (Visibility로 막는 게 없음)"));*/
+		return;
+	}
 	UPrimitiveComponent* Surface = Hit.GetComponent();
-	if (!Surface || !Surface->bReceivesDecals) return;
+
+	// [DEBUG-SPRAY] 맞은 대상 + Receives Decals 여부 + 히트 지점(노란 점)
+	/*UE_LOG(LogTemp, Warning, TEXT("[DEBUG-SPRAY] 히트! Actor=%s Comp=%s bReceivesDecals=%d ImpactPoint=%s"),
+		*GetNameSafe(Hit.GetActor()), *GetNameSafe(Surface),
+		Surface ? (Surface->bReceivesDecals ? 1 : 0) : -1, *Hit.ImpactPoint.ToString());
+	DrawDebugPoint(GetWorld(), Hit.ImpactPoint, 12.0f, FColor::Yellow, false, 2.0f);*/
+
+	if (!Surface || !Surface->bReceivesDecals)
+	{
+		//// [DEBUG-SPRAY] 맞긴 했는데 그 표면이 Receives Decals 꺼짐 → 데칼 안 찍힘
+		//UE_LOG(LogTemp, Warning, TEXT("[DEBUG-SPRAY] 표면의 Receives Decals가 꺼져 있음 → 데칼 스킵"));
+		//return;
+	}
 	const FTransform Transform = Surface->GetSocketTransform(Hit.BoneName);
 	const float Radius = FMath::Max(DecalRadius, 1.f);
 	if (LastSurface == Surface && LastBone == Hit.BoneName
@@ -206,7 +237,13 @@ void ASprayItem::SpraySurface()
 // [SPRAY-014] 각 클라이언트에서 피격 컴포넌트에 데칼 부착.
 void ASprayItem::MulticastStamp_Implementation(UPrimitiveComponent* Surface, FVector Location, FVector Normal, FName Bone)
 {
-	if (GetNetMode() == NM_DedicatedServer || !IsValid(Surface) || !DecalMaterial) return;
+	if (GetNetMode() == NM_DedicatedServer || !IsValid(Surface) || !DecalMaterial)
+	{
+		// [DEBUG-SPRAY] Multicast 진입 실패 (전용서버/표면무효/머티리얼없음)
+		UE_LOG(LogTemp, Warning, TEXT("[DEBUG-SPRAY] Stamp 리턴: NetMode=%d SurfaceValid=%d DecalMaterial=%d"),
+			(int32)GetNetMode(), IsValid(Surface) ? 1 : 0, DecalMaterial != nullptr ? 1 : 0);
+		return;
+	}
 	Decals.RemoveAll([](const TWeakObjectPtr<UDecalComponent>& Decal) { return !Decal.IsValid(); });
 	while (Decals.Num() >= FMath::Max(MaxDecals, 1))
 	{
@@ -215,10 +252,28 @@ void ASprayItem::MulticastStamp_Implementation(UPrimitiveComponent* Surface, FVe
 	}
 	const FTransform Transform = Surface->GetSocketTransform(Bone);
 	const FVector WorldNormal = Transform.TransformVectorNoScale(Normal).GetSafeNormal();
+	const FVector DecalSize(FMath::Max(ProjectionDepth, 0.1f), FMath::Max(DecalRadius, 1.f), FMath::Max(DecalRadius, 1.f));
+	const FVector DecalLoc = Transform.TransformPosition(Location);
 	UDecalComponent* Decal = UGameplayStatics::SpawnDecalAttached(DecalMaterial,
-		FVector(FMath::Max(ProjectionDepth, 0.1f), FMath::Max(DecalRadius, 1.f), FMath::Max(DecalRadius, 1.f)),
-		Surface, Bone, Transform.TransformPosition(Location), (-WorldNormal).Rotation(),
+		DecalSize, Surface, Bone, DecalLoc, (-WorldNormal).Rotation(),
 		EAttachLocation::KeepWorldPosition, FMath::Max(DecalLifeSeconds, 1.f));
+
+	//// [DEBUG-SPRAY] 데칼 스폰 결과 + 크기/위치 로그 + 위치에 초록 점
+	//UE_LOG(LogTemp, Warning, TEXT("[DEBUG-SPRAY] SpawnDecal 결과=%s Size=%s Loc=%s Life=%.0f"),
+	//	Decal ? TEXT("성공") : TEXT("NULL(실패)"), *DecalSize.ToString(), *DecalLoc.ToString(), DecalLifeSeconds);
+	//DrawDebugPoint(GetWorld(), DecalLoc, 20.0f, FColor::Green, false, 3.0f);
+
+	// [DEBUG-SPRAY] 데칼 투영 방향 확인: 데칼은 +X축으로 투영됨.
+	// 파란 선 = 데칼이 실제 쏘는 방향(+X). 이게 벽 안(뒤)으로 향하면 투영이 안 됨.
+	if (Decal)
+	{
+		const FVector DecalForward = Decal->GetComponentQuat().GetForwardVector();
+		UE_LOG(LogTemp, Warning, TEXT("[DEBUG-SPRAY] WorldNormal=%s DecalForward(+X)=%s (Forward가 벽 바깥=Normal과 같은쪽이어야 정상)"),
+			*WorldNormal.ToString(), *DecalForward.ToString());
+		/*DrawDebugLine(GetWorld(), DecalLoc, DecalLoc + DecalForward * 60.f, FColor::Blue, false, 3.0f, 0, 2.0f);
+		DrawDebugLine(GetWorld(), DecalLoc, DecalLoc + WorldNormal * 60.f, FColor::Cyan, false, 3.0f, 0, 2.0f);*/
+	}
+
 	if (Decal)
 	{
 		Decal->SetSortOrder(NextSortOrder++);
