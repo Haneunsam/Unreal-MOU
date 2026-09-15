@@ -624,6 +624,11 @@ private:
 	void OnJumpEndInput();
 	void OnEmoteToggle();
 	void OnUse();
+	// [SPRAYINPUT-000] 사용을 시작한 아이템에 입력 해제를 전달한다.
+	void OnUseReleased();
+
+	// 손의 아이템이 바뀌어도 원래 사용한 아이템에 중지를 전달한다.
+	TWeakObjectPtr<AItemBase> ActiveUseItem;
 
 	void OnSlot1();
 	void OnSlot2();

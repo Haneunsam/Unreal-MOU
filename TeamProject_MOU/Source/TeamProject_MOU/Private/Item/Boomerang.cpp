@@ -13,6 +13,7 @@
 #include "TimerManager.h"
 #include "Net/UnrealNetwork.h"
 
+// [BOOMERANG-007] 초기 컴포넌트와 기본값 설정
 ABoomerang::ABoomerang()
 {
 	// 비행 궤적을 매 프레임 직접 제어해야 하므로 Tick 필수 (AItemBase가 이미 bCanEverTick=true).
@@ -31,6 +32,7 @@ ABoomerang::ABoomerang()
 	HitStatusTag = FGameplayTag::RequestGameplayTag(FName("State.CC.FallDown"), false);
 }
 
+// [BOOMERANG-009] 네트워크 복제 대상 속성 등록
 void ABoomerang::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -38,11 +40,13 @@ void ABoomerang::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifeti
 }
 
 // 복제된 상태 도착 시 훅 (클라 연출용). 현재 비어있음.
+// [BOOMERANG-010] 복제된 비행 상태 반영
 void ABoomerang::OnRep_FlightState()
 {
 }
 
-// [BOOMERANG-000] 발사: 비행 시작. (부모 OnUse→TryFireOnServer가 서버 권한 확인 후 호출)
+// BOOMERANG-000 발사: 비행 시작. (부모 OnUse→TryFireOnServer가 서버 권한 확인 후 호출)
+// [BOOMERANG-000] 서버에서 무기 사용과 발사 처리
 void ABoomerang::Fire()
 {
 	// 이미 비행 중이면 재발사 무시.
@@ -56,12 +60,14 @@ void ABoomerang::Fire()
 }
 
 // 비행 중(손에 없을 때)에는 내려놓기/던지기를 막는다. 손에 돌아와 Idle이 되면 다시 허용.
+// [BOOMERANG-013] 사용 상태에 따른 내려놓기 허용 여부 반환
 bool ABoomerang::CanBeDropped() const
 {
 	return FlightState == EBoomerangState::Idle;
 }
 
-// [BOOMERANG-002] 비행 시작 (서버). 손에서 분리 → 물리 끄고 운동학 이동 준비 → 콜라이더 켜기.
+// BOOMERANG-002 비행 시작 (서버). 손에서 분리 → 물리 끄고 운동학 이동 준비 → 콜라이더 켜기.
+// [BOOMERANG-002] 비행 시작 (서버). 손에서 분리 + 물리 끄고 운동학 이동 준비 + 콜라이더 on.
 void ABoomerang::StartFlight()
 {
 	if (!HasAuthority())
@@ -74,7 +80,7 @@ void ABoomerang::StartFlight()
 	FVector ViewLocation = GetActorLocation();
 	FRotator ViewRotation = GetActorRotation();
 
-	// LastOwner 유실(레벨 이동 등) 대비: attach 부모까지 찾아 현재 든 Pawn을 얻는다. [WEAPON-018]
+	// LastOwner 유실(레벨 이동 등) 대비: attach 부모까지 찾아 현재 든 Pawn을 얻는다. WEAPON-018
 	if (APawn* OwnerPawn = GetOwningPawn())
 	{
 		if (OwnerPawn->GetController())
@@ -122,6 +128,7 @@ void ABoomerang::StartFlight()
 	MulticastThrown();
 }
 
+// [BOOMERANG-008] 매 프레임 무기 상태와 동작 갱신
 void ABoomerang::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -204,7 +211,8 @@ void ABoomerang::Tick(float DeltaTime)
 	}
 }
 
-// [BOOMERANG-003] 되돌아오기 전환 (서버). Outbound에서만.
+// BOOMERANG-003 되돌아오기 전환 (서버). Outbound에서만.
+// [BOOMERANG-003] 되돌아오기 전환 (서버). Outbound일 때만 동작.
 void ABoomerang::BeginReturn()
 {
 	if (!HasAuthority() || FlightState != EBoomerangState::Outbound)
@@ -214,7 +222,8 @@ void ABoomerang::BeginReturn()
 	FlightState = EBoomerangState::Returning; // 복제됨
 }
 
-// [BOOMERANG-001] 히트 override: 상태이상 부여 + 즉시 되돌아오기 전환
+// BOOMERANG-001 히트 override: 상태이상 부여 + 즉시 되돌아오기 전환
+// [BOOMERANG-001] 명중 대상의 효과 처리
 void ABoomerang::ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResult& Hit)
 {
 	// 판정은 서버에서만 불림 (부모 OnMeleeOverlap이 HasAuthority 가드)
@@ -281,7 +290,8 @@ void ABoomerang::ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResul
 	BeginReturn();
 }
 
-// [BOOMERANG-004] 잡힘 처리 (서버). 상태 복귀 + 손 소켓 재부착 연출.
+// BOOMERANG-004 잡힘 처리 (서버). 상태 복귀 + 손 소켓 재부착 연출.
+// [BOOMERANG-004] 잡힘 처리 (서버). 손 소켓 재부착 + Idle 복귀.
 void ABoomerang::CatchByOwner()
 {
 	if (!HasAuthority())
@@ -292,7 +302,7 @@ void ABoomerang::CatchByOwner()
 	FlightState = EBoomerangState::Idle; // 복제됨
 	ElapsedFlightTime = 0.0f;
 
-	// 손에 돌아왔으니 사용 중 상태 해제 → 슬롯 변경 다시 허용 [WEAPON-017]
+	// 손에 돌아왔으니 사용 중 상태 해제 → 슬롯 변경 다시 허용 WEAPON-017
 	FinishUse();
 
 	// 비행 콜라이더 끄기
@@ -324,9 +334,10 @@ void ABoomerang::CatchByOwner()
 	MulticastCatch();
 }
 
-// [BOOMERANG-005] 잡힘 재부착/연출 (모든 클라).
+// BOOMERANG-005 잡힘 재부착/연출 (모든 클라).
 //   주의: CarryingComponent::EquipItem은 무게를 다시 더하므로(좌클릭 발사라 손에서 논리적으로
 //   내려놓은 적이 없음) 사용하지 않는다. 여기서는 소켓 부착 + 장착 상태만 복원한다.
+// [BOOMERANG-005] 잡힘 연출/재부착 (모든 클라). 소켓 부착 + 장착 상태(물리 off, QueryOnly) 복원.
 void ABoomerang::MulticastCatch_Implementation()
 {
 	if (MeshComponent)
@@ -353,7 +364,8 @@ void ABoomerang::MulticastCatch_Implementation()
 	OnCaught();
 }
 
-// [BOOMERANG-006] 던짐 연출 (모든 클라).
+// BOOMERANG-006 던짐 연출 (모든 클라).
+// [BOOMERANG-006] 던짐 연출 (모든 클라). OnThrown BP 훅 재생.
 void ABoomerang::MulticastThrown_Implementation()
 {
 	OnThrown();

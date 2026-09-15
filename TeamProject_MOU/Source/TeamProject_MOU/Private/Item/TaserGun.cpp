@@ -1,4 +1,4 @@
-﻿#include "Item/TaserGun.h"
+#include "Item/TaserGun.h"
 #include "Base/CharacterBase.h"
 #include "Components/StatusComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -9,6 +9,7 @@
 #include "AbilitySystemBlueprintLibrary.h" // SendGameplayEventToActor
 #include "DrawDebugHelpers.h" // [DEBUG-TASER] 확인용 임시
 
+// [TASER-008] 초기 컴포넌트와 기본값 설정
 ATaserGun::ATaserGun()
 {
 	// 최대 내구도 100, 발사당 25 차감(GetDurabilityCostPerUse) → 4회 발사 가능.
@@ -20,8 +21,9 @@ ATaserGun::ATaserGun()
 	MuzzlePoint->SetupAttachment(MeshComponent);
 }
 
-// [TASER-001] 발사 override: 카메라 조준 방향으로 피아식별 트레이스 + VFX
+// TASER-001 발사 override: 카메라 조준 방향으로 피아식별 트레이스 + VFX
 // (좌클릭→횟수차감→서버권한 분기는 부모 WeaponItemBase::OnUse에서 처리)
+// [TASER-001] 서버에서 무기 사용과 발사 처리
 void ATaserGun::Fire()
 {
 	// 트레이스는 든 플레이어의 카메라 시점(화면 정중앙) 기준으로 발사한다.
@@ -29,7 +31,7 @@ void ATaserGun::Fire()
 	FVector ViewLocation = GetActorLocation();
 	FRotator ViewRotation = GetActorRotation();
 
-	// LastOwner 유실(레벨 이동 등) 대비: attach 부모까지 찾아 현재 든 Pawn을 얻는다. [WEAPON-018]
+	// LastOwner 유실(레벨 이동 등) 대비: attach 부모까지 찾아 현재 든 Pawn을 얻는다. WEAPON-018
 	APawn* OwnerPawn = GetOwningPawn();
 	if (OwnerPawn && OwnerPawn->GetController())
 	{
@@ -79,14 +81,15 @@ void ATaserGun::Fire()
 	const FVector FxEnd = Hit.GetActor() ? Hit.ImpactPoint : TraceEnd;
 	MulticastPlayFireEffect(FxStart, FxEnd, bHit);
 
-	// 발사 쿨다운 동안 "사용 중" 유지 → FireCooldown 후 슬롯 변경 다시 허용 [WEAPON-017]
+	// 발사 쿨다운 동안 "사용 중" 유지 → FireCooldown 후 슬롯 변경 다시 허용 WEAPON-017
 	if (HasAuthority())
 	{
 		GetWorldTimerManager().SetTimer(FireCooldownTimer, this, &ATaserGun::FinishUse, FireCooldown, false);
 	}
 }
 
-// [TASER-006] 무기 공통 히트 처리 override: 맞은 캐릭터에 감전 태그 부여 + 타이머로 해제 예약
+// TASER-006 무기 공통 히트 처리 override: 맞은 캐릭터에 감전 태그 부여 + 타이머로 해제 예약
+// [TASER-006] 명중 대상의 효과 처리
 void ATaserGun::ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResult& Hit)
 {
 	ACharacterBase* TargetCharacter = Cast<ACharacterBase>(HitActor);
@@ -132,7 +135,8 @@ void ATaserGun::ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResult
 	}*/
 }
 
-// [TASER-005] 발사 이펙트 훅 - 모든 클라이언트에서 BP VFX 이벤트 재생
+// TASER-005 발사 이펙트 훅 - 모든 클라이언트에서 BP VFX 이벤트 재생
+// [TASER-005] 발사 이펙트 훅 (전기 줄기 등). 시작/끝 지점 전달, 모든 클라 재생
 void ATaserGun::MulticastPlayFireEffect_Implementation(FVector Start, FVector End, bool bHit)
 {
 	OnFireEffect(Start, End, bHit);

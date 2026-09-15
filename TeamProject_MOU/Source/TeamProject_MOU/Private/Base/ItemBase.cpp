@@ -270,6 +270,11 @@ void AItemBase::HandlePlayerHit(AMainCharacter* HitPlayer, float ImpactSpeed)
 	UE_LOG(LogTemp, Log, TEXT("[%s] 일반 아이템 충돌! 피격 애니메이션 출력 (속도: %f)"), *GetName(), ImpactSpeed);
 }
 
+// [ITEM-100] 사용 입력 해제의 기본 동작은 비워 둔다.
+void AItemBase::OnUseReleased_Implementation()
+{
+}
+
 void AItemBase::OnUse_Implementation()
 {
 	// 일반 아이템 사용 로직 (자식 클래스에서 구현)

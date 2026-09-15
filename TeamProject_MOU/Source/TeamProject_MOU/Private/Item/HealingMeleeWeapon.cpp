@@ -1,6 +1,8 @@
 #include "Item/HealingMeleeWeapon.h"
 
 #include "AbilitySystemComponent.h"
+#include "Ability/GA_SpannerSwing.h"
+#include "TimerManager.h"
 #include "Animation/AnimMontage.h"
 #include "Base/BaseAttributeSet.h"
 #include "Components/StaticMeshComponent.h"
@@ -9,18 +11,19 @@
 #include "GameplayEffect.h"
 #include "Player/MainCharacter.h"
 
+// [HEAL-000] 초기 컴포넌트와 기본값 설정
 AHealingMeleeWeapon::AHealingMeleeWeapon()
 {
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = false;
 	MeshComponent->SetRelativeLocation(FVector::ZeroVector);
 	TargetTeam = EWeaponTargetTeam::Player;
 	HitMode = EWeaponHitMode::Melee;
 	ItemName = FText::FromString(TEXT("Healing Melee Weapon"));
 }
 
-void AHealingMeleeWeapon::Tick(float DeltaSeconds)
+// [HEAL-001] 타이머에서 개발용 판정 범위 표시
+void AHealingMeleeWeapon::DrawSwingRange()
 {
-	Super::Tick(DeltaSeconds);
 #if ENABLE_DRAW_DEBUG
 	if (bShowSwingRange && !IsHidden())
 	{
@@ -34,51 +37,91 @@ void AHealingMeleeWeapon::Tick(float DeltaSeconds)
 				const float Radius = FMath::Max(1.0f, SwingRadius);
 				DrawDebugCapsule(GetWorld(), Start + Forward * Range * 0.5f,
 					Range * 0.5f + Radius, Radius, FQuat::FindBetweenNormals(FVector::UpVector, Forward),
-					FColor::Yellow, false, -1.0f, 0, 1.5f);
-				DrawDebugSphere(GetWorld(), Start, Range, 32, FColor::Blue, false, -1.0f);
+					FColor::Yellow, false, 0.11f, 0, 1.5f);
+				DrawDebugSphere(GetWorld(), Start, Range, 32, FColor::Blue, false, 0.11f);
 				DrawDebugDirectionalArrow(GetWorld(), Start, Start + Forward * Range, 15.0f,
-					FColor::Yellow, false, -1.0f);
+					FColor::Yellow, false, 0.11f);
 			}
 		}
 	}
 #endif
-	if (HasAuthority() && bSwingHitPending && GetWorld()->GetTimeSeconds() >= SwingHitTime)
-	{
-		bSwingHitPending = false;
-		ResolveSwing();
-	}
-	if (HasAuthority() && IsInUse() && GetWorld()->GetTimeSeconds() >= NextSwingTime)
-	{
-		FinishUse();
-	}
 }
 
+// [HEAL-005] 효과 적용 가능한 대상인지 검사
 bool AHealingMeleeWeapon::IsValidTarget(AActor* HitActor) const
 {
 	const AMainCharacter* Player = Cast<AMainCharacter>(HitActor);
 	return IsValid(Player) && Player != GetOwningPawn() && !Player->bIsDead;
 }
 
-void AHealingMeleeWeapon::Fire()
+// [HEAL-012] 디버그 표시 타이머 초기화
+void AHealingMeleeWeapon::BeginPlay()
 {
-	AMainCharacter* Wielder = Cast<AMainCharacter>(GetOwningPawn());
-	if (!HasAuthority() || !IsValid(Wielder) || Wielder->bIsDead ||
-		GetOwner() != Wielder || GetAttachParentActor() != Wielder || IsHidden() ||
-		GetWorld()->GetTimeSeconds() < NextSwingTime)
-	{
-		return;
-	}
-
-	const float HitDelay = FMath::Max(0.0f, SwingHitDelay);
-	NextSwingTime = GetWorld()->GetTimeSeconds() + FMath::Max(HitDelay + 0.01f, SwingCooldown);
-	bIsInUse = true;
-	SwingWielder = Wielder;
-	SwingHitTime = GetWorld()->GetTimeSeconds() + HitDelay;
-	bSwingHitPending = true;
-	CurrentDurability = FMath::Max(0.0f, CurrentDurability - FMath::Max(0.0f, DurabilityCostPerSwing));
-	MulticastSwing(Wielder);
+	Super::BeginPlay();
+#if ENABLE_DRAW_DEBUG
+	if (bShowSwingRange)
+		GetWorldTimerManager().SetTimer(DebugRangeTimer, this, &AHealingMeleeWeapon::DrawSwingRange, 0.1f, true);
+#endif
 }
 
+// [HEAL-013] 제거 시 실행 중인 어빌리티와 타이머 정리
+void AHealingMeleeWeapon::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	GetWorldTimerManager().ClearTimer(DebugRangeTimer);
+	if (ActiveSwingAbility.IsValid())
+	{
+		UGA_SpannerSwing* Ability = ActiveSwingAbility.Get();
+		Ability->CancelAbility(Ability->GetCurrentAbilitySpecHandle(), Ability->GetCurrentActorInfo(), Ability->GetCurrentActivationInfo(), true);
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+// [HEAL-014] 현재 소유자의 장착·행동 가능 상태 검사
+bool AHealingMeleeWeapon::IsSwingOwnerValid() const
+{
+	const AMainCharacter* Wielder = Cast<AMainCharacter>(GetOwningPawn());
+	return HasAuthority() && IsValid(Wielder) && !Wielder->bIsDead && !Wielder->bIsGroggy && Wielder->CanAct()
+		&& GetOwner() == Wielder && GetAttachParentActor() == Wielder && !IsHidden();
+}
+
+// [HEAL-015] 새 공격의 내구도·사용 상태 검사
+bool AHealingMeleeWeapon::CanStartSwing() const
+{
+	return IsSwingOwnerValid() && !IsInUse() && CurrentDurability > 0.0f;
+}
+
+// [HEAL-003] 서버 ASC에 스패너 어빌리티를 일회 부여하고 실행
+void AHealingMeleeWeapon::Fire()
+{
+	if (!CanStartSwing()) return;
+	AMainCharacter* Wielder = Cast<AMainCharacter>(GetOwningPawn());
+	if (UAbilitySystemComponent* ASC = Wielder->GetAbilitySystemComponent())
+	{
+		FGameplayAbilitySpec Spec(UGA_SpannerSwing::StaticClass(), 1, INDEX_NONE, this);
+		ASC->GiveAbilityAndActivateOnce(Spec);
+	}
+}
+
+// [HEAL-016] 어빌리티 시작 시 내구도 차감과 사용 상태 설정
+void AHealingMeleeWeapon::BeginAbilitySwing(UGA_SpannerSwing* Ability)
+{
+	ActiveSwingAbility = Ability;
+	bIsInUse = true;
+	SwingWielder = Cast<AMainCharacter>(GetOwningPawn());
+	CurrentDurability = FMath::Max(0.0f, CurrentDurability - FMath::Max(0.0f, DurabilityCostPerSwing));
+	MulticastSwing(SwingWielder.Get());
+}
+
+// [HEAL-017] 어빌리티 종료 시 사용 상태 복원
+void AHealingMeleeWeapon::EndAbilitySwing(UGA_SpannerSwing* Ability)
+{
+	if (ActiveSwingAbility.Get() != Ability) return;
+	ActiveSwingAbility.Reset();
+	SwingWielder.Reset();
+	FinishUse();
+}
+
+// [HEAL-011] 서버 전방 스윕과 거리·가림 검사 후 한 명에게 치유 시도
 void AHealingMeleeWeapon::ResolveSwing()
 {
 	AMainCharacter* Wielder = SwingWielder.Get();
@@ -126,6 +169,7 @@ void AHealingMeleeWeapon::ResolveSwing()
 	}
 }
 
+// [HEAL-006] 명중 대상의 효과 처리
 void AHealingMeleeWeapon::ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResult& Hit)
 {
 	if (!HasAuthority() || !bResolvingSwing || !IsValidTarget(HitActor) || HealAmount <= 0.0f)
@@ -153,15 +197,13 @@ void AHealingMeleeWeapon::ApplyWeaponHit_Implementation(AActor* HitActor, const 
 	MulticastHealEffect(HitActor, HitActor->GetActorLocation());
 }
 
+// [HEAL-007] 모든 클라이언트에서 추가 휘두르기 연출 호출 (몽타주는 GAS에서 재생)
 void AHealingMeleeWeapon::MulticastSwing_Implementation(AMainCharacter* Wielder)
 {
-	if (IsValid(Wielder) && SwingMontage)
-	{
-		Wielder->PlayAnimMontage(SwingMontage);
-	}
 	OnSwingEffect();
 }
 
+// [HEAL-008] 모든 클라이언트에서 치유 연출 호출
 void AHealingMeleeWeapon::MulticastHealEffect_Implementation(AActor* Target, FVector Location)
 {
 	OnHealEffect(Target, Location);

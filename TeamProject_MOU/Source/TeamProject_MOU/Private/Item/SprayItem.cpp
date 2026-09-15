@@ -1,0 +1,234 @@
+#include "Item/SprayItem.h"
+#include "Components/CarryingComponent.h"
+#include "Components/DecalComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "StaticMeshResources.h"
+#include "Engine/World.h"
+#include "GameFramework/Controller.h"
+#include "Kismet/GameplayStatics.h"
+#include "Net/UnrealNetwork.h"
+#include "Player/MainCharacter.h"
+
+// [SPRAY-000] 기본 분사 주기와 용량 설정.
+ASprayItem::ASprayItem()
+{
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickInterval = 0.03f;
+	MaxUseCount = 60;
+	NozzleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("NozzleMesh"));
+	NozzleMesh->SetupAttachment(MeshComponent);
+	NozzleMesh->SetMobility(EComponentMobility::Movable);
+	NozzleMesh->SetSimulatePhysics(false);
+	NozzleMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	NozzleMesh->SetGenerateOverlapEvents(false);
+}
+
+// [SPRAY-018] 노즐을 포함한 공통 바운딩박스 중심 보정을 사용하지 않는다.
+bool ASprayItem::ShouldCenterOnCarrySocket() const
+{
+	return false;
+}
+
+// [SPRAY-019] 몸통의 잡는 지점을 스케일과 회전을 반영하여 손 소켓에 맞춘다.
+FVector ASprayItem::GetCarryLocationOffset() const
+{
+	if (!MeshComponent || !MeshComponent->GetStaticMesh()) return HandLocationOffset;
+	const UStaticMesh* BodyMesh = MeshComponent->GetStaticMesh();
+	// 에디터의 확장 경계는 원본 MeshDescription 캐시를 참조할 수 있다.
+	// Build Scale이 반영된 실제 렌더 메시의 중심을 우선 사용한다.
+	const FStaticMeshRenderData* RenderData = BodyMesh->GetRenderData();
+	const FVector BodyCenter = RenderData ? FVector(RenderData->Bounds.Origin) : FVector(BodyMesh->GetBounds().Origin);
+	const FVector GripPoint = BodyCenter + GripPointOffset;
+	// 호출 시 손 소켓에 이미 부착되어 있으므로 상대 스케일에 부모 스케일 보정도 포함된다.
+	const FVector ScaledGripPoint = GripPoint * MeshComponent->GetRelativeScale3D();
+	return HandLocationOffset - HandRotationOffset.RotateVector(ScaledGripPoint);
+}
+
+// [SPRAY-020] 손 소켓 기준 스프레이 방향을 반환한다.
+FRotator ASprayItem::GetCarryRotationOffset() const
+{
+	return HandRotationOffset;
+}
+
+// [SPRAY-016] BP에서 배치한 노즐의 기본 위치를 저장한다.
+void ASprayItem::BeginPlay()
+{
+	Super::BeginPlay();
+	if (NozzleMesh) NozzleRestLocation = NozzleMesh->GetRelativeLocation();
+}
+
+// [SPRAY-017] 분사 상태에 따라 노즐을 누르거나 기본 위치로 복귀시킨다.
+void ASprayItem::UpdateNozzle(float DeltaSeconds)
+{
+	if (!NozzleMesh || GetNetMode() == NM_DedicatedServer) return;
+	const float TargetAlpha = bSpraying ? 1.f : 0.f;
+	NozzlePressAlpha = NozzleTravelSeconds > KINDA_SMALL_NUMBER
+		? FMath::FInterpConstantTo(NozzlePressAlpha, TargetAlpha, DeltaSeconds, 1.f / NozzleTravelSeconds)
+		: TargetAlpha;
+	NozzleMesh->SetRelativeLocation(NozzleRestLocation + NozzlePressedOffset * NozzlePressAlpha);
+}
+
+// [SPRAY-001] 서버에서 표면 검사 및 지속 소비.
+void ASprayItem::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	// 분사가 끝난 뒤와 클라이언트에서도 노즐 복귀를 계속 처리한다.
+	UpdateNozzle(DeltaSeconds);
+	if (!HasAuthority() || !bSpraying) return;
+	AMainCharacter* Holder = Cast<AMainCharacter>(GetOwner());
+	UCarryingComponent* Carry = Holder ? Holder->FindComponentByClass<UCarryingComponent>() : nullptr;
+	if (!Holder || !Holder->CanAct() || !Carry || Carry->GetCarriedActor() != this || ConsumeUseCount <= 0)
+	{
+		SetSpraying(false);
+		return;
+	}
+	SpraySurface();
+	ConsumeElapsed += DeltaSeconds;
+	const float Interval = FMath::Max(SecondsPerUse, 0.1f);
+	while (ConsumeElapsed >= Interval && ConsumeUseCount > 0)
+	{
+		ConsumeElapsed -= Interval;
+		--ConsumeUseCount;
+	}
+	if (ConsumeUseCount <= 0)
+	{
+		SetSpraying(false);
+		Carry->ClearCarriedItem();
+		Destroy();
+	}
+}
+
+// [SPRAY-002] 좌클릭으로 분사 시작 요청.
+void ASprayItem::OnUse_Implementation()
+{
+	if (HasAuthority()) SetSpraying(true);
+	else ServerSetSpraying(true);
+}
+
+// [SPRAY-003] 입력 해제 시 서버에 분사 중지를 요청한다.
+void ASprayItem::OnUseReleased_Implementation()
+{
+	if (HasAuthority()) SetSpraying(false);
+	else ServerSetSpraying(false);
+}
+
+// [SPRAY-004] 장착 시 서버 RPC 소유권 복원.
+void ASprayItem::OnEquipped_Implementation(AActor* Equipper)
+{
+	Super::OnEquipped_Implementation(Equipper);
+	if (HasAuthority()) SetOwner(Equipper);
+}
+
+// [SPRAY-005] 수납 시 분사 중지.
+void ASprayItem::OnUnequipped_Implementation(AActor* Equipper)
+{
+	if (HasAuthority()) SetSpraying(false);
+	Super::OnUnequipped_Implementation(Equipper);
+}
+
+// [SPRAY-006] 내려놓기 전에 분사 중지.
+void ASprayItem::Drop_Implementation(FVector Location, AActor* Dropper)
+{
+	if (HasAuthority()) SetSpraying(false);
+	Super::Drop_Implementation(Location, Dropper);
+}
+
+// [SPRAY-007] 던지기 전에 분사 중지.
+void ASprayItem::Throw_Implementation(FVector Velocity, AActor* Thrower)
+{
+	if (HasAuthority()) SetSpraying(false);
+	Super::Throw_Implementation(Velocity, Thrower);
+}
+
+// [SPRAY-008] 분사 상태 복제 등록.
+void ASprayItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ASprayItem, bSpraying);
+}
+
+// [SPRAY-010] 복제된 분사 상태를 이펙트에 전달.
+void ASprayItem::OnRep_Spraying()
+{
+	OnSprayStateChanged(bSpraying);
+}
+
+// [SPRAY-011] 서버에서 분사 시작/중지 요청 검증.
+void ASprayItem::ServerSetSpraying_Implementation(bool bActive)
+{
+	SetSpraying(bActive);
+}
+
+// [SPRAY-012] 서버 분사 상태 전환.
+void ASprayItem::SetSpraying(bool bActive)
+{
+	if (!HasAuthority()) return;
+	if (bActive)
+	{
+		AMainCharacter* Holder = Cast<AMainCharacter>(GetOwner());
+		UCarryingComponent* Carry = Holder ? Holder->FindComponentByClass<UCarryingComponent>() : nullptr;
+		if (!Holder || !Holder->CanAct() || !Carry || Carry->GetCarriedActor() != this || ConsumeUseCount <= 0) return;
+	}
+	if (bSpraying == bActive) return;
+	bSpraying = bActive;
+	OnRep_Spraying();
+	ForceNetUpdate();
+}
+
+// [SPRAY-013] 표면 검사 후 반지름 밖에서만 새 데칼 생성.
+void ASprayItem::SpraySurface()
+{
+	APawn* Holder = Cast<APawn>(GetOwner());
+	if (!Holder || !Holder->GetController() || !DecalMaterial) return;
+	FVector Start;
+	FRotator Rotation;
+	Holder->GetController()->GetPlayerViewPoint(Start, Rotation);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(SpraySurface), true, this);
+	Params.AddIgnoredActor(Holder);
+	FHitResult Hit;
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, Start, Start + Rotation.Vector() * FMath::Max(SprayRange, 1.f), ECC_Visibility, Params)) return;
+	UPrimitiveComponent* Surface = Hit.GetComponent();
+	if (!Surface || !Surface->bReceivesDecals) return;
+	const FTransform Transform = Surface->GetSocketTransform(Hit.BoneName);
+	const float Radius = FMath::Max(DecalRadius, 1.f);
+	if (LastSurface == Surface && LastBone == Hit.BoneName
+		&& FVector::DotProduct(Transform.TransformVectorNoScale(LastLocalNormal).GetSafeNormal(), Hit.ImpactNormal) > 0.95f
+		&& FVector::DistSquared(Transform.TransformPosition(LastLocalPoint), Hit.ImpactPoint) <= FMath::Square(Radius)) return;
+	LastSurface = Surface;
+	LastBone = Hit.BoneName;
+	LastLocalPoint = Transform.InverseTransformPosition(Hit.ImpactPoint);
+	LastLocalNormal = Transform.InverseTransformVectorNoScale(Hit.ImpactNormal);
+	MulticastStamp(Surface, LastLocalPoint, LastLocalNormal, Hit.BoneName);
+}
+
+// [SPRAY-014] 각 클라이언트에서 피격 컴포넌트에 데칼 부착.
+void ASprayItem::MulticastStamp_Implementation(UPrimitiveComponent* Surface, FVector Location, FVector Normal, FName Bone)
+{
+	if (GetNetMode() == NM_DedicatedServer || !IsValid(Surface) || !DecalMaterial) return;
+	Decals.RemoveAll([](const TWeakObjectPtr<UDecalComponent>& Decal) { return !Decal.IsValid(); });
+	while (Decals.Num() >= FMath::Max(MaxDecals, 1))
+	{
+		if (Decals[0].IsValid()) Decals[0]->DestroyComponent();
+		Decals.RemoveAt(0);
+	}
+	const FTransform Transform = Surface->GetSocketTransform(Bone);
+	const FVector WorldNormal = Transform.TransformVectorNoScale(Normal).GetSafeNormal();
+	UDecalComponent* Decal = UGameplayStatics::SpawnDecalAttached(DecalMaterial,
+		FVector(FMath::Max(ProjectionDepth, 0.1f), FMath::Max(DecalRadius, 1.f), FMath::Max(DecalRadius, 1.f)),
+		Surface, Bone, Transform.TransformPosition(Location), (-WorldNormal).Rotation(),
+		EAttachLocation::KeepWorldPosition, FMath::Max(DecalLifeSeconds, 1.f));
+	if (Decal)
+	{
+		Decal->SetSortOrder(NextSortOrder++);
+		Decals.Add(Decal);
+	}
+}
+
+// [SPRAY-015] 소진 및 레벨 종료 시 분사 이펙트 정리.
+void ASprayItem::EndPlay(const EEndPlayReason::Type Reason)
+{
+	OnSprayStateChanged(false);
+	Super::EndPlay(Reason);
+}

@@ -48,12 +48,17 @@ class TEAMPROJECT_MOU_API AWeaponItemBase : public AItemBase
 	GENERATED_BODY()
 
 public:
+	// [WEAPON-019] 초기 컴포넌트와 기본값 설정
 	AWeaponItemBase();
 
 	// 모든 무기는 오른손 소켓을 사용하고 바운딩박스 중심 보정을 생략한다.
+	// [WEAPON-020] 소켓 장착 시 중심 보정 적용 여부 반환
 	virtual bool ShouldCenterOnCarrySocket() const override { return false; }
+	// [WEAPON-021] 무기 장착 소켓 이름 반환
 	virtual FName GetCarrySocketOverride() const override { return HandSocketName; }
+	// [WEAPON-022] 소켓 기준 장착 위치 보정값 반환
 	virtual FVector GetCarryLocationOffset() const override { return HandLocationOffset; }
+	// [WEAPON-023] 기본 자세와 무기 로컬 추가 회전을 합성하여 반환
 	virtual FRotator GetCarryRotationOffset() const override
 	{
 		// 기본 자세를 기준으로 무기 로컬 축의 추가 회전을 합성한다.
@@ -78,7 +83,9 @@ protected:
 		meta = (ToolTip = "Additional rotation around the weapon local axes after setting the base grip. Start at zero and adjust one axis at a time."))
 	FRotator HandLocalRotationOffset = FRotator::ZeroRotator;
 
+	// [WEAPON-024] 플레이 시작 시 상태와 이벤트 바인딩 초기화
 	virtual void BeginPlay() override;
+	// [WEAPON-025] 네트워크 복제 대상 속성 등록
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	// [WEAPON] 내구도는 ItemBase의 CurrentDurability/MaxDurability를 사용한다.
@@ -86,50 +93,62 @@ protected:
 	//   던질 때마다 서버에서 1씩 차감하고, 0 이하가 되면 더 발사할 수 없다.
 
 #pragma region [WEAPON] 소유권 (Server RPC 전제)
-	// [WEAPON-010] 집을 때 소유권 설정 → 클라가 ServerFire RPC 보낼 수 있게 함
+	// WEAPON-010 집을 때 소유권 설정 → 클라가 ServerFire RPC 보낼 수 있게 함
 	// (Owner 없으면 "No owning connection"으로 ServerRPC가 버려짐)
+	// [WEAPON-010] 집을 때 소유권 설정 → 클라가 ServerFire RPC 보낼 수 있게 함
 	virtual void PickUp_Implementation(AActor* Picker) override;
 
+	// WEAPON-011 놓을 때 소유권 해제
 	// [WEAPON-011] 놓을 때 소유권 해제
 	virtual void Drop_Implementation(FVector DropLocation, AActor* Dropper = nullptr) override;
 
+	// WEAPON-012 던질 때 소유권 해제
 	// [WEAPON-012] 던질 때 소유권 해제
 	virtual void Throw_Implementation(FVector ThrowVelocity, AActor* Thrower = nullptr) override;
 #pragma endregion
 
 #pragma region [WEAPON] 사용/발사 흐름 (공통)
+	// WEAPON-000 좌클릭: 잔여 횟수 체크 → (서버)차감 → Fire() 호출
 	// [WEAPON-000] 좌클릭: 잔여 횟수 체크 → (서버)차감 → Fire() 호출
 	virtual void OnUse_Implementation() override;
 
-	// [WEAPON-007] 실제 발사 로직. 자식이 override (테이저=트레이스, 칼=콜라이더 등)
+	// WEAPON-007 실제 발사 로직. 자식이 override (테이저=트레이스, 칼=콜라이더 등)
+	// [WEAPON-007] 서버에서 무기 사용과 발사 처리
 	virtual void Fire();
+	// [WEAPON-026] 이동 구간에서 캐릭터를 제외한 벽 차단 여부 검사
 	bool TraceWeaponObstacle(const FVector& Start, const FVector& End, float Radius, FHitResult& Hit) const;
 
-	// [WEAPON-013] 이 발사에서 내구도(CurrentDurability)를 차감할지 여부.
+	// WEAPON-013 이 발사에서 내구도(CurrentDurability)를 차감할지 여부.
 	// 기본 true(소모). 발사 시점에 소모하지 않는 무기(예: 적중 시에만 닳는 부메랑)는 false로 override한다.
+	// [WEAPON-013] 발사 시 공통 내구도 차감 여부 반환
 	virtual bool ShouldConsumeUseOnFire() const { return true; }
 
-	// [WEAPON-014] 발사 1회당 깎일 내구도 양. 무기마다 다르게(테이저=25 등) override.
+	// WEAPON-014 발사 1회당 깎일 내구도 양. 무기마다 다르게(테이저=25 등) override.
 	// ShouldConsumeUseOnFire()가 true일 때만 TryFireOnServer에서 이 값만큼 차감한다.
+	// [WEAPON-014] 발사 1회당 깎일 내구도 양. 무기마다 다르게(테이저=25 등) override.
 	virtual float GetDurabilityCostPerUse() const { return 1.0f; }
 
-	// [WEAPON-015] 이 무기가 발사 시 "사용 중" 상태를 유지하는지.
+	// WEAPON-015 이 무기가 발사 시 "사용 중" 상태를 유지하는지.
 	//   기본 false(즉발 무기는 사용 중이 없음). 그래버처럼 동작이 이어지는 무기는 true로 override.
 	//   true면 OnUse에서 bIsInUse=true가 되고, 자식이 FinishUse()로 끝을 알린다.
+	// [WEAPON-015] 발사 후 사용 중 상태 유지 여부 반환
 	virtual bool bUsesInUseState() const { return false; }
 
 public:
-	// [WEAPON-016] 지금 이 무기를 사용 중인지 (사용 중엔 슬롯 변경 차단용). 복제됨.
+	// WEAPON-016 지금 이 무기를 사용 중인지 (사용 중엔 슬롯 변경 차단용). 복제됨.
 	//   MainCharacter가 슬롯 변경 전에 조회하므로 public.
 	UFUNCTION(BlueprintPure, Category = "Weapon")
+	// [WEAPON-016] 지금 이 무기를 사용 중인지 (사용 중엔 슬롯 변경 차단용). 복제됨.
 	bool IsInUse() const { return bIsInUse; }
 
-	// [WEAPON-018] 이 무기를 현재 든 Pawn을 반환.
+	// WEAPON-018 이 무기를 현재 든 Pawn을 반환.
 	//   LastOwner가 유효하면 그걸, 아니면(레벨 이동 등으로 유실 시) attach된 부모 액터에서 찾는다.
 	//   발사 시 조준 소스(컨트롤러 시점)를 안정적으로 얻기 위함.
+	// [WEAPON-018] 이 무기를 현재 든 Pawn을 반환.
 	APawn* GetOwningPawn() const;
 
 protected:
+	// WEAPON-017 사용 완료 알림 (서버). 자식이 동작이 끝나는 시점에 호출 → bIsInUse=false.
 	// [WEAPON-017] 사용 완료 알림 (서버). 자식이 동작이 끝나는 시점에 호출 → bIsInUse=false.
 	void FinishUse();
 
@@ -138,10 +157,12 @@ protected:
 	bool bIsInUse = false;
 
 private:
-	// [WEAPON-008] 클라이언트에서 눌렀을 때 서버로 발사 위임 (서버에서 차감+발사)
+	// WEAPON-008 클라이언트에서 눌렀을 때 서버로 발사 위임 (서버에서 차감+발사)
 	UFUNCTION(Server, Reliable)
+	// [WEAPON-008] 클라이언트에서 눌렀을 때 서버로 발사 위임 (서버에서 차감+발사)
 	void ServerFire();
 
+	// WEAPON-009 서버에서 잔여 체크 → 차감 → Fire (OnUse/ServerFire 공통 진입점)
 	// [WEAPON-009] 서버에서 잔여 체크 → 차감 → Fire (OnUse/ServerFire 공통 진입점)
 	void TryFireOnServer();
 
@@ -163,34 +184,40 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon|Melee")
 	TObjectPtr<UBoxComponent> MeleeCollider;
 
-	// [WEAPON-001] 근접 콜라이더 오버랩 on/off (휘두르기 시작/끝에서 호출)
+	// WEAPON-001 근접 콜라이더 오버랩 on/off (휘두르기 시작/끝에서 호출)
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Melee")
+	// [WEAPON-001] 근접 콜라이더 오버랩 on/off (휘두르기 시작/끝에서 호출)
 	void EnableMeleeCollision(bool bEnable);
 
-	// [WEAPON-002] 근접 콜라이더 오버랩 콜백 - 진영 확인 후 ApplyWeaponHit
+	// WEAPON-002 근접 콜라이더 오버랩 콜백 - 진영 확인 후 ApplyWeaponHit
 	UFUNCTION()
+	// [WEAPON-002] 근접 콜라이더 오버랩 콜백 - 진영 확인 후 ApplyWeaponHit
 	void OnMeleeOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
 		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 #pragma endregion
 
 #pragma region [WEAPON] 원거리 (즉발 트레이스)
-	// [WEAPON-003] 즉발 트레이스 발사. TargetTeam 채널로 트레이스해 피아식별. 맞으면 ApplyWeaponHit.
+	// WEAPON-003 즉발 트레이스 발사. TargetTeam 채널로 트레이스해 피아식별. 맞으면 ApplyWeaponHit.
 	// 반환: 명중했으면 true, HitResult 채워짐
 	UFUNCTION(BlueprintCallable, Category = "Weapon|Ranged")
+	// [WEAPON-003] 즉발 트레이스 발사. TargetTeam 채널로 트레이스해 피아식별. 맞으면 ApplyWeaponHit.
 	bool FireHitscan(const FVector& Start, const FVector& End, FHitResult& OutHit, bool bApplyHit = true);
 #pragma endregion
 
 #pragma region [WEAPON] 공통 히트 처리
-	// [WEAPON-004] 실제 무기 효과 (기절/데미지 등). 자식이 override.
+	// WEAPON-004 실제 무기 효과 (기절/데미지 등). 자식이 override.
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Weapon")
+	// [WEAPON-004] 명중 대상의 효과 처리
 	void ApplyWeaponHit(AActor* HitActor, const FHitResult& Hit);
+	// [WEAPON-004] 명중 대상의 효과 처리
 	virtual void ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResult& Hit);
 #pragma endregion
 
 protected:
-	// [WEAPON-005] 대상이 이 무기의 유효 타겟인지 판정 (피아식별 코드 판정)
+	// WEAPON-005 대상이 이 무기의 유효 타겟인지 판정 (피아식별 코드 판정)
 	// TargetTeam에 따라: AllButSelf=본인 뺀 모든 캐릭터, Enemy=NPC만, Player=다른 플레이어만
 	// 자식이 필요하면 override 가능
+	// [WEAPON-005] 효과 적용 가능한 대상인지 검사
 	virtual bool IsValidTarget(AActor* HitActor) const;
 
 // ---------------------------------------------------------------------------
@@ -207,7 +234,7 @@ protected:
 //	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Weapon|Projectile")
 //	float ProjectileSpeed = 3000.0f;
 //
-//	// [WEAPON-006] 투사체 스폰 후 발사 (서버 권한에서 호출 권장)
+//	// WEAPON-006 투사체 스폰 후 발사 (서버 권한에서 호출 권장)
 //	UFUNCTION(BlueprintCallable, Category = "Weapon|Projectile")
 //	AActor* FireProjectile(const FVector& SpawnLocation, const FVector& Direction);
 };

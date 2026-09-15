@@ -40,11 +40,14 @@ class TEAMPROJECT_MOU_API ABoomerang : public AWeaponItemBase
 	GENERATED_BODY()
 
 public:
+	// [BOOMERANG-007] 초기 컴포넌트와 기본값 설정
 	ABoomerang();
 
+	// [BOOMERANG-008] 매 프레임 무기 상태와 동작 갱신
 	virtual void Tick(float DeltaTime) override;
 
 protected:
+	// [BOOMERANG-009] 네트워크 복제 대상 속성 등록
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 #pragma region [BOOMERANG] 설정값
@@ -113,55 +116,68 @@ protected:
 
 	// 복제된 상태 도착 시 훅 (필요 시 클라 연출용). 현재 비어있음.
 	UFUNCTION()
+	// [BOOMERANG-010] 복제된 비행 상태 반영
 	void OnRep_FlightState();
 #pragma endregion
 
 #pragma region [BOOMERANG] 사용/발사/타격
-	// [BOOMERANG-000] 발사 override: 비행 시작 (부모 OnUse→Fire 흐름 재사용)
+	// BOOMERANG-000 발사 override: 비행 시작 (부모 OnUse→Fire 흐름 재사용)
 	//   이미 비행 중이면 무시한다.
+	// [BOOMERANG-000] 서버에서 무기 사용과 발사 처리
 	virtual void Fire() override;
 
 	// 부메랑은 "던질 때"가 아니라 "적중했을 때" 내구도가 깎인다.
-	// 따라서 부모의 발사 시점 차감은 끄고(false), ApplyWeaponHit에서 직접 차감한다. [WEAPON-013]
+	// 따라서 부모의 발사 시점 차감은 끄고(false), ApplyWeaponHit에서 직접 차감한다. WEAPON-013
+	// [BOOMERANG-011] 발사 시 공통 내구도 차감 여부 반환
 	virtual bool ShouldConsumeUseOnFire() const override { return false; }
 
-	// 부메랑은 비행 중(던져서 손에 돌아올 때까지) "사용 중"이라 슬롯 변경을 막는다. [WEAPON-015]
+	// 부메랑은 비행 중(던져서 손에 돌아올 때까지) "사용 중"이라 슬롯 변경을 막는다. WEAPON-015
+	// [BOOMERANG-012] 발사 후 사용 중 상태 유지 여부 반환
 	virtual bool bUsesInUseState() const override { return true; }
 
 	// 비행 중(Idle이 아님)에는 손에서 내려놓기/던지기를 막는다. (손에 돌아온 뒤에만 놓을 수 있음)
+	// [BOOMERANG-013] 사용 상태에 따른 내려놓기 허용 여부 반환
 	virtual bool CanBeDropped() const override;
 
-	// [BOOMERANG-001] 무기 공통 히트 override: 맞은 캐릭터에 상태이상 부여 + 내구도 차감 + 즉시 되돌아오기 전환
+	// BOOMERANG-001 무기 공통 히트 override: 맞은 캐릭터에 상태이상 부여 + 내구도 차감 + 즉시 되돌아오기 전환
+	// [BOOMERANG-001] 명중 대상의 효과 처리
 	virtual void ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResult& Hit) override;
 #pragma endregion
 
 #pragma region [BOOMERANG] 연출 훅 (Blueprint VFX/사운드)
 	// 던져질 때 (모든 클라)
 	UFUNCTION(BlueprintImplementableEvent, Category = "Boomerang|FX")
+	// [BOOMERANG-014] BP에서 구현하는 던짐 연출 이벤트
 	void OnThrown();
 
 	// 손에 잡힐 때 (모든 클라)
 	UFUNCTION(BlueprintImplementableEvent, Category = "Boomerang|FX")
+	// [BOOMERANG-015] BP에서 구현하는 회수 연출 이벤트
 	void OnCaught();
 #pragma endregion
 
 private:
 #pragma region [BOOMERANG] 내부 구현
+	// BOOMERANG-002 비행 시작 (서버). 손에서 분리 + 물리 끄고 운동학 이동 준비 + 콜라이더 on.
 	// [BOOMERANG-002] 비행 시작 (서버). 손에서 분리 + 물리 끄고 운동학 이동 준비 + 콜라이더 on.
 	void StartFlight();
 
+	// BOOMERANG-003 되돌아오기 전환 (서버). Outbound일 때만 동작.
 	// [BOOMERANG-003] 되돌아오기 전환 (서버). Outbound일 때만 동작.
 	void BeginReturn();
 
+	// BOOMERANG-004 잡힘 처리 (서버). 손 소켓 재부착 + Idle 복귀.
 	// [BOOMERANG-004] 잡힘 처리 (서버). 손 소켓 재부착 + Idle 복귀.
 	void CatchByOwner();
 
-	// [BOOMERANG-005] 잡힘 연출/재부착 (모든 클라). 소켓 부착 + 장착 상태(물리 off, QueryOnly) 복원.
+	// BOOMERANG-005 잡힘 연출/재부착 (모든 클라). 소켓 부착 + 장착 상태(물리 off, QueryOnly) 복원.
 	UFUNCTION(NetMulticast, Reliable)
+	// [BOOMERANG-005] 잡힘 연출/재부착 (모든 클라). 소켓 부착 + 장착 상태(물리 off, QueryOnly) 복원.
 	void MulticastCatch();
 
-	// [BOOMERANG-006] 던짐 연출 (모든 클라). OnThrown BP 훅 재생.
+	// BOOMERANG-006 던짐 연출 (모든 클라). OnThrown BP 훅 재생.
 	UFUNCTION(NetMulticast, Reliable)
+	// [BOOMERANG-006] 던짐 연출 (모든 클라). OnThrown BP 훅 재생.
 	void MulticastThrown();
 
 	// 비행 방향(서버 계산, 수평면 기준). 나가는 동안 고정.

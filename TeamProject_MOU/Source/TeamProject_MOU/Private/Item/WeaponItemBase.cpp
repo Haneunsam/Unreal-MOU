@@ -1,4 +1,4 @@
-﻿#include "Item/WeaponItemBase.h"
+#include "Item/WeaponItemBase.h"
 #include "Base/CharacterBase.h"
 #include "Player/MainCharacter.h"
 #include "Item/ShopBase.h"
@@ -8,6 +8,7 @@
 #include "EngineUtils.h"
 #include "Engine/World.h"
 
+// [WEAPON-026] 이동 구간에서 캐릭터를 제외한 벽 차단 여부 검사
 bool AWeaponItemBase::TraceWeaponObstacle(const FVector& Start, const FVector& End, float Radius, FHitResult& Hit) const
 {
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(WeaponObstacle), false, this);
@@ -17,6 +18,7 @@ bool AWeaponItemBase::TraceWeaponObstacle(const FVector& Start, const FVector& E
 		ECC_Visibility, FCollisionShape::MakeSphere(FMath::Max(Radius, 0.1f)), Params);
 }
 
+// [WEAPON-019] 초기 컴포넌트와 기본값 설정
 AWeaponItemBase::AWeaponItemBase()
 {
 	// 근접 타격 콜라이더 (평소 꺼둠, BP에서 크기/위치 조정)
@@ -28,6 +30,7 @@ AWeaponItemBase::AWeaponItemBase()
 	MeleeCollider->SetGenerateOverlapEvents(false);
 }
 
+// [WEAPON-024] 플레이 시작 시 상태와 이벤트 바인딩 초기화
 void AWeaponItemBase::BeginPlay()
 {
 	Super::BeginPlay();
@@ -42,6 +45,7 @@ void AWeaponItemBase::BeginPlay()
 	}
 }
 
+// [WEAPON-025] 네트워크 복제 대상 속성 등록
 void AWeaponItemBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -49,7 +53,8 @@ void AWeaponItemBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AWeaponItemBase, bIsInUse);
 }
 
-// [WEAPON-010] 집을 때 소유권 설정 (클라 → 서버 RPC 가능하게)
+// WEAPON-010 집을 때 소유권 설정 (클라 → 서버 RPC 가능하게)
+// [WEAPON-010] 집을 때 소유권 설정 → 클라가 ServerFire RPC 보낼 수 있게 함
 void AWeaponItemBase::PickUp_Implementation(AActor* Picker)
 {
 	Super::PickUp_Implementation(Picker);
@@ -61,6 +66,7 @@ void AWeaponItemBase::PickUp_Implementation(AActor* Picker)
 	}
 }
 
+// WEAPON-011 놓을 때 소유권 해제
 // [WEAPON-011] 놓을 때 소유권 해제
 void AWeaponItemBase::Drop_Implementation(FVector DropLocation, AActor* Dropper)
 {
@@ -72,6 +78,7 @@ void AWeaponItemBase::Drop_Implementation(FVector DropLocation, AActor* Dropper)
 	Super::Drop_Implementation(DropLocation, Dropper);
 }
 
+// WEAPON-012 던질 때 소유권 해제
 // [WEAPON-012] 던질 때 소유권 해제
 void AWeaponItemBase::Throw_Implementation(FVector ThrowVelocity, AActor* Thrower)
 {
@@ -83,7 +90,8 @@ void AWeaponItemBase::Throw_Implementation(FVector ThrowVelocity, AActor* Throwe
 	Super::Throw_Implementation(ThrowVelocity, Thrower);
 }
 
-// [WEAPON-000] 좌클릭: 발사는 항상 서버에서 처리 (차감/판정/복제 신뢰성)
+// WEAPON-000 좌클릭: 발사는 항상 서버에서 처리 (차감/판정/복제 신뢰성)
+// [WEAPON-000] 좌클릭: 잔여 횟수 체크 → (서버)차감 → Fire() 호출
 void AWeaponItemBase::OnUse_Implementation()
 {
 	// 차감·발사는 서버에서만. 클라에서 불리면 ServerFire로 넘겨 서버가 처리한다.
@@ -98,7 +106,8 @@ void AWeaponItemBase::OnUse_Implementation()
 	}
 }
 
-// [WEAPON-009] 서버 공통 진입점: 잔여 체크 → 차감(복제) → Fire
+// WEAPON-009 서버 공통 진입점: 잔여 체크 → 차감(복제) → Fire
+// [WEAPON-009] 서버에서 잔여 체크 → 차감 → Fire (OnUse/ServerFire 공통 진입점)
 void AWeaponItemBase::TryFireOnServer()
 {
 	// 서버에서만 실행되어야 함
@@ -112,14 +121,14 @@ void AWeaponItemBase::TryFireOnServer()
 		return;
 	}
 
-	// 소모형 무기만 차감(복제되어 모든 클라 화면에 동기화). false로 override한 무기는 차감 안 함. [WEAPON-013]
-	// 발사 1회당 차감량은 무기별로 다르다(GetDurabilityCostPerUse). [WEAPON-014]
+	// 소모형 무기만 차감(복제되어 모든 클라 화면에 동기화). false로 override한 무기는 차감 안 함. WEAPON-013
+	// 발사 1회당 차감량은 무기별로 다르다(GetDurabilityCostPerUse). WEAPON-014
 	if (ShouldConsumeUseOnFire())
 	{
 		CurrentDurability -= GetDurabilityCostPerUse();
 	}
 
-	// 동작이 이어지는 무기(그래버 등)는 사용 중 상태 진입 → 슬롯 변경 차단. [WEAPON-015]
+	// 동작이 이어지는 무기(그래버 등)는 사용 중 상태 진입 → 슬롯 변경 차단. WEAPON-015
 	if (bUsesInUseState())
 	{
 		bIsInUse = true;
@@ -128,7 +137,8 @@ void AWeaponItemBase::TryFireOnServer()
 	Fire();
 }
 
-// [WEAPON-017] 사용 완료 (서버): 자식이 동작 끝나는 시점에 호출 → 슬롯 변경 다시 허용
+// WEAPON-017 사용 완료 (서버): 자식이 동작 끝나는 시점에 호출 → 슬롯 변경 다시 허용
+// [WEAPON-017] 사용 완료 알림 (서버). 자식이 동작이 끝나는 시점에 호출 → bIsInUse=false.
 void AWeaponItemBase::FinishUse()
 {
 	if (HasAuthority())
@@ -137,7 +147,8 @@ void AWeaponItemBase::FinishUse()
 	}
 }
 
-// [WEAPON-018] 이 무기를 현재 든 Pawn을 반환 (LastOwner 유실 대비 attach 부모 폴백)
+// WEAPON-018 이 무기를 현재 든 Pawn을 반환 (LastOwner 유실 대비 attach 부모 폴백)
+// [WEAPON-018] 이 무기를 현재 든 Pawn을 반환.
 APawn* AWeaponItemBase::GetOwningPawn() const
 {
 	// 1순위: LastOwner가 살아있고 Pawn이면 그대로 사용
@@ -161,19 +172,22 @@ APawn* AWeaponItemBase::GetOwningPawn() const
 	return nullptr;
 }
 
-// [WEAPON-007] 실제 발사 로직 (기본 빈 구현, 자식이 override)
+// WEAPON-007 실제 발사 로직 (기본 빈 구현, 자식이 override)
+// [WEAPON-007] 서버에서 무기 사용과 발사 처리
 void AWeaponItemBase::Fire()
 {
 	// 자식 클래스에서 구현 (테이저=트레이스, 칼=콜라이더 등)
 }
 
-// [WEAPON-008] 클라이언트 → 서버 발사 위임 (서버에서 차감+발사)
+// WEAPON-008 클라이언트 → 서버 발사 위임 (서버에서 차감+발사)
+// [WEAPON-008] 클라이언트에서 눌렀을 때 서버로 발사 위임 (서버에서 차감+발사)
 void AWeaponItemBase::ServerFire_Implementation()
 {
 	TryFireOnServer();
 }
 
-// [WEAPON-005] 대상이 유효 타겟인지 코드로 판정 (피아식별)
+// WEAPON-005 대상이 유효 타겟인지 코드로 판정 (피아식별)
+// [WEAPON-005] 효과 적용 가능한 대상인지 검사
 bool AWeaponItemBase::IsValidTarget(AActor* HitActor) const
 {
 	// 캐릭터가 아니면 대상 아님 (벽/바닥/아이템 등)
@@ -206,7 +220,8 @@ bool AWeaponItemBase::IsValidTarget(AActor* HitActor) const
 	}
 }
 
-// [WEAPON-001] 근접 콜라이더 오버랩 on/off
+// WEAPON-001 근접 콜라이더 오버랩 on/off
+// [WEAPON-001] 근접 콜라이더 오버랩 on/off (휘두르기 시작/끝에서 호출)
 void AWeaponItemBase::EnableMeleeCollision(bool bEnable)
 {
 	if (!MeleeCollider)
@@ -226,7 +241,8 @@ void AWeaponItemBase::EnableMeleeCollision(bool bEnable)
 	}
 }
 
-// [WEAPON-002] 근접 콜라이더 오버랩 콜백
+// WEAPON-002 근접 콜라이더 오버랩 콜백
+// [WEAPON-002] 근접 콜라이더 오버랩 콜백 - 진영 확인 후 ApplyWeaponHit
 void AWeaponItemBase::OnMeleeOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
@@ -245,9 +261,10 @@ void AWeaponItemBase::OnMeleeOverlap(UPrimitiveComponent* OverlappedComp, AActor
 	ApplyWeaponHit(OtherActor, SweepResult);
 }
 
-// [WEAPON-003] 즉발 트레이스 발사 (피아식별은 IsValidTarget 코드 판정)
+// WEAPON-003 즉발 트레이스 발사 (피아식별은 IsValidTarget 코드 판정)
 // Pawn 채널로 멀티 트레이스 → 벽/바닥(WorldStatic)이 앞을 막으면 거기서 멈추고,
 // 캐릭터들 중 첫 유효 타겟(본인 제외 등)에게만 효과.
+// [WEAPON-003] 즉발 트레이스 발사. TargetTeam 채널로 트레이스해 피아식별. 맞으면 ApplyWeaponHit.
 bool AWeaponItemBase::FireHitscan(const FVector& Start, const FVector& End, FHitResult& OutHit, bool bApplyHit)
 {
 	FCollisionQueryParams Params;
@@ -308,7 +325,8 @@ bool AWeaponItemBase::FireHitscan(const FVector& Start, const FVector& End, FHit
 	return false;
 }
 
-// [WEAPON-004] 공통 히트 처리 (기본은 빈 구현, 자식이 override)
+// WEAPON-004 공통 히트 처리 (기본은 빈 구현, 자식이 override)
+// [WEAPON-004] 명중 대상의 효과 처리
 void AWeaponItemBase::ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResult& Hit)
 {
 	// 자식 클래스에서 구현 (테이저건=기절, 칼=데미지 등)

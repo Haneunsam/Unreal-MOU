@@ -149,6 +149,12 @@ public:
 	void OnUse();
 	virtual void OnUse_Implementation();
 
+	// [ITEM-100] 사용 입력 해제를 자식 아이템에 전달한다.
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Item|Action")
+	void OnUseReleased();
+	// [ITEM-100] 사용 입력 해제의 기본 동작은 비워 둔다.
+	virtual void OnUseReleased_Implementation();
+
 	// 손에 장착될 때 (인벤토리에서 활성화될 때)
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Item|Action")
 	void OnEquipped(AActor* Equipper);

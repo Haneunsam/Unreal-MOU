@@ -1,4 +1,4 @@
-﻿#include "Item/GrabGun.h"
+#include "Item/GrabGun.h"
 #include "Base/CharacterBase.h"
 #include "Components/GrabFollowComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -57,6 +57,7 @@ static int32 PartNameToMeshIndex(const FString& PartName)
 	return Found ? *Found : INDEX_NONE;
 }
 
+// [GRAB-017] 초기 컴포넌트와 기본값 설정
 AGrabGun::AGrabGun()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -87,6 +88,7 @@ AGrabGun::AGrabGun()
 }
 
 // BP에서 Linkage 설정값(CellCount/각도 등)을 바꿀 때마다 셀을 재생성하고 포즈를 다시 그린다.
+// [GRAB-019] 구성 변경에 맞춰 링크 부품과 자세 갱신
 void AGrabGun::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
@@ -94,6 +96,7 @@ void AGrabGun::OnConstruction(const FTransform& Transform)
 	UpdateLinkagePose(CurrentExtendAlpha); // 접힘 포즈 적용
 }
 
+// [GRAB-018] 플레이 시작 시 상태와 이벤트 바인딩 초기화
 void AGrabGun::BeginPlay()
 {
 	Super::BeginPlay();
@@ -120,6 +123,7 @@ void AGrabGun::BeginPlay()
 	}
 }
 
+// [GRAB-021] 네트워크 복제 대상 속성 등록
 void AGrabGun::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -135,6 +139,7 @@ void AGrabGun::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 // [GRAB] 부품 메시 로드 / 축 헬퍼
 // =============================================================================
 
+// [GRAB-014] 부품 메시 하나 로드 헬퍼 (extending-arm-toy-gun 폴더 기준)
 UStaticMesh* AGrabGun::LoadPartMesh(const FString& PartName) const
 {
 	// 부품 이름 → mesh 인덱스 → 실제 에셋명(extending-arm-toy-gun2222_mesh_<idx>)
@@ -155,12 +160,14 @@ UStaticMesh* AGrabGun::LoadPartMesh(const FString& PartName) const
 	return Mesh;
 }
 
+// [GRAB-033] 부품의 로컬 위치 벡터 구성
 FVector AGrabGun::MakeLocal(float X, float Y, float Z) const
 {
 	// GLB matrix 실측값을 그대로 UE 로컬로 사용한다. (Interchange가 축 변환 처리)
 	return FVector(X, Y, Z);
 }
 
+// [GRAB-034] 부품의 로컬 Yaw 회전 구성
 FRotator AGrabGun::MakeYawRot(float DegZ) const
 {
 	// GLB 노드 회전은 Z축(Yaw) 기준. 가위 링크가 XY 평면에서 접힌다.
@@ -168,9 +175,10 @@ FRotator AGrabGun::MakeYawRot(float DegZ) const
 }
 
 // =============================================================================
-// [GRAB-012] 팬터그래프 부품 계층 스폰
+// GRAB-012 팬터그래프 부품 계층 스폰
 // =============================================================================
 
+// [GRAB-012] 생성자에서 고정 부품(집게·트리거·콜라이더)을 스폰
 void AGrabGun::BuildLinkageComponents()
 {
 	// 헬퍼: SceneComponent(빈 피벗) 생성
@@ -251,9 +259,10 @@ void AGrabGun::BuildLinkageComponents()
 }
 
 // =============================================================================
-// [GRAB-012B] 셀(cell/bar/pin) 런타임 재생성 - CellCount만큼
+// GRAB-012B 셀(cell/bar/pin) 런타임 재생성 - CellCount만큼
 // =============================================================================
 
+// [GRAB-032] RebuildCells 처리
 void AGrabGun::RebuildCells()
 {
 	if (!LinkageRoot)
@@ -345,9 +354,10 @@ void AGrabGun::RebuildCells()
 }
 
 // =============================================================================
-// [GRAB-013] 링크 포즈 갱신 (삼각함수)
+// GRAB-013 링크 포즈 갱신 (삼각함수)
 // =============================================================================
 
+// [GRAB-013] CurrentExtendAlpha에 맞춰 링크/집게/트리거 트랜스폼 갱신 (Tick에서 호출)
 void AGrabGun::UpdateLinkagePose(float Alpha)
 {
 	Alpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
@@ -453,6 +463,7 @@ void AGrabGun::UpdateLinkagePose(float Alpha)
 	}
 }
 
+// [GRAB-026] 서버에서 발사 순간 조준 목표 계산과 복제
 void AGrabGun::CaptureShotAim()
 {
 	APawn* Wielder = GetOwningPawn();
@@ -480,6 +491,7 @@ void AGrabGun::CaptureShotAim()
 	ForceNetUpdate();
 }
 
+// [GRAB-025] 집게를 조준 목표로 회전하고 접힘 완료 시 자세 복원
 void AGrabGun::UpdateShotAim()
 {
 	if (!LinkageRoot || bBrokenApart) return;
@@ -501,6 +513,7 @@ void AGrabGun::UpdateShotAim()
 	}
 }
 
+// [GRAB-020] 매 프레임 무기 상태와 동작 갱신
 void AGrabGun::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -561,9 +574,10 @@ void AGrabGun::Tick(float DeltaTime)
 }
 
 // =============================================================================
-// [GRAB-001] 발사: 재발사 토글 (잡고 있으면 놓기, 아니면 잡기)
+// GRAB-001 발사: 재발사 토글 (잡고 있으면 놓기, 아니면 잡기)
 // =============================================================================
 
+// [GRAB-001] 서버에서 무기 사용과 발사 처리
 void AGrabGun::Fire()
 {
 	// Fire는 서버 권한에서 호출됨 (WeaponItemBase::TryFireOnServer 경로)
@@ -589,7 +603,8 @@ void AGrabGun::Fire()
 	MulticastPlayFireEffect(FxStart, FxEnd, false);
 }
 
-// [GRAB-002B] 집게 콜라이더 오버랩: 펴짐 중(bGrabArmed) player/enemy 닿으면 잡기
+// GRAB-002B 집게 콜라이더 오버랩: 펴짐 중(bGrabArmed) player/enemy 닿으면 잡기
+// [GRAB-029] OnJawOverlap 처리
 void AGrabGun::OnJawOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
@@ -615,13 +630,15 @@ void AGrabGun::OnJawOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherAc
 	}
 }
 
-// [GRAB-003] 무기 공통 히트 처리 override: (콜라이더 방식이라 트레이스 히트는 안 쓴다. 호환용으로 남김)
+// GRAB-003 무기 공통 히트 처리 override: (콜라이더 방식이라 트레이스 히트는 안 쓴다. 호환용으로 남김)
+// [GRAB-003] 명중 대상의 효과 처리
 void AGrabGun::ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResult& Hit)
 {
 	// 집게 콜라이더 오버랩(OnJawOverlap)에서 처리하므로 여기서는 아무것도 하지 않는다.
 }
 
 // 집게 콜라이더 on/off
+// [GRAB-030] 집게 접촉 콜라이더 활성화 또는 비활성화
 void AGrabGun::SetJawColliderActive(bool bActive)
 {
 	if (!JawGrabCollider)
@@ -640,7 +657,8 @@ void AGrabGun::SetJawColliderActive(bool bActive)
 	}
 }
 
-// [GRAB-010] 대상을 집는다 (서버): 집게 컴포넌트에 직접 attach + 이동정지
+// GRAB-010 대상을 집는다 (서버): 집게 컴포넌트에 직접 attach + 이동정지
+// [GRAB-010] 대상을 집는다 (서버). 집게에 attach + 이동정지 + 당기기 시작. 성공 시 내구도 1 소모.
 void AGrabGun::GrabTarget(ACharacterBase* Target)
 {
 	if (!HasAuthority() || !Target)
@@ -692,13 +710,15 @@ void AGrabGun::GrabTarget(ACharacterBase* Target)
 	UE_LOG(LogTemp, Warning, TEXT("[GRAB] Grabbed & pulling %s"), *GetNameSafe(Target));
 }
 
-// [GRAB-016] 내구도 0 도달 시 빨간 부품 분해 (모든 클라)
+// GRAB-016 내구도 0 도달 시 빨간 부품 분해 (모든 클라)
+// [GRAB-016] 내구도 0 도달 시 빨간 부품(bar/pin/jaw/yoke)을 물리로 분해 (모든 클라 재생)
 void AGrabGun::MulticastBreakApart_Implementation()
 {
 	BreakApartLinkage();
 }
 
 // 빨간 부품(bar/pin/jaw/yoke) 물리 분해: 부모 detach + 물리·콜라이더 ON + 임펄스 + 수명 타이머
+// [GRAB-031] 집게 부품 분리와 물리 분해 연출 적용
 void AGrabGun::BreakApartLinkage()
 {
 	if (bBrokenApart)
@@ -774,7 +794,8 @@ void AGrabGun::BreakApartLinkage()
 	UE_LOG(LogTemp, Warning, TEXT("[GRAB] Broke apart (durability 0)"));
 }
 
-// [GRAB-011] 시퀀스 종료 (서버): detach + 대상 이동복원 + 사용자 잠금해제 + 상태 리셋
+// GRAB-011 시퀀스 종료 (서버): detach + 대상 이동복원 + 사용자 잠금해제 + 상태 리셋
+// [GRAB-011] 잡고 있던 대상을 놓는다 (서버). detach + 이동복원 + 사용자 잠금해제.
 void AGrabGun::ReleaseTarget()
 {
 	if (!HasAuthority())
@@ -807,7 +828,7 @@ void AGrabGun::ReleaseTarget()
 	// 사용자 이동+카메라 잠금 해제 (시퀀스 종료)
 	SetOwnerInputLocked(false);
 
-	// 사용 중 상태 해제 → 슬롯 변경 다시 허용 [WEAPON-017]
+	// 사용 중 상태 해제 → 슬롯 변경 다시 허용 WEAPON-017
 	FinishUse();
 
 	// 내구도 0으로 이번 당기기가 마지막이었으면, 당김 완료 후 지금 분해한다.
@@ -818,8 +839,9 @@ void AGrabGun::ReleaseTarget()
 	}
 }
 
-// [GRAB-015] 사용자 입력 잠금/해제 (서버 진입점).
+// GRAB-015 사용자 입력 잠금/해제 (서버 진입점).
 // 복제 변수 bOwnerInputLocked만 세팅 → 소유 클라는 OnRep에서, 서버(리슨호스트)는 여기서 직접 로컬 적용.
+// [GRAB-015] 사용자(그래버 든 플레이어)의 이동+카메라 입력 잠금/해제 (PlayerController Ignore).
 void AGrabGun::SetOwnerInputLocked(bool bLock)
 {
 	if (!HasAuthority() || bOwnerInputLocked == bLock)
@@ -831,12 +853,14 @@ void AGrabGun::SetOwnerInputLocked(bool bLock)
 }
 
 // 복제 도착 시 소유 클라에서 로컬 컨트롤러에 실제 Ignore 적용
+// [GRAB-027] 복제된 입력 잠금을 로컬 플레이어에게 반영
 void AGrabGun::OnRep_OwnerInputLocked()
 {
 	ApplyLocalInputLock(bOwnerInputLocked);
 }
 
 // 실제 로컬 PlayerController에 Ignore 적용 (로컬 소유일 때만). Ignore는 카운터라 짝을 맞춘다.
+// [GRAB-028] 이동·시점·점프 입력 잠금 적용 또는 해제
 void AGrabGun::ApplyLocalInputLock(bool bLock)
 {
 	if (bLocalInputLockApplied == bLock)
@@ -871,12 +895,14 @@ void AGrabGun::ApplyLocalInputLock(bool bLock)
 }
 
 // 뻗기~당기기 시퀀스 중에는 버리기/던지기를 막는다 (사용 중엔 손에서 못 뗌).
+// [GRAB-023] 사용 상태에 따른 내려놓기 허용 여부 반환
 bool AGrabGun::CanBeDropped() const
 {
 	return !(bGrabArmed || bPulling || GrabbedTarget != nullptr);
 }
 
-// [GRAB-004] 그래버 자체를 내려놓을 때 잡고 있던 대상도 해제
+// GRAB-004 그래버 자체를 내려놓을 때 잡고 있던 대상도 해제
+// [GRAB-004] 놓을 때(G키) 잡고 있던 대상도 자동 해제
 void AGrabGun::Drop_Implementation(FVector DropLocation, AActor* Dropper)
 {
 	if (HasAuthority())
@@ -886,7 +912,8 @@ void AGrabGun::Drop_Implementation(FVector DropLocation, AActor* Dropper)
 	Super::Drop_Implementation(DropLocation, Dropper);
 }
 
-// [GRAB-005] 던질 때도 해제
+// GRAB-005 던질 때도 해제
+// [GRAB-005] 던질 때도 잡고 있던 대상 해제
 void AGrabGun::Throw_Implementation(FVector ThrowVelocity, AActor* Thrower)
 {
 	if (HasAuthority())
@@ -896,7 +923,8 @@ void AGrabGun::Throw_Implementation(FVector ThrowVelocity, AActor* Thrower)
 	Super::Throw_Implementation(ThrowVelocity, Thrower);
 }
 
-// [GRAB-006] 발사 이펙트 훅
+// GRAB-006 발사 이펙트 훅
+// [GRAB-006] 발사 이펙트 훅 (집게 발사/명중 등). 시작/끝 지점 전달, 모든 클라 재생
 void AGrabGun::MulticastPlayFireEffect_Implementation(FVector Start, FVector End, bool bHit)
 {
 	OnFireEffect(Start, End, bHit);
