@@ -37,6 +37,25 @@ public:
 	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Warehouse|Delivery")
 	void ServerSaveWarehouseDelivery(const TArray<FStoredItemData>& RequestedItems);
 
+	// Add button: reserve immediately; the Done button must not save this list again.
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Warehouse|Delivery")
+	void ServerAddWarehouseDeliveryItem(TSubclassOf<AItemBase> ItemClass, int32 Quantity = 1);
+
+	UPROPERTY(BlueprintAssignable, Category = "Warehouse|Delivery")
+	FOnWarehouseDeliverySaveCompleted OnWarehouseDeliveryAddCompleted;
+
+	UFUNCTION(Client, Reliable)
+	void ClientWarehouseDeliveryAddCompleted(bool bSucceeded);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Warehouse|Delivery")
+	void ServerRemoveWarehouseDeliveryItem(TSubclassOf<AItemBase> ItemClass, int32 Quantity = 1);
+
+	UPROPERTY(BlueprintAssignable, Category = "Warehouse|Delivery")
+	FOnWarehouseDeliverySaveCompleted OnWarehouseDeliveryRemoveCompleted;
+
+	UFUNCTION(Client, Reliable)
+	void ClientWarehouseDeliveryRemoveCompleted(bool bSucceeded);
+
 	// Result only; inventory replication can arrive before or after this event.
 	UPROPERTY(BlueprintAssignable, Category = "Warehouse|Delivery")
 	FOnWarehouseDeliverySaveCompleted OnWarehouseDeliverySaveCompleted;
