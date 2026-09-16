@@ -8,12 +8,17 @@
 #include "TeamProject_MOUPlayerController.generated.h"
 
 class UInputMappingContext;
+class UInputAction;
 class UUserWidget;
 class URadioStatusWidget;
 class UVoiceComponent;
 class UVoiceStatusWidget;
+class AMainCharacter;
+class UMOU_CharacterStatusHUD;
+class USpectatorOverlayWidget;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWarehouseDeliverySaveCompleted, bool, bSucceeded);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnViewTargetActorChanged, AActor*, NewViewTarget, bool, bIsSelf);
 
 /**
  *  Basic PlayerController class for a third person game
@@ -31,12 +36,108 @@ public:
 	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Warehouse|Delivery")
 	void ServerSaveWarehouseDelivery(const TArray<FStoredItemData>& RequestedItems);
 
+	// Add button: reserve immediately; the Done button must not save this list again.
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Warehouse|Delivery")
+	void ServerAddWarehouseDeliveryItem(TSubclassOf<AItemBase> ItemClass, int32 Quantity = 1);
+
+	UPROPERTY(BlueprintAssignable, Category = "Warehouse|Delivery")
+	FOnWarehouseDeliverySaveCompleted OnWarehouseDeliveryAddCompleted;
+
+	UFUNCTION(Client, Reliable)
+	void ClientWarehouseDeliveryAddCompleted(bool bSucceeded);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Warehouse|Delivery")
+	void ServerRemoveWarehouseDeliveryItem(TSubclassOf<AItemBase> ItemClass, int32 Quantity = 1);
+
+	UPROPERTY(BlueprintAssignable, Category = "Warehouse|Delivery")
+	FOnWarehouseDeliverySaveCompleted OnWarehouseDeliveryRemoveCompleted;
+
+	UFUNCTION(Client, Reliable)
+	void ClientWarehouseDeliveryRemoveCompleted(bool bSucceeded);
+
 	// Result only; inventory replication can arrive before or after this event.
 	UPROPERTY(BlueprintAssignable, Category = "Warehouse|Delivery")
 	FOnWarehouseDeliverySaveCompleted OnWarehouseDeliverySaveCompleted;
 
 	UFUNCTION(Client, Reliable)
 	void ClientWarehouseDeliverySaveCompleted(bool bSucceeded);
+
+	// ---------------------------------------------------------
+	// [차량 탑승 입력 전환] - 차량(AVehicleBase)이 탑승/하차 시 호출한다.
+	// 캐릭터용 IMC(DefaultMappingContexts)를 걷어내고 차량용 IMC 하나만 남긴다.
+	// 이 프로젝트는 입력 IMC를 컨트롤러가 관리하므로, 차량 입력 전환도 여기서 처리한다.
+	// ---------------------------------------------------------
+
+	// 차량 운전 모드로 전환: 캐릭터 IMC 제거 + 지정한 차량 IMC 추가.
+	UFUNCTION(BlueprintCallable, Category = "Input|Vehicle")
+	void SwitchToVehicleInput(UInputMappingContext* DrivingContext);
+
+	// 차량 운전 모드 해제: 차량 IMC 제거 + 캐릭터 IMC(DefaultMappingContexts) 복원.
+	UFUNCTION(BlueprintCallable, Category = "Input|Vehicle")
+	void RestoreCharacterInput();
+
+private:
+	// SwitchToVehicleInput 으로 추가한 차량 IMC. RestoreCharacterInput 에서 제거하려고 기억한다.
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> ActiveVehicleContext;
+
+public:
+	UPROPERTY(BlueprintAssignable, Category = "Camera")
+	FOnViewTargetActorChanged OnViewTargetActorChanged;
+
+	UFUNCTION(BlueprintCallable, Category = "Spectator")
+	void SpectateNextPlayer();
+
+	UFUNCTION(BlueprintCallable, Category = "Spectator")
+	void SpectatePrevPlayer();
+
+	UFUNCTION(BlueprintCallable, Category = "Spectator")
+	void SetSpectateTarget(AMainCharacter* NewTarget, float BlendTime = 0.25f);
+
+	UFUNCTION(BlueprintPure, Category = "Spectator")
+	TArray<AMainCharacter*> GetAliveTeammates() const;
+
+	UFUNCTION(BlueprintPure, Category = "Spectator")
+	AMainCharacter* GetCurrentSpectateTarget() const { return CurrentSpectateTarget.Get(); }
+
+	UFUNCTION(BlueprintPure, Category = "Spectator")
+	bool IsSpectating() const { return bIsSpectating; }
+
+	UFUNCTION(BlueprintCallable, Category = "Spectator")
+	void StartSpectating();
+
+	UFUNCTION(BlueprintCallable, Category = "Spectator")
+	void StopSpectating();
+
+	UFUNCTION(BlueprintCallable, Category = "UI|Spectator")
+	void StartDeathSpectatorSequence();
+
+	UFUNCTION(BlueprintCallable, Category = "UI|Spectator")
+	void OnTurnOffDisplayFinished();
+
+	UFUNCTION(BlueprintCallable, Category = "UI|Spectator")
+	void ShowTurnOffDisplay();
+
+	UFUNCTION(BlueprintCallable, Category = "UI|Spectator")
+	void HideTurnOffDisplay();
+
+	UFUNCTION(BlueprintCallable, Category = "UI|Spectator")
+	void ShowSpectatorOverlay();
+
+	UFUNCTION(BlueprintCallable, Category = "UI|Spectator")
+	void HideSpectatorOverlay();
+
+	UFUNCTION(BlueprintCallable, Category = "UI|Status")
+	void RegisterStatusHUDWidget(UMOU_CharacterStatusHUD* InStatusHUD);
+
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void RegisterPlayerHUDWidget(UUserWidget* InPlayerHUD);
+
+	UFUNCTION(BlueprintCallable, Category = "UI|Status")
+	void SetInGameUIHidden(bool bInHidden);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "UI")
+	void OnInGameUIVisibilityChanged(bool bVisible);
 
 protected:
 	/**
@@ -118,16 +219,82 @@ protected:
 	UPROPERTY()
 	TObjectPtr<URadioStatusWidget> RadioStatusWidget;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Spectator")
+	TObjectPtr<UInputMappingContext> SpectatorMappingContext;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Spectator")
+	TObjectPtr<UInputAction> IA_SpectateNext;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Spectator")
+	TObjectPtr<UInputAction> IA_SpectatePrev;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Spectator")
+	TObjectPtr<UInputAction> IA_SpectateLook;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Spectator")
+	TObjectPtr<UInputAction> IA_SpectateZoom;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Spectator")
+	int32 SpectatorMappingPriority = 100;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Spectator")
+	TObjectPtr<class ASpectatorCameraActor> SpectatorCameraActor;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Spectator")
+	TSubclassOf<UUserWidget> TurnOffDisplayWidgetClass;
+
+	UPROPERTY(BlueprintReadWrite, Category = "UI|Spectator")
+	TObjectPtr<UUserWidget> TurnOffDisplayWidget;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Spectator")
+	TSubclassOf<USpectatorOverlayWidget> SpectatorOverlayWidgetClass;
+
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Spectator")
+	TObjectPtr<USpectatorOverlayWidget> SpectatorOverlayWidget;
+
+	UPROPERTY(BlueprintReadWrite, Category = "UI|Status")
+	TObjectPtr<UMOU_CharacterStatusHUD> StatusHUDWidget;
+
+	UPROPERTY(BlueprintReadWrite, Category = "UI")
+	TObjectPtr<UUserWidget> PlayerHUDWidget;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Spectator")
+	float DeathSpectatorDelay = 3.0f;
+
+	FTimerHandle SpectatorTransitionTimerHandle;
+
 	/** Gameplay initialization */
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	virtual void PlayerTick(float DeltaTime) override;
 
 	/** Input mapping context setup */
 	virtual void SetupInputComponent() override;
+
+	void OnSpectatorLook(const struct FInputActionValue& Value);
+	void OnSpectatorZoom(const struct FInputActionValue& Value);
+	void OnSpectatorMouseWheel(float Val);
+	void OnSpectatorTurn(float Val);
+	void OnSpectatorLookUp(float Val);
 
 	/** Returns true if the player should use UMG touch controls */
 	bool ShouldUseTouchControls() const;
 
 private:
+	TWeakObjectPtr<AMainCharacter> CurrentSpectateTarget;
+	int32 CurrentSpectateIndex = -1;
+	bool bIsSpectating = false;
+	bool bIsDeathSequenceActive = false;
+
+	TWeakObjectPtr<AActor> LastViewTarget;
+
+	void UpdateSpectatorOverlay();
+	void CheckSpectateTargetAlive();
+
+	/** bAutoShowLoginWidget 이 켜져 있고 아직 로그인 전이면 로그인 위젯을 띄운다. */
+	void ShowLoginWidgetIfNeeded();
+
 	/**
 	 * 마이크/무전기 상태 위젯을 띄운다. 이미 떠 있으면 아무것도 안 한다.
 	 *

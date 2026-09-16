@@ -3,6 +3,8 @@
 #include "Components/CarryingComponent.h"
 #include "Components/StatusComponent.h"
 #include "Components/CharacterVisualComponent.h"
+#include "Components/CharacterCustomizationComponent.h"
+#include "NPC/CustomizationNPC.h"
 #include "Data/CharacterVisualDataAsset.h"
 #include "Base/BaseAttributeSet.h"
 #include "EnhancedInputComponent.h"
@@ -20,6 +22,7 @@
 #include "Components/InventoryComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Ability/GA_Sprint.h"
 #include "Ability/GA_PushObject.h"
@@ -36,6 +39,10 @@
 #include "Ability/GA_Groggy.h"
 #include "Ability/GA_Death.h"
 #include "Ability/GA_Knockdown.h"
+#include "Ability/GA_HitReaction.h"
+#include "TeamProject_MOUPlayerController.h"
+#include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
 
 AMainCharacter::AMainCharacter()
 {
@@ -45,6 +52,7 @@ AMainCharacter::AMainCharacter()
 	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
 	CarryingComponent = CreateDefaultSubobject<UCarryingComponent>(TEXT("CarryingComponent"));
 	InventoryComponent = CreateDefaultSubobject<UInventoryComponent>(TEXT("InventoryComponent"));
+	CustomizationComponent = CreateDefaultSubobject<UCharacterCustomizationComponent>(TEXT("CustomizationComponent"));
 
 	// 발광(손전등 대체) 포인트 라이트 컴포넌트 생성 및 메시 부착
 	FlashlightLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("FlashlightLight"));
@@ -69,6 +77,27 @@ AMainCharacter::AMainCharacter()
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationRoll = false;
 
+	SpectatorCameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpectatorCameraBoom"));
+	SpectatorCameraBoom->SetupAttachment(GetCapsuleComponent());
+	SpectatorCameraBoom->TargetArmLength = 350.0f;
+	SpectatorCameraBoom->TargetOffset = FVector(0.0f, 0.0f, 60.0f);
+	SpectatorCameraBoom->SocketOffset = FVector::ZeroVector;
+	SpectatorCameraBoom->bDoCollisionTest = true;
+	SpectatorCameraBoom->ProbeChannel = ECC_WorldStatic;
+	SpectatorCameraBoom->ProbeSize = 8.0f;
+	SpectatorCameraBoom->bUsePawnControlRotation = false;
+	SpectatorCameraBoom->bInheritPitch = false;
+	SpectatorCameraBoom->bInheritYaw = false;
+	SpectatorCameraBoom->bInheritRoll = false;
+	SpectatorCameraBoom->bEnableCameraLag = true;
+	SpectatorCameraBoom->CameraLagSpeed = 15.0f;
+	SpectatorCameraBoom->SetRelativeRotation(CurrentSpectatorOrbitRotation);
+
+	SpectatorCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("SpectatorCamera"));
+	SpectatorCamera->SetupAttachment(SpectatorCameraBoom, USpringArmComponent::SocketName);
+	SpectatorCamera->bUsePawnControlRotation = false;
+	SpectatorCamera->bAutoActivate = false;
+
 	if (GetCharacterMovement())
 	{
 		GetCharacterMovement()->bOrientRotationToMovement = false;
@@ -91,11 +120,62 @@ AMainCharacter::AMainCharacter()
 		GetFollowCamera()->bUsePawnControlRotation = true;
 		GetFollowCamera()->SetFieldOfView(90.0f);
 	}
+
+	// 1인칭 전신 그림자 및 루멘 반사용 프록시 메시 생성
+	FirstPersonShadowMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonShadowMesh"));
+	FirstPersonShadowMesh->SetupAttachment(GetMesh());
+	FirstPersonShadowMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonShadowMesh->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
+	FirstPersonShadowMesh->SetGenerateOverlapEvents(false);
+	FirstPersonShadowMesh->CastShadow = true;
+	FirstPersonShadowMesh->bCastHiddenShadow = true;
+	FirstPersonShadowMesh->SetOwnerNoSee(true);
+	FirstPersonShadowMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 }
 
 void AMainCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 1인칭 그림자/반사용 프록시 메시 설정 (로컬 플레이어만 활성화)
+	if (IsLocallyControlled())
+	{
+		// 라이브 코딩 시 생성자 컴포넌트 누락 방지를 위해 런타임 동적 생성 보장
+		if (!FirstPersonShadowMesh && GetMesh())
+		{
+			FirstPersonShadowMesh = NewObject<USkeletalMeshComponent>(this, TEXT("FirstPersonShadowMesh_Runtime"));
+			FirstPersonShadowMesh->RegisterComponent();
+			FirstPersonShadowMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale);
+		}
+
+		if (FirstPersonShadowMesh && GetMesh())
+		{
+			FirstPersonShadowMesh->SetSkeletalMeshAsset(GetMesh()->GetSkeletalMeshAsset());
+			FirstPersonShadowMesh->SetLeaderPoseComponent(GetMesh(), true);
+			for (int32 i = 0; i < GetMesh()->GetNumMaterials(); ++i)
+			{
+				FirstPersonShadowMesh->SetMaterial(i, GetMesh()->GetMaterial(i));
+			}
+			FirstPersonShadowMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			FirstPersonShadowMesh->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
+			FirstPersonShadowMesh->SetGenerateOverlapEvents(false);
+			FirstPersonShadowMesh->SetOwnerNoSee(true);
+			FirstPersonShadowMesh->SetCastHiddenShadow(true);
+			FirstPersonShadowMesh->CastShadow = true;
+			FirstPersonShadowMesh->bCastDynamicShadow = true;
+			FirstPersonShadowMesh->bAffectDistanceFieldLighting = true;
+			FirstPersonShadowMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+			FirstPersonShadowMesh->SetVisibility(true);
+		}
+	}
+	else
+	{
+		if (FirstPersonShadowMesh)
+		{
+			FirstPersonShadowMesh->SetVisibility(false);
+			FirstPersonShadowMesh->DestroyComponent();
+		}
+	}
 
 	UpdateFirstPersonMeshVisibility();
 
@@ -151,6 +231,9 @@ void AMainCharacter::BeginPlay()
 
 		TSubclassOf<UGameplayAbility> KnockdownClass = KnockdownAbilityClass ? KnockdownAbilityClass : TSubclassOf<UGameplayAbility>(UGA_Knockdown::StaticClass());
 		KnockdownAbilitySpecHandle = AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(KnockdownClass, 1));
+
+		TSubclassOf<UGameplayAbility> HitReactionClass = HitReactionAbilityClass ? HitReactionAbilityClass : TSubclassOf<UGameplayAbility>(UGA_HitReaction::StaticClass());
+		HitReactionAbilitySpecHandle = AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(HitReactionClass, 1));
 	}
 
 	if (USkeletalMeshComponent* SkelMesh = GetMesh())
@@ -198,6 +281,132 @@ void AMainCharacter::OnRep_PlayerState()
 	UpdateFirstPersonMeshVisibility();
 }
 
+void AMainCharacter::SetFirstPersonViewMode(bool bIsFirstPerson)
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+
+	if (bIsDead)
+	{
+		if (USkeletalMeshComponent* SkelMesh = GetMesh())
+		{
+			SkelMesh->SetVisibility(true, true);
+			SkelMesh->UnHideBoneByName(FName("neck"));
+			SkelMesh->SetCastShadow(true);
+		}
+
+		TArray<UStaticMeshComponent*> StaticMeshes;
+		GetComponents<UStaticMeshComponent>(StaticMeshes);
+		for (UStaticMeshComponent* SM : StaticMeshes)
+		{
+			if (SM)
+			{
+				SM->SetVisibility(true);
+				SM->SetOwnerNoSee(false);
+			}
+		}
+
+		if (FirstPersonShadowMesh)
+		{
+			FirstPersonShadowMesh->SetVisibility(false);
+			FirstPersonShadowMesh->SetCastShadow(false);
+			FirstPersonShadowMesh->bCastHiddenShadow = false;
+		}
+		return;
+	}
+
+	// 커스터마이징 모드일 때는 3인칭 전신 및 얼굴/머리 부품이 온전히 보여야 함
+	if (bIsInCustomizationMode)
+	{
+		if (USkeletalMeshComponent* SkelMesh = GetMesh())
+		{
+			SkelMesh->SetVisibility(true, true);
+			SkelMesh->SetOwnerNoSee(false);
+			SkelMesh->UnHideBoneByName(FName("neck"));
+			SkelMesh->SetCastShadow(true);
+			SkelMesh->bCastHiddenShadow = false;
+		}
+
+		TArray<UStaticMeshComponent*> StaticMeshes;
+		GetComponents<UStaticMeshComponent>(StaticMeshes);
+		for (UStaticMeshComponent* SM : StaticMeshes)
+		{
+			if (SM)
+			{
+				SM->SetVisibility(true);
+				SM->SetOwnerNoSee(false);
+			}
+		}
+
+		if (FirstPersonShadowMesh)
+		{
+			FirstPersonShadowMesh->SetVisibility(false);
+			FirstPersonShadowMesh->SetCastShadow(false);
+			FirstPersonShadowMesh->bCastHiddenShadow = false;
+		}
+		return;
+	}
+
+	if (bIsFirstPerson)
+	{
+		if (USkeletalMeshComponent* SkelMesh = GetMesh())
+		{
+			SkelMesh->SetVisibility(true, true);
+			SkelMesh->HideBoneByName(FName("neck"), PBO_None);
+			SkelMesh->SetCastShadow(false);
+			SkelMesh->bCastHiddenShadow = false;
+		}
+
+		TArray<UStaticMeshComponent*> StaticMeshes;
+		GetComponents<UStaticMeshComponent>(StaticMeshes);
+		for (UStaticMeshComponent* SM : StaticMeshes)
+		{
+			if (SM && (SM->GetName().Contains(TEXT("Eye")) || SM->GetName().Contains(TEXT("Mouth"))))
+			{
+				SM->SetVisibility(true);
+				SM->SetOwnerNoSee(true);
+				SM->SetCastHiddenShadow(false);
+			}
+		}
+
+		if (FirstPersonShadowMesh)
+		{
+			FirstPersonShadowMesh->SetVisibility(true);
+			FirstPersonShadowMesh->SetOwnerNoSee(true);
+			FirstPersonShadowMesh->SetCastShadow(true);
+			FirstPersonShadowMesh->bCastHiddenShadow = true;
+		}
+	}
+	else
+	{
+		if (USkeletalMeshComponent* SkelMesh = GetMesh())
+		{
+			SkelMesh->SetVisibility(false, true);
+			SkelMesh->SetCastShadow(false);
+			SkelMesh->bCastHiddenShadow = false;
+		}
+
+		TArray<UStaticMeshComponent*> StaticMeshes;
+		GetComponents<UStaticMeshComponent>(StaticMeshes);
+		for (UStaticMeshComponent* SM : StaticMeshes)
+		{
+			if (SM)
+			{
+				SM->SetVisibility(false);
+			}
+		}
+
+		if (FirstPersonShadowMesh)
+		{
+			FirstPersonShadowMesh->SetVisibility(false);
+			FirstPersonShadowMesh->SetCastShadow(false);
+			FirstPersonShadowMesh->bCastHiddenShadow = false;
+		}
+	}
+}
+
 void AMainCharacter::UpdateFirstPersonMeshVisibility()
 {
 	if (IsLocallyControlled())
@@ -205,8 +414,6 @@ void AMainCharacter::UpdateFirstPersonMeshVisibility()
 		if (USkeletalMeshComponent* SkelMesh = GetMesh())
 		{
 			SkelMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
-			SkelMesh->HideBoneByName(FName("neck"), PBO_None);
-			SkelMesh->bCastHiddenShadow = true;
 		}
 
 		if (GetFollowCamera() && GetMesh())
@@ -236,15 +443,8 @@ void AMainCharacter::UpdateFirstPersonMeshVisibility()
 			}
 		}
 
-		TArray<UStaticMeshComponent*> StaticMeshes;
-		GetComponents<UStaticMeshComponent>(StaticMeshes);
-		for (UStaticMeshComponent* SM : StaticMeshes)
-		{
-			if (SM && (SM->GetName().Contains(TEXT("Eye")) || SM->GetName().Contains(TEXT("Mouth"))))
-			{
-				SM->SetOwnerNoSee(true);
-			}
-		}
+		// 초기 가시성 적용: 1인칭 상태 적용
+		SetFirstPersonViewMode(bIsCurrentViewFirstPerson);
 
 		if (APlayerController* PC = Cast<APlayerController>(GetController()))
 		{
@@ -260,6 +460,35 @@ void AMainCharacter::UpdateFirstPersonMeshVisibility()
 void AMainCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// [카메라 시점 변경 실시간 감지: 1인칭 vs 외부 카메라(NPC 대화, 3인칭, 컷씬 등)]
+	if (IsLocallyControlled())
+	{
+		APlayerController* PC = Cast<APlayerController>(GetController());
+		bool bShouldBeFirstPerson = true;
+		if (bIsDead)
+		{
+			bShouldBeFirstPerson = false;
+		}
+		else if (PC)
+		{
+			AActor* CurrentViewTarget = PC->GetViewTarget();
+			if (CurrentViewTarget && CurrentViewTarget != this)
+			{
+				bShouldBeFirstPerson = false;
+			}
+			else if (GetFollowCamera() && !GetFollowCamera()->IsActive())
+			{
+				bShouldBeFirstPerson = false;
+			}
+		}
+
+		if (bShouldBeFirstPerson != bIsCurrentViewFirstPerson)
+		{
+			bIsCurrentViewFirstPerson = bShouldBeFirstPerson;
+			SetFirstPersonViewMode(bIsCurrentViewFirstPerson);
+		}
+	}
 
 	// [달리기 정지 감지] 방향키를 떼어 가속이 멈춘 경우 즉시 달리기 해제 (대기 모션 복귀)
 	if (bIsSprinting && GetCharacterMovement() && GetCharacterMovement()->GetCurrentAcceleration().IsNearlyZero())
@@ -339,40 +568,74 @@ void AMainCharacter::Tick(float DeltaTime)
 	if (bIsPushingMode && CurrentPushedObject && (IsLocallyControlled() || HasAuthority()))
 	{
 		AEventObjectBase* EventObj = Cast<AEventObjectBase>(CurrentPushedObject);
+		bool bIsCustomAlignment = EventObj && EventObj->bCustomPusherAlignment;
 
-		// 1. 손 앵커 포인트 기준 거리 이탈 검사 (상자가 이동하면서 원래 잡았던 손 위치에서 110cm 이상 멀어지면 자동 밀기 해제)
-		FVector WorldAnchor = CurrentPushedObject->GetActorTransform().TransformPosition(PushLocalAnchor);
-		float Dist2D = FVector::Dist2D(GetActorLocation(), WorldAnchor);
-		float DetachLimit = EventObj ? EventObj->PushDetachDistance : 110.0f;
-		if (Dist2D > DetachLimit)
+		// 1. 거리 이탈 검사
+		if (!bIsCustomAlignment)
 		{
-			StopPushMode();
-			return;
+			// 일반 상자: 상자 로컬 공간 기준 손 접촉 앵커 거리 검사
+			FVector WorldAnchor = CurrentPushedObject->GetActorTransform().TransformPosition(PushLocalAnchor);
+			float Dist2D = FVector::Dist2D(GetActorLocation(), WorldAnchor);
+			float DetachLimit = EventObj ? EventObj->PushDetachDistance : 110.0f;
+			if (Dist2D > DetachLimit)
+			{
+				StopPushMode();
+				return;
+			}
+		}
+		else
+		{
+			// 회전형 기믹(SluiceWheel 등): 휠 중심과의 수평 거리 검사 (네트워크 핑/지연으로 인한 손 앵커 오차 해제 차단)
+			float DistToCenter = FVector::Dist2D(GetActorLocation(), CurrentPushedObject->GetActorLocation());
+			float MaxLimit = EventObj ? (EventObj->MaxPushDistance + 100.0f) : 450.0f;
+			if (DistToCenter > MaxLimit)
+			{
+				StopPushMode();
+				return;
+			}
 		}
 
 		FVector CurrentLoc = GetActorLocation();
 
-		// 2. 상자가 이동 불가능한 상태(인원 부족/입력 불일치 등)일 때 캐릭터가 앞으로 나아가지 못하도록 이전 위치로 고정
-		bool bCanMove = EventObj ? EventObj->IsReadyToMove() : false;
-		if (!bCanMove)
+		if (bIsCustomAlignment)
 		{
-			SetActorLocation(LastCharacterLocation, false);
-			CurrentLoc = LastCharacterLocation;
+			if (HasAuthority())
+			{
+				// 서버: 휠 회전 궤적 위치를 기준으로 고정하여 이동 컴포넌트의 원심력 이탈 차단
+				SetActorLocation(LastCharacterLocation, false);
+				CurrentLoc = LastCharacterLocation;
+			}
+			else
+			{
+				// 클라이언트: 서버의 위치 복제와 회전 이동을 자연스럽게 수신하여 동기화
+				CurrentLoc = GetActorLocation();
+				LastCharacterLocation = CurrentLoc;
+			}
 		}
 		else
 		{
-			// [단방향 메쉬 파고들기 차단] 캐릭터가 상자 중심 방향으로 파고들었을 때만 상자 표면 쪽으로 밀어냄 (상자가 멀어질 때는 절대 끌어당기지 않음)
-			FVector BoxCenter = CurrentPushedObject->GetComponentsBoundingBox().GetCenter();
-			FVector ToBox = BoxCenter - CurrentLoc;
-			ToBox.Z = 0.0f;
-			float DistToCenter = ToBox.Size();
-
-			if (DistToCenter < PushInitialDistToBox && PushInitialDistToBox > 0.0f && !ToBox.IsNearlyZero())
+			// 2. 상자가 이동 불가능한 상태(인원 부족/입력 불일치 등)일 때 캐릭터가 앞으로 나아가지 못하도록 이전 위치로 고정
+			bool bCanMove = EventObj ? EventObj->IsReadyToMove() : false;
+			if (!bCanMove)
 			{
-				FVector ClampedLoc = BoxCenter - (ToBox / DistToCenter) * PushInitialDistToBox;
-				ClampedLoc.Z = CurrentLoc.Z;
-				SetActorLocation(ClampedLoc, false);
-				CurrentLoc = ClampedLoc;
+				SetActorLocation(LastCharacterLocation, false);
+				CurrentLoc = LastCharacterLocation;
+			}
+			else
+			{
+				// [단방향 메쉬 파고들기 차단] 캐릭터가 상자 중심 방향으로 파고들었을 때만 상자 표면 쪽으로 밀어냄 (상자가 멀어질 때는 절대 끌어당기지 않음)
+				FVector BoxCenter = CurrentPushedObject->GetComponentsBoundingBox().GetCenter();
+				FVector ToBox = BoxCenter - CurrentLoc;
+				ToBox.Z = 0.0f;
+				float DistToCenter = ToBox.Size();
+
+				if (DistToCenter < PushInitialDistToBox && PushInitialDistToBox > 0.0f && !ToBox.IsNearlyZero())
+				{
+					FVector ClampedLoc = BoxCenter - (ToBox / DistToCenter) * PushInitialDistToBox;
+					ClampedLoc.Z = CurrentLoc.Z;
+					SetActorLocation(ClampedLoc, false);
+					CurrentLoc = ClampedLoc;
+				}
 			}
 		}
 
@@ -444,6 +707,14 @@ void AMainCharacter::Tick(float DeltaTime)
 	}
 	else
 	{
+		// 커스터마이징 모드 중에는 몸체 자동 회전(Turn In Place) 및 에임 오프셋을 차단하여 가만히 유지
+		if (bIsInCustomizationMode)
+		{
+			bUseControllerRotationYaw = false;
+			ReplicatedAimYaw = 0.0f;
+			return;
+		}
+
 		float Speed = GetVelocity().Size2D();
 		bool bMoving = (Speed > 5.0f) || (GetCharacterMovement() && GetCharacterMovement()->GetCurrentAcceleration().SizeSquared() > 0.0f);
 
@@ -509,6 +780,7 @@ void AMainCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME(AMainCharacter, bIsFlashlightOn);
 	DOREPLIFETIME(AMainCharacter, FlashlightColorIndex);
 	DOREPLIFETIME(AMainCharacter, ReplicatedAimYaw);
+	DOREPLIFETIME(AMainCharacter, bIsInCustomizationMode);
 }
 
 void AMainCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -591,6 +863,11 @@ void AMainCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	if (FlashlightColorAction)
 	{
 		EnhancedInputComponent->BindAction(FlashlightColorAction, ETriggerEvent::Started, this, &AMainCharacter::CycleFlashlightColor);
+	}
+
+	if (SlapAction)
+	{
+		EnhancedInputComponent->BindAction(SlapAction, ETriggerEvent::Started, this, &AMainCharacter::OnSlapStarted);
 	}
 }
 
@@ -1631,7 +1908,7 @@ void AMainCharacter::OnEmoteMontageEnded(UAnimMontage* Montage, bool bInterrupte
 
 bool AMainCharacter::CanAct() const
 {
-	if (bIsStunned || bIsGroggy || bIsDead || bIsReviving)
+	if (bIsStunned || bIsGroggy || bIsDead || bIsReviving || bIsInCustomizationMode)
 	{
 		return false;
 	}
@@ -1640,11 +1917,145 @@ bool AMainCharacter::CanAct() const
 
 bool AMainCharacter::CanMove() const
 {
-	if (bIsStunned || bIsGroggy || bIsDead || bIsReviving || bIsHoldingRevive)
+	if (bIsStunned || bIsGroggy || bIsDead || bIsReviving || bIsHoldingRevive || bIsInCustomizationMode)
 	{
 		return false;
 	}
 	return Super::CanMove();
+}
+
+void AMainCharacter::StartCustomization(ACustomizationNPC* TargetNPC)
+{
+	if (!TargetNPC || bIsInCustomizationMode)
+	{
+		return;
+	}
+
+	bIsInCustomizationMode = true;
+	ActiveCustomizationNPC = TargetNPC;
+
+	// 1. 이동 정지
+	if (GetCharacterMovement())
+	{
+		GetCharacterMovement()->StopMovementImmediately();
+	}
+
+	// 2. 플레이어 위치 및 회전을 NPC 앞 지정된 스팟(PlayerStandSpot)으로 자동 텔레포트 정렬
+	if (USceneComponent* StandSpot = TargetNPC->GetPlayerStandSpot())
+	{
+		SetActorLocationAndRotation(StandSpot->GetComponentLocation(), StandSpot->GetComponentRotation(), false, nullptr, ETeleportType::TeleportPhysics);
+	}
+
+	// 3. 서버 권한 동기화: 서버에서도 텔레포트 및 커스터마이징 상태를 적용하여 롤백 방지
+	if (!HasAuthority())
+	{
+		ServerStartCustomization(TargetNPC);
+	}
+
+	// 4. 마우스 드래그를 통한 360도 자유 회전을 위해 컨트롤러 회전 동기화 해제 및 머리 회전(AO) 0 초기화
+	bUseControllerRotationYaw = false;
+	ReplicatedAimYaw = 0.0f;
+
+	// 5. 1인칭 전용 메시 가시성 해제 (전신 메시와 머리가 카메라에 보이도록 전환)
+	SetFirstPersonViewMode(false);
+
+	// 6. NPC의 프리뷰 카메라로 뷰타겟 전환 및 입력 모드 설정
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		// 카메라 시점 변경 시 캐릭터 머리가 돌아가지 않도록 컨트롤러 회전도 스팟 방향과 일치화
+		if (USceneComponent* StandSpot = TargetNPC->GetPlayerStandSpot())
+		{
+			PC->SetControlRotation(StandSpot->GetComponentRotation());
+		}
+
+		PC->SetViewTargetWithBlend(TargetNPC, 0.75f, EViewTargetBlendFunction::VTBlend_Cubic);
+
+		FInputModeGameAndUI InputMode;
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(InputMode);
+		PC->bShowMouseCursor = true;
+	}
+
+	// 7. UI 오픈 등을 위한 블루프린트 이벤트 호출
+	OnCustomizationStarted(TargetNPC);
+}
+
+void AMainCharacter::ServerStartCustomization_Implementation(ACustomizationNPC* TargetNPC)
+{
+	if (!TargetNPC)
+	{
+		return;
+	}
+
+	bIsInCustomizationMode = true;
+	ActiveCustomizationNPC = TargetNPC;
+
+	if (GetCharacterMovement())
+	{
+		GetCharacterMovement()->StopMovementImmediately();
+	}
+
+	// 서버 공식 위치 텔레포트 갱신 (클라이언트와의 위치 불일치 롤백 차단)
+	if (USceneComponent* StandSpot = TargetNPC->GetPlayerStandSpot())
+	{
+		SetActorLocationAndRotation(StandSpot->GetComponentLocation(), StandSpot->GetComponentRotation(), false, nullptr, ETeleportType::TeleportPhysics);
+	}
+
+	bUseControllerRotationYaw = false;
+	ReplicatedAimYaw = 0.0f;
+}
+
+void AMainCharacter::EndCustomization()
+{
+	if (!bIsInCustomizationMode)
+	{
+		return;
+	}
+
+	bIsInCustomizationMode = false;
+
+	// 1. 컨트롤러 Yaw 복원 및 카메라 방향을 캐릭터 현재 방향으로 동기화
+	bUseControllerRotationYaw = true;
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		PC->SetControlRotation(GetActorRotation());
+		PC->SetViewTargetWithBlend(this, 0.5f, EViewTargetBlendFunction::VTBlend_Cubic);
+
+		FInputModeGameOnly InputMode;
+		PC->SetInputMode(InputMode);
+		PC->bShowMouseCursor = false;
+	}
+
+	// 2. 1인칭 뷰 복원
+	SetFirstPersonViewMode(true);
+
+	// 3. 서버에 커스터마이징 종료 및 최종 회전값 동기화
+	if (!HasAuthority())
+	{
+		ServerEndCustomization(GetActorRotation());
+	}
+
+	ActiveCustomizationNPC.Reset();
+
+	// 4. UI 닫기 등을 위한 블루프린트 이벤트 호출
+	OnCustomizationEnded();
+}
+
+void AMainCharacter::ServerEndCustomization_Implementation(FRotator FinalRotation)
+{
+	bIsInCustomizationMode = false;
+	bUseControllerRotationYaw = true;
+	SetActorRotation(FinalRotation);
+	ActiveCustomizationNPC.Reset();
+}
+
+void AMainCharacter::AddCustomizationCharacterYaw(float DeltaYaw)
+{
+	if (bIsInCustomizationMode)
+	{
+		AddActorWorldRotation(FRotator(0.0f, DeltaYaw, 0.0f));
+	}
 }
 
 void AMainCharacter::Knockdown()
@@ -1674,38 +2085,77 @@ void AMainCharacter::ServerKnockdown_Implementation()
 
 void AMainCharacter::PlayHitReaction(float Duration)
 {
-	if (HasAuthority())
+	if (bIsDead || bIsGroggy || bIsStunned)
 	{
-		MulticastPlayHitReaction(Duration);
+		return;
 	}
-	else
+
+	if (!HasAuthority())
 	{
-		if (VisualComponent)
-		{
-			static const FGameplayTag HitTag = FGameplayTag::RequestGameplayTag(FName("State.Player.HitReaction"), false);
-			VisualComponent->SetTagTemporaryOverride(HitTag, Duration);
-		}
+		ServerPlayHitReaction(Duration);
+		return;
 	}
+
+	// GAS GA_HitReaction 어빌리티 실행 (내부에서 50:50 몽타주 선택 및 복제 재생, 표정 처리)
+	if (AbilitySystemComponent && HitReactionAbilitySpecHandle.IsValid())
+	{
+		AbilitySystemComponent->TryActivateAbility(HitReactionAbilitySpecHandle);
+	}
+
+	OnPlayHitReaction(Duration);
 }
 
-void AMainCharacter::MulticastPlayHitReaction_Implementation(float Duration)
+void AMainCharacter::ServerPlayHitReaction_Implementation(float Duration)
 {
-	if (VisualComponent)
-	{
-		static const FGameplayTag HitTag = FGameplayTag::RequestGameplayTag(FName("State.Player.HitReaction"), false);
-		VisualComponent->SetTagTemporaryOverride(HitTag, Duration);
-	}
+	PlayHitReaction(Duration);
 }
 
 // ---------------------------------------------------------
 // [그로기 및 사망 / 부활 시스템]
 // ---------------------------------------------------------
 
+bool AMainCharacter::HasAnyAliveTeammate(bool bMustBeConscious) const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	for (TActorIterator<AMainCharacter> It(World); It; ++It)
+	{
+		AMainCharacter* OtherChar = *It;
+		if (!OtherChar || OtherChar == this)
+		{
+			continue;
+		}
+		if (!OtherChar->IsPlayerControlled())
+		{
+			continue;
+		}
+		if (OtherChar->bIsDead)
+		{
+			continue;
+		}
+		if (bMustBeConscious && OtherChar->bIsGroggy)
+		{
+			continue;
+		}
+		return true;
+	}
+	return false;
+}
+
 void AMainCharacter::HandleHealthZero()
 {
 	if (bIsDead)
 	{
 		return;
+	}
+
+	if (!HasAnyAliveTeammate(true))
+	{
+		DownCount = FMath::Max(1, DownCount);
 	}
 
 	if (DownCount == 0 && !bIsGroggy)
@@ -1828,6 +2278,11 @@ void AMainCharacter::MulticastOnRevived_Implementation()
 		VisualComponent->RefreshVisualState();
 	}
 	OnRevived();
+
+	if (IsLocallyControlled())
+	{
+		SetFirstPersonViewMode(true);
+	}
 }
 
 void AMainCharacter::MulticastOnDeath_Implementation()
@@ -1837,6 +2292,15 @@ void AMainCharacter::MulticastOnDeath_Implementation()
 		VisualComponent->RefreshVisualState();
 	}
 	OnDeath();
+
+	if (IsLocallyControlled())
+	{
+		SetFirstPersonViewMode(false);
+		if (ATeamProject_MOUPlayerController* PC = Cast<ATeamProject_MOUPlayerController>(GetController()))
+		{
+			PC->StartDeathSpectatorSequence();
+		}
+	}
 }
 
 // 클라이언트가 F키를 눌러 서버에서 비로소 살려달라고 요청
@@ -1966,28 +2430,34 @@ void AMainCharacter::StartPushMode(AActor* TargetObject)
 		EventObj->AddPusher(this);
 	}
 
-	// 캐릭터 정렬 연출: 거리는 그대로 유지하되, 대상(박스)을 바라보도록 회전만 수행
-	FVector BoxCenter = TargetObject->GetComponentsBoundingBox().GetCenter();
-	FVector Dir = BoxCenter - GetActorLocation();
-	Dir.Z = 0.0f;
-	Dir.Normalize();
-	SetActorRotation(Dir.Rotation());
-	LockedPushDirection = Dir;
+	AEventObjectBase* EventObjBase = Cast<AEventObjectBase>(CurrentPushedObject);
+	bool bUseCustomAlignment = EventObjBase && EventObjBase->bCustomPusherAlignment;
 
-	// 상자 중심점과의 초기 수평 거리 기록 (메쉬 관통 방지용)
-	PushInitialDistToBox = FVector::Dist2D(GetActorLocation(), BoxCenter);
-
-	// 상자 로컬 공간 기준 손 접촉 앵커 위치 기록 (거리 이탈 감지용)
-	if (TargetObject)
+	if (!bUseCustomAlignment)
 	{
-		PushLocalAnchor = TargetObject->GetActorTransform().InverseTransformPosition(GetActorLocation());
+		// 캐릭터 정렬 연출: 거리는 그대로 유지하되, 대상(박스)을 바라보도록 회전만 수행
+		FVector BoxCenter = TargetObject->GetComponentsBoundingBox().GetCenter();
+		FVector Dir = BoxCenter - GetActorLocation();
+		Dir.Z = 0.0f;
+		Dir.Normalize();
+		SetActorRotation(Dir.Rotation());
+		LockedPushDirection = Dir;
+
+		// 상자 중심점과의 초기 수평 거리 기록 (메쉬 관통 방지용)
+		PushInitialDistToBox = FVector::Dist2D(GetActorLocation(), BoxCenter);
+
+		// 상자 로컬 공간 기준 손 접촉 앵커 위치 기록 (거리 이탈 감지용)
+		if (TargetObject)
+		{
+			PushLocalAnchor = TargetObject->GetActorTransform().InverseTransformPosition(GetActorLocation());
+		}
 	}
 
 	// 밀기 시작 시 로컬 카메라 방향도 밀기 방향 기준 에임오프셋 범위 내로 즉시 보정
 	if (IsLocallyControlled() && GetController())
 	{
 		FRotator ControlRot = GetController()->GetControlRotation();
-		float ForwardYaw = Dir.Rotation().Yaw;
+		float ForwardYaw = LockedPushDirection.Rotation().Yaw;
 		float DeltaYaw = FRotator::NormalizeAxis(ControlRot.Yaw - ForwardYaw);
 		if (FMath::Abs(DeltaYaw) > PushCameraYawLimit)
 		{
@@ -2489,4 +2959,149 @@ void AMainCharacter::UpdateFlashlightVisuals()
 		FlashlightLight->SetLightColor(CurrentColor);
 	}
 }
+
+void AMainCharacter::OnSlapStarted()
+{
+	Slap();
+}
+
+void AMainCharacter::Slap()
+{
+	if (bIsDead || bIsGroggy || bIsStunned)
+	{
+		return;
+	}
+
+	float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	if (CurrentTime - LastSlapTime < SlapCooldown)
+	{
+		return;
+	}
+
+	ServerSlap();
+}
+
+void AMainCharacter::ServerSlap_Implementation()
+{
+	if (bIsDead || bIsGroggy || bIsStunned)
+	{
+		return;
+	}
+
+	float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	if (CurrentTime - LastSlapTime < SlapCooldown)
+	{
+		return;
+	}
+	LastSlapTime = CurrentTime;
+
+	MulticastPlaySlapMontage();
+
+	if (SlapHitDelay > 0.0f)
+	{
+		GetWorldTimerManager().SetTimer(SlapHitTimerHandle, this, &AMainCharacter::PerformSlapTrace, SlapHitDelay, false);
+	}
+	else
+	{
+		PerformSlapTrace();
+	}
+}
+
+void AMainCharacter::MulticastPlaySlapMontage_Implementation()
+{
+	if (SlapMontage)
+	{
+		PlayAnimMontage(SlapMontage);
+	}
+}
+
+void AMainCharacter::PerformSlapTrace()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	FVector Start = GetActorLocation() + FVector(0.0f, 0.0f, BaseEyeHeight > 0.0f ? BaseEyeHeight : 60.0f);
+	FRotator ViewRotation = GetBaseAimRotation();
+	FVector End = Start + (ViewRotation.Vector() * SlapTraceDistance);
+
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(this);
+	QueryParams.bTraceComplex = false;
+
+	TArray<FHitResult> HitResults;
+	FCollisionShape SphereShape = FCollisionShape::MakeSphere(SlapTraceRadius);
+
+	bool bHit = GetWorld()->SweepMultiByChannel(
+		HitResults,
+		Start,
+		End,
+		FQuat::Identity,
+		ECC_Pawn,
+		SphereShape,
+		QueryParams
+	);
+
+	if (bHit)
+	{
+		for (const FHitResult& Hit : HitResults)
+		{
+			AMainCharacter* HitPlayer = Cast<AMainCharacter>(Hit.GetActor());
+			if (HitPlayer && HitPlayer != this && !HitPlayer->bIsDead)
+			{
+				HitPlayer->PlayHitReaction(0.5f);
+				FVector SoundLocation = Hit.ImpactPoint.IsZero() ? HitPlayer->GetActorLocation() : FVector(Hit.ImpactPoint);
+				MulticastPlaySlapHitSound(SoundLocation);
+				break;
+			}
+		}
+	}
+}
+
+void AMainCharacter::MulticastPlaySlapHitSound_Implementation(const FVector& Location)
+{
+	if (SlapHitSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, SlapHitSound, Location);
+	}
+}
+
+void AMainCharacter::EnableSpectatorCamera(bool bEnable)
+{
+	if (SpectatorCamera)
+	{
+		SpectatorCamera->SetActive(bEnable);
+	}
+	if (GetFollowCamera())
+	{
+		GetFollowCamera()->SetActive(!bEnable);
+	}
+	if (bEnable && SpectatorCameraBoom)
+	{
+		SpectatorCameraBoom->SetRelativeRotation(CurrentSpectatorOrbitRotation);
+	}
+}
+
+void AMainCharacter::AddSpectatorOrbit(float PitchDelta, float YawDelta)
+{
+	CurrentSpectatorOrbitRotation.Pitch = FMath::ClampAngle(CurrentSpectatorOrbitRotation.Pitch + PitchDelta, -80.0f, 80.0f);
+	CurrentSpectatorOrbitRotation.Yaw = FRotator::NormalizeAxis(CurrentSpectatorOrbitRotation.Yaw + YawDelta);
+
+	if (SpectatorCameraBoom)
+	{
+		SpectatorCameraBoom->SetRelativeRotation(CurrentSpectatorOrbitRotation);
+	}
+}
+
+void AMainCharacter::AddSpectatorZoom(float WheelDelta)
+{
+	if (SpectatorCameraBoom)
+	{
+		float NewLength = FMath::Clamp(SpectatorCameraBoom->TargetArmLength - (WheelDelta * 40.0f), 120.0f, 800.0f);
+		SpectatorCameraBoom->TargetArmLength = NewLength;
+	}
+}
+
+
 

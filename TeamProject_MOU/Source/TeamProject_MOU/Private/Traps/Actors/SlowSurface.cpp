@@ -41,11 +41,13 @@ void ASlowSurface::BeginPlay()
 void ASlowSurface::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// 액터 파괴 시 감속 중이던 모든 캐릭터의 원래 무브먼트 복원
-	for (auto& Pair : OriginalSpeedMap)
+	TArray<TObjectPtr<ACharacter>> AffectedCharacters;
+	OriginalSpeedMap.GetKeys(AffectedCharacters);
+	for (ACharacter* Char : AffectedCharacters)
 	{
-		if (Pair.Key)
+		if (Char)
 		{
-			RestoreCharacterMovement(Pair.Key);
+			RestoreCharacterMovement(Char);
 		}
 	}
 	OriginalSpeedMap.Empty();
