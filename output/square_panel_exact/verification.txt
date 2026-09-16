@@ -1,0 +1,1 @@
+Size: 114x114; separated pixels: 544; max stored RGB reconstruction error: 0; base alpha errors: 0; interior changed pixels: 0

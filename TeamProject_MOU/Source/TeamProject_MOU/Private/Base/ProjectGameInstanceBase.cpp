@@ -73,12 +73,20 @@ void UProjectGameInstanceBase::ClearStoredItems()
 void UProjectGameInstanceBase::SavePendingDeliveryData(const FDeliveryData& InDeliveryData)
 {
 	PendingDeliveryData = InDeliveryData;
+	if (UWarehouseDataSubsystem* Warehouse = GetSubsystem<UWarehouseDataSubsystem>())
+	{
+		Warehouse->NotifyPendingDeliveryChanged();
+	}
 }
 
 void UProjectGameInstanceBase::ClearPendingDeliveryData()
 {
 	PendingDeliveryData.SelectedItems.Reset();
 	PendingDeliveryData.SelectedItemInstances.Reset();
+	if (UWarehouseDataSubsystem* Warehouse = GetSubsystem<UWarehouseDataSubsystem>())
+	{
+		Warehouse->NotifyPendingDeliveryChanged();
+	}
 }
 
 void UProjectGameInstanceBase::HandlePreLoadedMap(const FString& MapName)

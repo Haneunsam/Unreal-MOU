@@ -56,6 +56,34 @@ void ATeamProject_MOUPlayerController::ClientWarehouseDeliverySaveCompleted_Impl
 	OnWarehouseDeliverySaveCompleted.Broadcast(bSucceeded);
 }
 
+void ATeamProject_MOUPlayerController::ServerAddWarehouseDeliveryItem_Implementation(
+	TSubclassOf<AItemBase> ItemClass, int32 Quantity)
+{
+	UWarehouseDataSubsystem* Warehouse = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UWarehouseDataSubsystem>() : nullptr;
+	const bool bSucceeded = Warehouse && Warehouse->AddPendingDeliveryItem(ItemClass, Quantity);
+	ClientWarehouseDeliveryAddCompleted(bSucceeded);
+}
+
+void ATeamProject_MOUPlayerController::ClientWarehouseDeliveryAddCompleted_Implementation(bool bSucceeded)
+{
+	OnWarehouseDeliveryAddCompleted.Broadcast(bSucceeded);
+}
+
+void ATeamProject_MOUPlayerController::ServerRemoveWarehouseDeliveryItem_Implementation(
+	TSubclassOf<AItemBase> ItemClass, int32 Quantity)
+{
+	UWarehouseDataSubsystem* Warehouse = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UWarehouseDataSubsystem>() : nullptr;
+	const bool bSucceeded = Warehouse && Warehouse->RemovePendingDeliveryItem(ItemClass, Quantity);
+	ClientWarehouseDeliveryRemoveCompleted(bSucceeded);
+}
+
+void ATeamProject_MOUPlayerController::ClientWarehouseDeliveryRemoveCompleted_Implementation(bool bSucceeded)
+{
+	OnWarehouseDeliveryRemoveCompleted.Broadcast(bSucceeded);
+}
+
 void ATeamProject_MOUPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
@@ -150,6 +178,88 @@ void ATeamProject_MOUPlayerController::SetupInputComponent()
 			InputComponent->BindAxisKey(EKeys::MouseWheelAxis, this, &ATeamProject_MOUPlayerController::OnSpectatorMouseWheel);
 			InputComponent->BindAxisKey(EKeys::MouseX, this, &ATeamProject_MOUPlayerController::OnSpectatorTurn);
 			InputComponent->BindAxisKey(EKeys::MouseY, this, &ATeamProject_MOUPlayerController::OnSpectatorLookUp);
+		}
+	}
+}
+
+// 차량 운전 모드로 전환: 캐릭터 IMC를 모두 제거하고 차량 IMC 하나만 남긴다.
+// (캐릭터 IMC가 남아 있으면 W/A/S/D 같은 공용 키를 먼저 소비해 차량 액션까지 도달하지 못한다.)
+void ATeamProject_MOUPlayerController::SwitchToVehicleInput(UInputMappingContext* DrivingContext)
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	UEnhancedInputLocalPlayerSubsystem* Subsystem =
+		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
+	if (!Subsystem)
+	{
+		return;
+	}
+
+	// 캐릭터용 IMC 전부 제거 (SetupInputComponent 에서 추가한 것과 동일 목록).
+	for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
+	{
+		if (CurrentContext)
+		{
+			Subsystem->RemoveMappingContext(CurrentContext);
+		}
+	}
+	for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
+	{
+		if (CurrentContext)
+		{
+			Subsystem->RemoveMappingContext(CurrentContext);
+		}
+	}
+
+	// 차량 IMC 추가.
+	if (DrivingContext)
+	{
+		Subsystem->AddMappingContext(DrivingContext, 0);
+		ActiveVehicleContext = DrivingContext;
+	}
+}
+
+// 차량 운전 모드 해제: 차량 IMC를 제거하고 캐릭터 IMC를 원래대로 복원한다.
+void ATeamProject_MOUPlayerController::RestoreCharacterInput()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	UEnhancedInputLocalPlayerSubsystem* Subsystem =
+		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
+	if (!Subsystem)
+	{
+		return;
+	}
+
+	// 차량 IMC 제거.
+	if (ActiveVehicleContext)
+	{
+		Subsystem->RemoveMappingContext(ActiveVehicleContext);
+		ActiveVehicleContext = nullptr;
+	}
+
+	// 캐릭터용 IMC 복원 (SetupInputComponent 와 동일 규칙).
+	for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
+	{
+		if (CurrentContext)
+		{
+			Subsystem->AddMappingContext(CurrentContext, 0);
+		}
+	}
+	if (!ShouldUseTouchControls())
+	{
+		for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
+		{
+			if (CurrentContext)
+			{
+				Subsystem->AddMappingContext(CurrentContext, 0);
+			}
 		}
 	}
 }
