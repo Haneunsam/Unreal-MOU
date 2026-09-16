@@ -30,6 +30,8 @@
 #include "UI/MOU_CharacterStatusHUD.h"
 #include "UI/SpectatorOverlayWidget.h"
 #include "EnhancedInputComponent.h"
+#include "InputActionValue.h"
+#include "Player/SpectatorCameraActor.h"
 #include "EngineUtils.h"
 #include "Blueprint/WidgetTree.h"
 
@@ -81,6 +83,23 @@ void ATeamProject_MOUPlayerController::BeginPlay()
 	ShowVoiceWidgetsIfNeeded();
 }
 
+void ATeamProject_MOUPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	GetWorldTimerManager().ClearTimer(SpectatorTransitionTimerHandle);
+
+	bIsDeathSequenceActive = false;
+
+	if (bIsSpectating)
+	{
+		StopSpectating();
+	}
+
+	HideTurnOffDisplay();
+	HideSpectatorOverlay();
+
+	Super::EndPlay(EndPlayReason);
+}
+
 void ATeamProject_MOUPlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
@@ -116,6 +135,21 @@ void ATeamProject_MOUPlayerController::SetupInputComponent()
 			{
 				EnhancedInputComponent->BindAction(IA_SpectatePrev, ETriggerEvent::Started, this, &ATeamProject_MOUPlayerController::SpectatePrevPlayer);
 			}
+			if (IA_SpectateLook)
+			{
+				EnhancedInputComponent->BindAction(IA_SpectateLook, ETriggerEvent::Triggered, this, &ATeamProject_MOUPlayerController::OnSpectatorLook);
+			}
+			if (IA_SpectateZoom)
+			{
+				EnhancedInputComponent->BindAction(IA_SpectateZoom, ETriggerEvent::Triggered, this, &ATeamProject_MOUPlayerController::OnSpectatorZoom);
+			}
+		}
+
+		if (InputComponent)
+		{
+			InputComponent->BindAxisKey(EKeys::MouseWheelAxis, this, &ATeamProject_MOUPlayerController::OnSpectatorMouseWheel);
+			InputComponent->BindAxisKey(EKeys::MouseX, this, &ATeamProject_MOUPlayerController::OnSpectatorTurn);
+			InputComponent->BindAxisKey(EKeys::MouseY, this, &ATeamProject_MOUPlayerController::OnSpectatorLookUp);
 		}
 	}
 }
@@ -278,6 +312,31 @@ void ATeamProject_MOUPlayerController::PlayerTick(float DeltaTime)
 	if (bIsSpectating)
 	{
 		CheckSpectateTargetAlive();
+
+		if (CurrentSpectateTarget.IsValid() && IsLocalPlayerController())
+		{
+			float MouseX = 0.0f;
+			float MouseY = 0.0f;
+			GetInputMouseDelta(MouseX, MouseY);
+			if (!FMath::IsNearlyZero(MouseX) || !FMath::IsNearlyZero(MouseY))
+			{
+				CurrentSpectateTarget->AddSpectatorOrbit(MouseY, MouseX);
+			}
+
+			float WheelDelta = GetInputAnalogKeyState(EKeys::MouseWheelAxis);
+			if (!FMath::IsNearlyZero(WheelDelta))
+			{
+				CurrentSpectateTarget->AddSpectatorZoom(WheelDelta);
+			}
+			else if (IsInputKeyDown(EKeys::MouseScrollUp))
+			{
+				CurrentSpectateTarget->AddSpectatorZoom(1.0f);
+			}
+			else if (IsInputKeyDown(EKeys::MouseScrollDown))
+			{
+				CurrentSpectateTarget->AddSpectatorZoom(-1.0f);
+			}
+		}
 	}
 }
 
@@ -365,7 +424,13 @@ void ATeamProject_MOUPlayerController::SetSpectateTarget(AMainCharacter* NewTarg
 		return;
 	}
 
+	if (CurrentSpectateTarget.IsValid() && CurrentSpectateTarget.Get() != NewTarget)
+	{
+		CurrentSpectateTarget->EnableSpectatorCamera(false);
+	}
+
 	CurrentSpectateTarget = NewTarget;
+	NewTarget->EnableSpectatorCamera(true);
 
 	SetViewTargetWithBlend(NewTarget, BlendTime, EViewTargetBlendFunction::VTBlend_EaseInOut, 2.0f, true);
 
@@ -390,7 +455,17 @@ void ATeamProject_MOUPlayerController::StartSpectating()
 		return;
 	}
 
+	AMainCharacter* MyChar = Cast<AMainCharacter>(GetPawn());
+	if (!MyChar || !MyChar->bIsDead)
+	{
+		return;
+	}
+
 	bIsSpectating = true;
+
+	bShowMouseCursor = false;
+	FInputModeGameOnly InputMode;
+	SetInputMode(InputMode);
 
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 	{
@@ -416,9 +491,20 @@ void ATeamProject_MOUPlayerController::StartSpectating()
 
 void ATeamProject_MOUPlayerController::StopSpectating()
 {
+	if (CurrentSpectateTarget.IsValid())
+	{
+		CurrentSpectateTarget->EnableSpectatorCamera(false);
+	}
+
 	bIsSpectating = false;
 	CurrentSpectateTarget = nullptr;
 	CurrentSpectateIndex = -1;
+
+	if (SpectatorCameraActor)
+	{
+		SpectatorCameraActor->Destroy();
+		SpectatorCameraActor = nullptr;
+	}
 
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 	{
@@ -456,6 +542,7 @@ void ATeamProject_MOUPlayerController::StartDeathSpectatorSequence()
 		return;
 	}
 
+	bIsDeathSequenceActive = true;
 	SetInGameUIHidden(true);
 	ShowTurnOffDisplay();
 
@@ -472,7 +559,18 @@ void ATeamProject_MOUPlayerController::OnTurnOffDisplayFinished()
 {
 	GetWorldTimerManager().ClearTimer(SpectatorTransitionTimerHandle);
 	HideTurnOffDisplay();
-	StartSpectating();
+
+	if (!bIsDeathSequenceActive)
+	{
+		return;
+	}
+	bIsDeathSequenceActive = false;
+
+	AMainCharacter* MyChar = Cast<AMainCharacter>(GetPawn());
+	if (MyChar && MyChar->bIsDead)
+	{
+		StartSpectating();
+	}
 }
 
 void ATeamProject_MOUPlayerController::ShowTurnOffDisplay()
@@ -580,3 +678,57 @@ void ATeamProject_MOUPlayerController::SetInGameUIHidden(bool bInHidden)
 	}
 	OnInGameUIVisibilityChanged(!bInHidden);
 }
+
+void ATeamProject_MOUPlayerController::OnSpectatorLook(const FInputActionValue& Value)
+{
+	if (!bIsSpectating || !CurrentSpectateTarget.IsValid())
+	{
+		return;
+	}
+
+	FVector2D LookAxisVector = Value.Get<FVector2D>();
+	CurrentSpectateTarget->AddSpectatorOrbit(LookAxisVector.Y, LookAxisVector.X);
+}
+
+void ATeamProject_MOUPlayerController::OnSpectatorZoom(const FInputActionValue& Value)
+{
+	if (!bIsSpectating || !CurrentSpectateTarget.IsValid())
+	{
+		return;
+	}
+
+	float ZoomDelta = Value.Get<float>();
+	CurrentSpectateTarget->AddSpectatorZoom(ZoomDelta);
+}
+
+void ATeamProject_MOUPlayerController::OnSpectatorMouseWheel(float Val)
+{
+	if (!bIsSpectating || !CurrentSpectateTarget.IsValid() || FMath::IsNearlyZero(Val))
+	{
+		return;
+	}
+
+	CurrentSpectateTarget->AddSpectatorZoom(Val);
+}
+
+void ATeamProject_MOUPlayerController::OnSpectatorTurn(float Val)
+{
+	if (!bIsSpectating || !CurrentSpectateTarget.IsValid() || FMath::IsNearlyZero(Val))
+	{
+		return;
+	}
+
+	CurrentSpectateTarget->AddSpectatorOrbit(0.0f, Val);
+}
+
+void ATeamProject_MOUPlayerController::OnSpectatorLookUp(float Val)
+{
+	if (!bIsSpectating || !CurrentSpectateTarget.IsValid() || FMath::IsNearlyZero(Val))
+	{
+		return;
+	}
+
+	CurrentSpectateTarget->AddSpectatorOrbit(Val, 0.0f);
+}
+
+
