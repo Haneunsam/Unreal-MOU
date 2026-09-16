@@ -1,26 +1,15 @@
 ﻿// MOU 로비 - 메인메뉴 + 대기실 UI.
 //
 // [이 위젯이 하는 일]
-//   로그인 다음에 오는 화면 전부다. 화면 하나가 상태에 따라 세 얼굴을 갖는다.
+//   로그인 다음 화면들을 UWidgetSwitcher 기반 스택으로 소유한다.
 //
-//     상태          1번 버튼            2번 버튼        3번 버튼
-//     ─────────────────────────────────────────────────────────────
-//     메인메뉴      방 만들기           참여하기        게임 종료
-//     대기실(참여)  준비하기 / 준비해제  커스터마이징    나가기
-//     대기실(방장)  게임 시작 *         커스터마이징    나가기
+//     MainLobby
+//       ├─ RoomCreate ── 성공 ──▶ RoomLobby ──▶ Customize
+//       ├─ RoomList   ── 성공 ──▶ RoomLobby ──▶ Customize
+//       └─ Settings
 //
-//     * 참여자가 전원 준비해야 켜진다. 판정은 서버가 한다(RoomMemberList.bAllReady).
-//
-//   버튼을 상태마다 새로 만들지 않고 같은 세 개의 라벨만 바꾸는 이유:
-//   위젯이 하나면 WBP 로 갈아끼울 때도 배치가 한 번으로 끝나고,
-//   "지금 무엇을 할 수 있는가" 가 항상 같은 자리에 있어 눈이 헤매지 않는다.
-//
-// [시스템에서의 위치]
-//     ULoginWidgetBase (로그인)
-//       └─ ULobbyWidgetBase (메인메뉴 + 대기실)   ← 이 파일
-//            ├─ URoomCreateWidgetBase             방을 "만드는" 창
-//            └─ URoomListWidgetBase               방에 "들어가는" 창
-//   두 자식 창은 방에 들어갈 때까지만 쓰인다. 들어간 뒤로는 이 위젯이 대기실이 된다.
+//   방 생성/목록/설정/커스터마이징의 뒤로가기는 한 장을 Pop한다.
+//   RoomLobby의 방 나가기는 서버 상태를 정리하고 MainLobby까지 Pop한다.
 //
 // [대기실 상태는 서버가 갖고 있다]
 //   누가 방에 있고 누가 준비했는지는 전부 서버가 진실을 안다.
@@ -53,12 +42,8 @@
 //   다시 검사하는 부분이 없다. 자세한 내용은 SERVER_INTEGRATION.md 12절 3번.
 //
 // [WBP 로 갈아끼우려면]
-//   WBP 없이 CreateWidget 만 해도 C++ 이 기본 레이아웃을 조립한다.
-//   WBP 를 만들어 부모로 지정하면 아래 BindWidgetOptional 과 같은 이름의 위젯을
-//   배치하는 것만으로 디자인이 바뀐다.
-//     필요한 이름: PrimaryButton / SecondaryButton / TertiaryButton
-//                  PrimaryButtonLabel / SecondaryButtonLabel / TertiaryButtonLabel
-//                  TitleText / StatusText / MessageText / MemberListBox
+//   WBP_LobbyWidget에는 LobbyScreenStack이라는 WidgetSwitcher를 둔다.
+//   실제 디자인은 각 페이지 베이스의 WBP 자식으로 나누어 이 루트의 클래스 속성에 넣는다.
 
 #pragma once
 
@@ -71,11 +56,17 @@
 class UButton;
 class UTextBlock;
 class UVerticalBox;
+class UWidgetSwitcher;
 class UServerSubsystem;
 class URoomCreateWidgetBase;
 class URoomListWidgetBase;
+class ULobbyFlowCoordinator;
+class ULobbyMainWidgetBase;
+class URoomLobbyWidgetBase;
+class ULobbySettingsWidgetBase;
+class ULobbyCustomizeWidgetBase;
 
-/** 로비 화면이 지금 무엇을 보여주고 있는지. */
+/** 화면 종류가 아니라 현재 서버 방 소속 상태다. 실제 화면은 PageStack이 결정한다. */
 UENUM(BlueprintType)
 enum class EMOULobbyUIState : uint8
 {
@@ -86,7 +77,7 @@ enum class EMOULobbyUIState : uint8
 };
 
 /**
- * 로비 메인메뉴 겸 대기실.
+ * 로그인 이후 로비 페이지 전체를 소유하는 스택 루트.
  *
  * 사용 흐름:
  *   1. 로그인 성공 후 자동으로 뜬다 (ULoginWidgetBase::bShowLobbyWidgetOnSuccess)
@@ -115,6 +106,22 @@ public:
 	/** 방 목록 창. 비워두면 URoomListWidgetBase 의 C++ 기본 레이아웃을 쓴다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MOU|Lobby")
 	TSubclassOf<URoomListWidgetBase> RoomListWidgetClass;
+
+	/** 스택 바닥의 메인 로비 페이지. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MOU|Lobby|Stack")
+	TSubclassOf<ULobbyMainWidgetBase> MainLobbyWidgetClass;
+
+	/** 방 생성/참여 성공 뒤 Push되는 대기실 페이지. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MOU|Lobby|Stack")
+	TSubclassOf<URoomLobbyWidgetBase> RoomLobbyWidgetClass;
+
+	/** 환경설정 페이지. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MOU|Lobby|Stack")
+	TSubclassOf<ULobbySettingsWidgetBase> SettingsWidgetClass;
+
+	/** 방 대기실에서 여는 커스터마이징 페이지. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MOU|Lobby|Stack")
+	TSubclassOf<ULobbyCustomizeWidgetBase> CustomizeWidgetClass;
 
 	/** 리슨서버가 실제로 열 포트. 방 생성 창에 그대로 넘긴다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MOU|Lobby")
@@ -182,8 +189,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MOU|Lobby")
 	bool bPreloadMapWhileWaiting = false;
 
-	/** 방 만들기 / 참여하기 창이 열려 있는 동안 이 화면을 숨길지. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MOU|Lobby")
+	/** @deprecated LobbyScreenStack이 페이지 가시성을 관리하므로 더 이상 사용하지 않는다. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MOU|Lobby",
+		meta = (DeprecatedProperty, DeprecationMessage = "LobbyScreenStack이 페이지 가시성을 관리합니다."))
 	bool bHideWhileChildOpen = true;
 
 	/**
@@ -205,6 +213,17 @@ public:
 	/** 방 목록 창을 연다. 메인메뉴에서만 의미가 있다. */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
 	void OpenRoomList();
+
+	/** 환경설정 페이지를 스택에 Push한다. */
+	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby|Stack")
+	void OpenSettings();
+
+	/** 현재 페이지의 뒤로가기 규칙을 실행한다. 루트 페이지는 Pop하지 않는다. */
+	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby|Stack")
+	bool NavigateBack();
+
+	UFUNCTION(BlueprintPure, Category = "MOU|Lobby|Stack")
+	int32 GetStackDepth() const { return PageStack.Num(); }
 
 	/** 내 준비 상태를 뒤집는다. 참여자만 의미가 있다. */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
@@ -272,10 +291,14 @@ public:
 	void OnCustomizeRequested();
 
 protected:
-	// --- 위젯 바인딩 (WBP 에 같은 이름이 있으면 자동 연결) -------------------
+	/** WBP_LobbyWidget에는 이 이름의 WidgetSwitcher 하나만 있으면 된다. */
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby|Stack")
+	TObjectPtr<UWidgetSwitcher> LobbyScreenStack;
+
+	// --- 구형 WBP 바인딩 --------------------------------------------------
 	//
-	// 버튼 이름이 Primary/Secondary/Tertiary 인 이유는 상태마다 하는 일이 달라서다.
-	// HostButton 같은 이름을 붙이면 대기실에서 "준비하기" 를 담당할 때 거짓말이 된다.
+	// 기존 WBP_LobbyWidget의 로드를 깨지 않기 위해 마이그레이션 동안만 남긴다.
+	// 새 UI는 LobbyPageWidgetBase.h의 페이지별 고정 이름을 사용한다.
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
 	TObjectPtr<UTextBlock> TitleText;
@@ -344,14 +367,23 @@ private:
 
 	// --- 자식 창에서 올라오는 결과 (네이티브 델리게이트) ---------------------
 
-	void HandleRoomCreateFinished(int32 RoomId, const FString& RoomPassword);
 	void HandleRoomCreateCancelled();
-	void HandleRoomJoinApproved(const FMOURoomJoinResult& Result, const FString& RoomPassword);
 	void HandleRoomListClosed();
+	void HandleFlowRoomEntered(int32 RoomId, bool bIsHost, const FString& RoomPassword);
+	void HandleSettingsClosed();
+	void HandleCustomizeClosed();
 
 	// --- 내부 -------------------------------------------------------------
 
 	void BuildDefaultLayout();
+	void InitializePageStack();
+	void ResetPageStack();
+	void PushPage(UUserWidget* Page);
+	bool PopPage();
+	void PopToMainMenu();
+	bool IsTopPage(const UUserWidget* Page) const;
+	ULobbyMainWidgetBase* CreateMainLobbyPage();
+	URoomLobbyWidgetBase* CreateRoomLobbyPage();
 
 	/** 대기실로 전환한다. */
 	void EnterWaitingRoom(int32 RoomId, bool bIsHost);
@@ -368,8 +400,6 @@ private:
 	/** 대기실 명단을 다시 그린다. */
 	void RebuildMemberList();
 
-	void CloseChildWidgets();
-	void SetPanelVisible(bool bVisible);
 
 	// ★ TravelAsHost / TravelAsClient / BeginPreloadHostMap 은 2026-08-29 에
 	//   UServerSubsystem 으로 옮겼다(각각 TravelAsHost / TravelToHost / BeginPreloadMap).
@@ -385,8 +415,6 @@ private:
 	/** 접속/이동 실패 사유를 화면에 띄운다. UServerSubsystem::OnTravelFailed 구독. */
 	void HandleTravelFailed(const FString& Reason);
 
-	FDelegateHandle TravelFailedHandle;
-
 	UServerSubsystem* GetServerSubsystem() const;
 
 	UPROPERTY()
@@ -394,6 +422,21 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<URoomListWidgetBase> RoomListWidget;
+
+	UPROPERTY()
+	TObjectPtr<ULobbyMainWidgetBase> MainLobbyWidget;
+
+	UPROPERTY()
+	TObjectPtr<URoomLobbyWidgetBase> RoomLobbyWidget;
+
+	UPROPERTY()
+	TObjectPtr<ULobbySettingsWidgetBase> SettingsWidget;
+
+	UPROPERTY()
+	TObjectPtr<ULobbyCustomizeWidgetBase> CustomizeWidget;
+
+	UPROPERTY()
+	TArray<TObjectPtr<UUserWidget>> PageStack;
 
 	UPROPERTY()
 	EMOULobbyUIState UIState = EMOULobbyUIState::MainMenu;

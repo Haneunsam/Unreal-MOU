@@ -139,6 +139,9 @@ struct FMOURoomMember
 {
 	GENERATED_BODY()
 
+	UPROPERTY(BlueprintReadOnly, Category = "MOU|Lobby")
+	int32 SlotIndex = INDEX_NONE;
+
 	/** 계정 번호. 원본은 uint64 지만 블루프린트가 못 다뤄 int64 로 받는다. */
 	UPROPERTY(BlueprintReadOnly, Category = "MOU|Lobby")
 	int64 UserId = 0;
