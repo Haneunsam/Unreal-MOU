@@ -54,6 +54,34 @@ void ATeamProject_MOUPlayerController::ClientWarehouseDeliverySaveCompleted_Impl
 	OnWarehouseDeliverySaveCompleted.Broadcast(bSucceeded);
 }
 
+void ATeamProject_MOUPlayerController::ServerAddWarehouseDeliveryItem_Implementation(
+	TSubclassOf<AItemBase> ItemClass, int32 Quantity)
+{
+	UWarehouseDataSubsystem* Warehouse = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UWarehouseDataSubsystem>() : nullptr;
+	const bool bSucceeded = Warehouse && Warehouse->AddPendingDeliveryItem(ItemClass, Quantity);
+	ClientWarehouseDeliveryAddCompleted(bSucceeded);
+}
+
+void ATeamProject_MOUPlayerController::ClientWarehouseDeliveryAddCompleted_Implementation(bool bSucceeded)
+{
+	OnWarehouseDeliveryAddCompleted.Broadcast(bSucceeded);
+}
+
+void ATeamProject_MOUPlayerController::ServerRemoveWarehouseDeliveryItem_Implementation(
+	TSubclassOf<AItemBase> ItemClass, int32 Quantity)
+{
+	UWarehouseDataSubsystem* Warehouse = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UWarehouseDataSubsystem>() : nullptr;
+	const bool bSucceeded = Warehouse && Warehouse->RemovePendingDeliveryItem(ItemClass, Quantity);
+	ClientWarehouseDeliveryRemoveCompleted(bSucceeded);
+}
+
+void ATeamProject_MOUPlayerController::ClientWarehouseDeliveryRemoveCompleted_Implementation(bool bSucceeded)
+{
+	OnWarehouseDeliveryRemoveCompleted.Broadcast(bSucceeded);
+}
+
 void ATeamProject_MOUPlayerController::BeginPlay()
 {
 	Super::BeginPlay();

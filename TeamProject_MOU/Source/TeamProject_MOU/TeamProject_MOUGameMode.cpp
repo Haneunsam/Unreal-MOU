@@ -16,6 +16,7 @@
 #include "Subsystems/WarehouseDataSubsystem.h"
 #include "GameFramework/PlayerState.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/PackageName.h"
 #include "TimerManager.h"
 
 ATeamProject_MOUGameMode::ATeamProject_MOUGameMode()
@@ -40,6 +41,13 @@ void ATeamProject_MOUGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 	TryStartLevelTimer();
+}
+
+bool ATeamProject_MOUGameMode::IsLobbyLevel() const
+{
+	if (LobbyMap.IsNull() || !GetWorld()) return false;
+	const FString LobbyPackage = LobbyMap.ToSoftObjectPath().GetLongPackageName();
+	return UGameplayStatics::GetCurrentLevelName(this, true) == FPackageName::GetShortName(LobbyPackage);
 }
 
 void ATeamProject_MOUGameMode::AdvanceHalfDay()

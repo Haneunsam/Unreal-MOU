@@ -50,6 +50,7 @@ void AProjectGameStateBase::PublishWarehouseStorage()
 	{
 		WarehouseStorage.Items = Instance->SavedStoredItems;
 		WarehouseStorage.Instances = Instance->SavedStoredItemInstances;
+		WarehouseStorage.PendingDelivery = Instance->PendingDeliveryData;
 		++WarehouseStorage.Revision;
 		ForceNetUpdate();
 	}
@@ -62,7 +63,8 @@ void AProjectGameStateBase::OnRep_WarehouseStorage()
 	{
 		if (UWarehouseDataSubsystem* Warehouse = Instance->GetSubsystem<UWarehouseDataSubsystem>())
 		{
-			Warehouse->ApplyReplicatedStorage(WarehouseStorage.Items, WarehouseStorage.Instances);
+			Warehouse->ApplyReplicatedStorage(WarehouseStorage.Items, WarehouseStorage.Instances,
+				WarehouseStorage.PendingDelivery);
 		}
 	}
 }

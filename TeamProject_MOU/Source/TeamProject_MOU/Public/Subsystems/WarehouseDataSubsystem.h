@@ -25,9 +25,15 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Warehouse|Storage")
 	FOnStoredWarehouseChanged OnStoredItemsChanged;
 
+	// Refresh the confirmed delivery list on both host and clients.
+	UPROPERTY(BlueprintAssignable, Category = "Warehouse|Delivery")
+	FOnStoredWarehouseChanged OnPendingDeliveryChanged;
+
+	void NotifyPendingDeliveryChanged();
+
 	void NotifyStoredWarehouseChanged();
 	void ApplyReplicatedStorage(const TArray<FStoredItemData>& Items,
-		const TArray<FStoredItemInstanceData>& Instances);
+		const TArray<FStoredItemInstanceData>& Instances, const FDeliveryData& PendingDelivery);
 
 	// 창고 요약 데이터를 GameInstance에 저장
 	UFUNCTION(BlueprintCallable, Category = "Warehouse|Storage")
@@ -88,6 +94,17 @@ public:
 	// Client UI must call ServerSaveWarehouseDelivery on its owning controller.
 	UFUNCTION(BlueprintCallable, Category = "Warehouse|Delivery")
 	bool SavePendingDeliveryDataFromRequest(const TArray<FStoredItemData>& RequestedItems);
+
+	// Immediately reserve items in the shared persistent manifest.
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Warehouse|Delivery")
+	bool AddPendingDeliveryItem(TSubclassOf<AItemBase> ItemClass, int32 Quantity = 1);
+
+	// Shared manifest: any player may return items while preparing in the lobby.
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Warehouse|Delivery")
+	bool RemovePendingDeliveryItem(TSubclassOf<AItemBase> ItemClass, int32 Quantity = 1);
+
+	UFUNCTION(BlueprintPure, Category = "Warehouse|Delivery")
+	bool CanEditPendingDelivery() const;
 
 	UFUNCTION(BlueprintCallable, Category = "Warehouse|Delivery")
 	void SavePendingDeliveryData(const FDeliveryData& InDeliveryData);
