@@ -4,6 +4,7 @@
 #include "MiniGame/StockGraphWidget.h"
 #include "Rendering/DrawElements.h"
 #include "TimerManager.h"
+#include "GameFramework/GameStateBase.h"
 
 void UStockGraphWidget::NativeConstruct()
 {
@@ -21,7 +22,7 @@ void UStockGraphWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
-void UStockGraphWidget::StartStockGraph(float InStopMultiplier)
+void UStockGraphWidget::StartStockGraph(float InStopMultiplier, float InStartServerTime)
 {
 	// 이전에 실행 중인 그래프와 Timer 정리
 	StopStockGraph();
@@ -36,6 +37,9 @@ void UStockGraphWidget::StartStockGraph(float InStopMultiplier)
 	// 배율 및 경과 시간 초기화
 	CurrentMultiplier = MinStopMultiplier;
 	ElapsedTime = 0.0f;
+
+	// 서버에서 라운드가 시작된 시간 저장
+	RoundStartServerTime = InStartServerTime;
 
 	// StockMachine에서 전달받은 배율 저장
 	StopMultiplier = FMath::Clamp(
@@ -94,18 +98,26 @@ void UStockGraphWidget::UpdateStockGraph()
 		return;
 	}
 
-	// 그래프 경과 시간 증가
-	ElapsedTime += UpdateInterval;
+	// 서버 기준 시간으로 실제 라운드 경과 시간 계산
+	if (const AGameStateBase* GameState = GetWorld()->GetGameState<AGameStateBase>())
+	{
+		ElapsedTime = FMath::Max(
+			0.0f,
+			GameState->GetServerWorldTimeSeconds() - RoundStartServerTime
+		);
+	}
+	else
+	{
+		// GameState를 얻지 못한 경우 기존 Timer 방식 사용
+		ElapsedTime += UpdateInterval;
+	}
 
 	// 전체 그래프 진행률
 	// GraphDuration 동안 0.0 → 1.0으로 증가
 	const float Progress = FMath::Clamp(ElapsedTime / GraphDuration, 0.0f, 1.0f);
 
-	// 기본적으로 조금씩 상승
-	const float PowerCurve = FMath::Pow(Progress, CurvePower);
-
-	// 그래프를 후반에 급격하게 상승시키기 위한 곡선
-	const float CurveAlpha = FMath::Lerp(Progress, PowerCurve, 0.65f);
+	// 초반은 완만하고 후반으로 갈수록 급격하게 상승
+	const float CurveAlpha = FMath::Pow(Progress, CurvePower);
 
 	// 모든 라운드에서 동일한 X 진행
 	CurrentX = FMath::Lerp(100.0f, MaxX, Progress);
