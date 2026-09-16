@@ -50,7 +50,8 @@ namespace MOU
 	//            추가했다. 릴레이는 UE 게임 패킷을 해석하지 않고 그대로 전달하며,
 	//            방장/참여자는 실제 게임 소켓에서 일회성 capability 로만 등록한다.
 	// v12: RoomMemberInfo에 고정 좌석 SlotIndex 추가. 서버/클라이언트 함께 갱신.
-	constexpr uint16_t kProtocolVersion = 12;
+	// v13: 이미 접속 중인 계정의 로그인을 거부하는 결과 코드 추가.
+	constexpr uint16_t kProtocolVersion = 13;
 
 	// BodySize 가 이 값을 넘으면 악성 패킷으로 보고 연결을 끊는다.
 	constexpr uint32_t kMaxBodySize = 4096;
@@ -421,6 +422,7 @@ namespace MOU
 		DuplicateId     = 5,   // 가입하려는 아이디가 이미 있다
 		InvalidFormat   = 6,   // 아이디/비번 길이 규칙 위반
 		ServerError     = 7,   // DB 오류 등 서버 문제. 클라이언트 잘못이 아니다
+		AlreadyOnline   = 8,   // 다른 세션에서 이미 로그인한 계정
 	};
 
 #pragma pack(push, 1)

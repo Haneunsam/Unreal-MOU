@@ -236,6 +236,7 @@ FString UServerSubsystem::GetLoginResultText(EChatLoginResultBP Result)
 	case EChatLoginResultBP::DuplicateId:     return TEXT("이미 사용 중인 아이디입니다.");
 	case EChatLoginResultBP::InvalidFormat:   return TEXT("아이디 또는 비밀번호 형식이 올바르지 않습니다.");
 	case EChatLoginResultBP::ServerError:     return TEXT("서버 오류입니다. 잠시 후 다시 시도해 주세요.");
+	case EChatLoginResultBP::AlreadyOnline:   return TEXT("이미 접속 중인 계정입니다. 기존 접속을 종료한 뒤 다시 시도해 주세요.");
 	default:                                  return TEXT("알 수 없는 오류입니다.");
 	}
 }
@@ -786,7 +787,8 @@ bool UServerSubsystem::Tick(float DeltaTime)
 				// 재접속 때마다 틀린 비밀번호를 자동 재전송하는 것을 막는다.
 				if (LoginResult.Result == EChatLoginResultBP::AccountNotFound
 					|| LoginResult.Result == EChatLoginResultBP::WrongPassword
-					|| LoginResult.Result == EChatLoginResultBP::InvalidFormat)
+					|| LoginResult.Result == EChatLoginResultBP::InvalidFormat
+					|| LoginResult.Result == EChatLoginResultBP::AlreadyOnline)
 				{
 					bHasPendingLogin = false;
 					PendingPassword.Empty();
