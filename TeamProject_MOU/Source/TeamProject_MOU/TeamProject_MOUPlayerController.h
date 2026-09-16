@@ -258,7 +258,16 @@ protected:
 	TObjectPtr<UInputAction> IA_SpectatePrev;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Spectator")
+	TObjectPtr<UInputAction> IA_SpectateLook;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Spectator")
+	TObjectPtr<UInputAction> IA_SpectateZoom;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Spectator")
 	int32 SpectatorMappingPriority = 100;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Spectator")
+	TObjectPtr<class ASpectatorCameraActor> SpectatorCameraActor;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Spectator")
 	TSubclassOf<UUserWidget> TurnOffDisplayWidgetClass;
@@ -285,11 +294,18 @@ protected:
 
 	/** Gameplay initialization */
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	virtual void PlayerTick(float DeltaTime) override;
 
 	/** Input mapping context setup */
 	virtual void SetupInputComponent() override;
+
+	void OnSpectatorLook(const struct FInputActionValue& Value);
+	void OnSpectatorZoom(const struct FInputActionValue& Value);
+	void OnSpectatorMouseWheel(float Val);
+	void OnSpectatorTurn(float Val);
+	void OnSpectatorLookUp(float Val);
 
 	/** Returns true if the player should use UMG touch controls */
 	bool ShouldUseTouchControls() const;
@@ -298,6 +314,7 @@ private:
 	TWeakObjectPtr<AMainCharacter> CurrentSpectateTarget;
 	int32 CurrentSpectateIndex = -1;
 	bool bIsSpectating = false;
+	bool bIsDeathSequenceActive = false;
 
 	TWeakObjectPtr<AActor> LastViewTarget;
 
