@@ -76,7 +76,7 @@ private:
 	// 그래프의 급등 정도
 	// 값이 높을수록 초반은 완만하고 후반에 급격하게 상승
 	UPROPERTY(EditDefaultsOnly, Category = "Stock|Graph", meta = (ClampMin = "0.1"))
-	float CurvePower = 2.8f;
+	float CurvePower = 2.2f;
 
 	// 현재 그래프 X 위치
 	float CurrentX = 100.0f;

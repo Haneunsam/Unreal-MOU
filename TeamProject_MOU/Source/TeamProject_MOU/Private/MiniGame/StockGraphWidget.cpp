@@ -116,11 +116,8 @@ void UStockGraphWidget::UpdateStockGraph()
 	// GraphDuration 동안 0.0 → 1.0으로 증가
 	const float Progress = FMath::Clamp(ElapsedTime / GraphDuration, 0.0f, 1.0f);
 
-	// 기본적으로 조금씩 상승
-	const float PowerCurve = FMath::Pow(Progress, CurvePower);
-
-	// 그래프를 후반에 급격하게 상승시키기 위한 곡선
-	const float CurveAlpha = FMath::Lerp(Progress, PowerCurve, 0.65f);
+	// 초반은 완만하고 후반으로 갈수록 급격하게 상승
+	const float CurveAlpha = FMath::Pow(Progress, CurvePower);
 
 	// 모든 라운드에서 동일한 X 진행
 	CurrentX = FMath::Lerp(100.0f, MaxX, Progress);
