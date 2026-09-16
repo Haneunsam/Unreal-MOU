@@ -1,8 +1,8 @@
 ﻿// MOU 로비 - 방 생성 UI 구현.
 //
-// 이 파일은 소켓/패킷을 전혀 모른다. UServerSubsystem 하고만 대화한다.
-//   보낼 때: UServerSubsystem::CreateRoom()
-//   받을 때: UServerSubsystem::OnRoomCreated
+// 이 파일은 소켓/패킷을 전혀 모른다.
+//   보낼 때/받을 때: ULobbyFlowCoordinator
+//   상태 조회와 도달성 프로브: UServerSubsystem
 
 #include "Server/Lobby/RoomCreateWidgetBase.h"
 
@@ -10,6 +10,7 @@
 // ChatProtocol.h 를 직접 넣지 않고 ChatFraming.h 를 거치는 이유는
 // 그쪽이 THIRD_PARTY_INCLUDES_START 로 감싸주기 때문이다.
 #include "Server/Net/ChatFraming.h"
+#include "Server/Lobby/LobbyFlowCoordinator.h"
 #include "Server/ServerSubsystem.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -63,10 +64,10 @@ void URoomCreateWidgetBase::NativeConstruct()
 	// NativeConstruct 는 뷰포트에 다시 붙을 때마다 불릴 수 있어 중복 구독을 막는다.
 	if (!bSubscribed)
 	{
-		if (UServerSubsystem* Chat = GetServerSubsystem())
+		if (ULobbyFlowCoordinator* Flow = GetFlowCoordinator())
 		{
-			Chat->OnRoomCreated.AddDynamic(this, &URoomCreateWidgetBase::HandleRoomCreated);
-			Chat->OnReachabilityChecked.AddDynamic(this, &URoomCreateWidgetBase::HandleReachabilityChecked);
+			Flow->OnRoomCreateCompleted.AddUObject(this, &URoomCreateWidgetBase::HandleRoomCreated);
+			Flow->OnReachabilityChecked.AddUObject(this, &URoomCreateWidgetBase::HandleReachabilityChecked);
 			bSubscribed = true;
 		}
 	}
@@ -146,10 +147,10 @@ void URoomCreateWidgetBase::NativeDestruct()
 	// 구독 해제를 여기서 반드시 해야 파괴된 위젯으로 델리게이트가 날아오지 않는다.
 	if (bSubscribed)
 	{
-		if (UServerSubsystem* Chat = GetServerSubsystem())
+		if (ULobbyFlowCoordinator* Flow = GetFlowCoordinator())
 		{
-			Chat->OnRoomCreated.RemoveDynamic(this, &URoomCreateWidgetBase::HandleRoomCreated);
-			Chat->OnReachabilityChecked.RemoveDynamic(this, &URoomCreateWidgetBase::HandleReachabilityChecked);
+			Flow->OnRoomCreateCompleted.RemoveAll(this);
+			Flow->OnReachabilityChecked.RemoveAll(this);
 		}
 		bSubscribed = false;
 	}
@@ -270,6 +271,15 @@ UServerSubsystem* URoomCreateWidgetBase::GetServerSubsystem() const
 	return nullptr;
 }
 
+ULobbyFlowCoordinator* URoomCreateWidgetBase::GetFlowCoordinator() const
+{
+	if (const UGameInstance* GameInstance = GetGameInstance())
+	{
+		return GameInstance->GetSubsystem<ULobbyFlowCoordinator>();
+	}
+	return nullptr;
+}
+
 void URoomCreateWidgetBase::TryCreateRoom()
 {
 	if (bBusy)
@@ -359,16 +369,20 @@ void URoomCreateWidgetBase::TryCreateRoom()
 
 void URoomCreateWidgetBase::SubmitCreateRoom()
 {
-	UServerSubsystem* Server = GetServerSubsystem();
-	if (Server == nullptr)
+	ULobbyFlowCoordinator* Flow = GetFlowCoordinator();
+	if (Flow == nullptr)
 	{
 		SetBusy(false);
-		SetMessage(TEXT("서버 시스템을 찾을 수 없습니다."), true);
+		SetMessage(TEXT("로비 흐름 관리자를 찾을 수 없습니다."), true);
 		return;
 	}
 
 	SetMessage(TEXT("방을 만드는 중..."), false);
-	Server->CreateRoom(SubmittedTitle, SubmittedPassword, ResolveAdvertisedPort());
+	if (!Flow->CreateRoom(SubmittedTitle, SubmittedPassword, ResolveAdvertisedPort()))
+	{
+		SetBusy(false);
+		SetMessage(TEXT("다른 방 요청이 처리 중입니다."), true);
+	}
 }
 
 int32 URoomCreateWidgetBase::ResolveAdvertisedPort() const
@@ -463,6 +477,15 @@ void URoomCreateWidgetBase::HandleReachabilityChecked(bool bReachable, const FSt
 
 void URoomCreateWidgetBase::CancelCreate()
 {
+	if (const ULobbyFlowCoordinator* Flow = GetFlowCoordinator())
+	{
+		if (Flow->GetOperation() == EMOULobbyFlowOperation::CreatingRoom)
+		{
+			SetMessage(TEXT("방 생성 응답을 기다리는 중에는 닫을 수 없습니다."), false);
+			return;
+		}
+	}
+
 	// ★ 호스트가 되기를 그만뒀으므로 열어둔 포트를 닫는다.
 	//   성공 시에는 닫지 않는다 — 그때는 매핑이 계속 살아 있어야 참가자가 들어온다.
 	if (UNatPortMappingSubsystem* Nat = GetNatSubsystem())
@@ -480,7 +503,11 @@ void URoomCreateWidgetBase::CancelCreate()
 void URoomCreateWidgetBase::HandleCreateClicked() { TryCreateRoom(); }
 void URoomCreateWidgetBase::HandleCancelClicked() { CancelCreate(); }
 
-void URoomCreateWidgetBase::HandleRoomCreated(bool bSuccess, int32 RoomId, EMOURoomResultBP Result)
+void URoomCreateWidgetBase::HandleRoomCreated(
+	bool bSuccess,
+	int32 RoomId,
+	EMOURoomResultBP Result,
+	const FString& RoomPassword)
 {
 	SetBusy(false);
 
@@ -496,11 +523,10 @@ void URoomCreateWidgetBase::HandleRoomCreated(bool bSuccess, int32 RoomId, EMOUR
 	// 소유자(로비)와 블루프린트에 같은 정보를 넘긴다.
 	// 여기서 리슨서버를 여는 것이 다음 차례지만, 맵 이름은 게임 쪽 사정이라
 	// 이 위젯이 결정하지 않는다.
-	const FString UsedPassword = SubmittedPassword;
 	SubmittedPassword.Empty();
 
-	OnRoomCreateSucceeded(RoomId, UsedPassword);
-	OnRoomCreateFinished.ExecuteIfBound(RoomId, UsedPassword);
+	OnRoomCreateSucceeded(RoomId, RoomPassword);
+	OnRoomCreateFinished.ExecuteIfBound(RoomId, RoomPassword);
 
 	if (bRemoveOnSuccess)
 	{
@@ -514,6 +540,10 @@ void URoomCreateWidgetBase::SetBusy(bool bInBusy)
 	if (CreateButton != nullptr)
 	{
 		CreateButton->SetIsEnabled(!bInBusy);
+	}
+	if (CancelButton != nullptr)
+	{
+		CancelButton->SetIsEnabled(!bInBusy);
 	}
 }
 

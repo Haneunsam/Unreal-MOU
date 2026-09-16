@@ -21,6 +21,11 @@ Server_Build/*.db
 Server_Build/*.db-wal
 Server_Build/*.db-shm
 
+# Isolated CMake builds and regression-test databases.
+Server_Build/cmake_refactor/
+Server_Build/friends-*/
+Server_Build/smoke-*/
+
 *.exe
 *.obj
 *.ilk
