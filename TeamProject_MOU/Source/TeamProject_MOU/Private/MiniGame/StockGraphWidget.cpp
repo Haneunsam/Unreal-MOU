@@ -30,6 +30,9 @@ void UStockGraphWidget::StartStockGraph(float InStopMultiplier, float InStartSer
 	// 기존 그래프 초기화
 	ResetStockGraph();
 
+	// 이전 라운드 현금화 마커 초기화
+	ResetCashOutMarker();
+
 	// 그래프 시작 위치 설정
 	CurrentX = 100.0f;
 	CurrentY = 600.0f;
@@ -82,6 +85,7 @@ void UStockGraphWidget::StopStockGraph()
 		GetWorld()->GetTimerManager().ClearTimer(GraphTimerHandle);
 	}
 }
+
 void UStockGraphWidget::UpdateStockGraph()
 {
 	// 그래프가 진행 중이 아니면 갱신하지 않음.
@@ -165,6 +169,36 @@ void UStockGraphWidget::ResetStockGraph()
 	InvalidateLayoutAndVolatility();
 }
 
+void UStockGraphWidget::SetCashOutMarker(float InMultiplier)
+{
+	// 배율을 1.0 ~ 5.0 범위로 제한
+	const float ClampedMultiplier = FMath::Clamp(InMultiplier, MinStopMultiplier, MaxStopMultiplier);
+	
+	// 현재 배율을 0 ~ 1 범위로 제한
+	const float NormalizedMultiplier = (ClampedMultiplier - MinStopMultiplier) / (MaxStopMultiplier - MinStopMultiplier);
+
+	// 그래프 상승 곡선을 역산하여 해당 배율의 진행률 계산
+	const float Progress = FMath::Pow(NormalizedMultiplier, 1.0f / CurvePower);
+
+	// 실제 그래프 좌표 계산
+	const float MarkerX = FMath::Lerp(100.0f, MaxX, Progress);
+
+	const float MarkerY = FMath::Lerp(600.0f, 120.0f, NormalizedMultiplier);
+
+	CashOutMarkerPoint = FVector2D(MarkerX, MarkerY);
+	ShowCashOutMarker = true;
+
+	InvalidateLayoutAndVolatility();
+}
+
+void UStockGraphWidget::ResetCashOutMarker()
+{
+	ShowCashOutMarker = false;
+	CashOutMarkerPoint = FVector2D::ZeroVector;
+
+	InvalidateLayoutAndVolatility();
+}
+
 int32 UStockGraphWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool ParentEnabled) const
 {
 	// 부모 위젯의 기본 Paint 처리
@@ -203,6 +237,59 @@ int32 UStockGraphWidget::NativePaint(const FPaintArgs& Args, const FGeometry& Al
 		true,
 		5.0f
 	);
+
+	// 현금화 지점 마커 표시
+	if (ShowCashOutMarker)
+	{
+		const float MarkerSize = 12.0f;
+
+		TArray<FVector2f> MarkerLine1;
+		MarkerLine1.Add(FVector2f(
+			CashOutMarkerPoint.X - MarkerSize,
+			CashOutMarkerPoint.Y - MarkerSize
+		));
+		MarkerLine1.Add(FVector2f(
+			CashOutMarkerPoint.X + MarkerSize,
+			CashOutMarkerPoint.Y + MarkerSize
+		));
+
+		TArray<FVector2f> MarkerLine2;
+		MarkerLine2.Add(FVector2f(
+			CashOutMarkerPoint.X - MarkerSize,
+			CashOutMarkerPoint.Y + MarkerSize
+		));
+		MarkerLine2.Add(FVector2f(
+			CashOutMarkerPoint.X + MarkerSize,
+			CashOutMarkerPoint.Y - MarkerSize
+		));
+
+		const int32 MarkerLayer = GraphLayer + 1;
+
+		FSlateDrawElement::MakeLines(
+			OutDrawElements,
+			MarkerLayer,
+			AllottedGeometry.ToPaintGeometry(),
+			MarkerLine1,
+			ESlateDrawEffect::None,
+			FLinearColor(1.0f, 0.5f, 0.0f, 1.0f),
+			true,
+			7.0f
+		);
+
+		FSlateDrawElement::MakeLines(
+			OutDrawElements,
+			MarkerLayer,
+			AllottedGeometry.ToPaintGeometry(),
+			MarkerLine2,
+			ESlateDrawEffect::None,
+			FLinearColor(1.0f, 0.5f, 0.0f, 1.0f),
+			true,
+			7.0f
+		);
+
+		return MarkerLayer;
+	}
+
 
 	return GraphLayer;
 }
