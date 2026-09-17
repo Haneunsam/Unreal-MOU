@@ -11,9 +11,9 @@
 //       ├─ URoomCreateWidgetBase      방을 "만드는" 쪽
 //       └─ URoomListWidgetBase     ← 이 파일. 방에 "들어가는" 쪽
 //            └─ URoomListEntryWidget   목록의 한 줄
-//   서버와 직접 대화하지 않는다. UServerSubsystem 하고만 대화한다.
-//     보낼 때: UServerSubsystem::RequestRoomList() / JoinRoom()
-//     받을 때: UServerSubsystem::OnRoomListReceived / OnRoomJoinCompleted
+//   서버 응답의 수명은 ULobbyFlowCoordinator 가 관리한다.
+//     보낼 때: ULobbyFlowCoordinator::RequestRoomList() / JoinRoom()
+//     받을 때: Coordinator 의 OnRoomListReceived / OnRoomJoinCompleted
 //   대응하는 서버 코드: MOU_Server/Server/Server.cpp 의 RoomListReq/RoomJoinReq 핸들러,
 //                       MOU_Server/Server/Rooms.cpp 의 Rooms::ListWaiting() / Rooms::Join()
 //
@@ -52,12 +52,13 @@ class UScrollBox;
 class UTextBlock;
 class UVerticalBox;
 class UServerSubsystem;
+class ULobbyFlowCoordinator;
 
 /** 목록의 한 줄에서 "참여" 를 눌렀을 때. 목록 위젯이 받는다. */
 DECLARE_DELEGATE_OneParam(FOnRoomEntryJoinClicked, int32 /*RoomId*/);
 
 /**
- * 참여가 승인됐을 때 C++ 소유자에게 알리는 통로 (ULobbyWidgetBase 가 받는다).
+ * 참여가 승인됐을 때 선택적인 C++ 소유자에게 알리는 호환 통로.
  *
  * @param Result       호스트 주소가 담긴 승인 결과. Result.MakeTravelURL() 로 URL 을 만든다
  * @param RoomPassword 사용자가 입력한 방 비밀번호(공개방이면 빈 문자열).
@@ -216,7 +217,7 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "MOU|Lobby")
 	void OnRoomJoinApproved(const FMOURoomJoinResult& Result, const FString& RoomPassword);
 
-	// --- C++ 소유자용 (ULobbyWidgetBase 가 바인딩한다) ----------------------
+	// --- C++ 소유자용 호환 델리게이트 ------------------------------------
 
 	FOnRoomJoinApprovedNative OnRoomJoinApprovedNative;
 	FOnRoomListClosed         OnRoomListClosed;
@@ -257,13 +258,11 @@ protected:
 	TObjectPtr<UButton> JoinCancelButton;
 
 private:
-	// --- 델리게이트 수신부 (AddDynamic 대상이라 전부 UFUNCTION) --------------
+	// --- 흐름 관리자 / UI 델리게이트 수신부 -------------------------------
 
-	UFUNCTION()
 	void HandleRoomListReceived(const TArray<FMOURoomInfo>& Rooms);
 
-	UFUNCTION()
-	void HandleRoomJoinCompleted(const FMOURoomJoinResult& Result);
+	void HandleRoomJoinCompleted(const FMOURoomJoinResult& Result, const FString& RoomPassword);
 
 	UFUNCTION()
 	void HandleRefreshClicked();
@@ -296,6 +295,7 @@ private:
 	void SetBusy(bool bBusy);
 
 	UServerSubsystem* GetServerSubsystem() const;
+	ULobbyFlowCoordinator* GetFlowCoordinator() const;
 
 	/** 지금 화면에 떠 있는 줄들. 목록을 다시 받을 때 통째로 지우고 새로 만든다. */
 	UPROPERTY()
@@ -306,9 +306,6 @@ private:
 
 	/** 비밀번호 입력을 기다리는 방. 0 이면 대기 중이 아니다. */
 	int32 PendingJoinRoomId = 0;
-
-	/** 참여 요청에 실제로 실어 보낸 비밀번호. 승인되면 여행 URL 에 다시 쓴다. */
-	FString SubmittedPassword;
 
 	FTimerHandle RefreshTimerHandle;
 

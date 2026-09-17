@@ -10,16 +10,10 @@
 #include "TeamProject_MOU.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
-// 로그인 화면 자동 표시를 위해 포함한다. Chat 서브시스템은 이 컨트롤러를 몰라도
-// 되지만(느슨한 결합), 컨트롤러는 "게임이 시작되면 로그인 화면부터 띄운다" 는
-// 정책을 알아야 하므로 여기서만 의존한다.
-#include "Server/ServerSubsystem.h"
-#include "Server/Lobby/LoginWidgetBase.h"
 #include "Engine/GameInstance.h"
 
 // 음성 RPC 창구. 컨트롤러는 음성 시스템의 내부를 몰라도 되지만,
 // "모든 컨트롤러가 음성 창구를 하나씩 갖는다" 는 것은 컨트롤러의 책임이다
-// (채팅 로그인 위젯을 여기서 띄우는 것과 같은 이유).
 #include "Voice/VoiceComponent.h"
 
 // 마이크/무전기 상태 표시. 로그인 위젯과 같은 이유로 여기서만 의존한다 -
@@ -30,6 +24,8 @@
 #include "UI/MOU_CharacterStatusHUD.h"
 #include "UI/SpectatorOverlayWidget.h"
 #include "EnhancedInputComponent.h"
+#include "InputActionValue.h"
+#include "Player/SpectatorCameraActor.h"
 #include "EngineUtils.h"
 #include "Blueprint/WidgetTree.h"
 
@@ -52,6 +48,34 @@ void ATeamProject_MOUPlayerController::ServerSaveWarehouseDelivery_Implementatio
 void ATeamProject_MOUPlayerController::ClientWarehouseDeliverySaveCompleted_Implementation(bool bSucceeded)
 {
 	OnWarehouseDeliverySaveCompleted.Broadcast(bSucceeded);
+}
+
+void ATeamProject_MOUPlayerController::ServerAddWarehouseDeliveryItem_Implementation(
+	TSubclassOf<AItemBase> ItemClass, int32 Quantity)
+{
+	UWarehouseDataSubsystem* Warehouse = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UWarehouseDataSubsystem>() : nullptr;
+	const bool bSucceeded = Warehouse && Warehouse->AddPendingDeliveryItem(ItemClass, Quantity);
+	ClientWarehouseDeliveryAddCompleted(bSucceeded);
+}
+
+void ATeamProject_MOUPlayerController::ClientWarehouseDeliveryAddCompleted_Implementation(bool bSucceeded)
+{
+	OnWarehouseDeliveryAddCompleted.Broadcast(bSucceeded);
+}
+
+void ATeamProject_MOUPlayerController::ServerRemoveWarehouseDeliveryItem_Implementation(
+	TSubclassOf<AItemBase> ItemClass, int32 Quantity)
+{
+	UWarehouseDataSubsystem* Warehouse = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UWarehouseDataSubsystem>() : nullptr;
+	const bool bSucceeded = Warehouse && Warehouse->RemovePendingDeliveryItem(ItemClass, Quantity);
+	ClientWarehouseDeliveryRemoveCompleted(bSucceeded);
+}
+
+void ATeamProject_MOUPlayerController::ClientWarehouseDeliveryRemoveCompleted_Implementation(bool bSucceeded)
+{
+	OnWarehouseDeliveryRemoveCompleted.Broadcast(bSucceeded);
 }
 
 void ATeamProject_MOUPlayerController::BeginPlay()
@@ -77,8 +101,24 @@ void ATeamProject_MOUPlayerController::BeginPlay()
 
 	}
 
-	ShowLoginWidgetIfNeeded();
 	ShowVoiceWidgetsIfNeeded();
+}
+
+void ATeamProject_MOUPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	GetWorldTimerManager().ClearTimer(SpectatorTransitionTimerHandle);
+
+	bIsDeathSequenceActive = false;
+
+	if (bIsSpectating)
+	{
+		StopSpectating();
+	}
+
+	HideTurnOffDisplay();
+	HideSpectatorOverlay();
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void ATeamProject_MOUPlayerController::SetupInputComponent()
@@ -116,6 +156,21 @@ void ATeamProject_MOUPlayerController::SetupInputComponent()
 			{
 				EnhancedInputComponent->BindAction(IA_SpectatePrev, ETriggerEvent::Started, this, &ATeamProject_MOUPlayerController::SpectatePrevPlayer);
 			}
+			if (IA_SpectateLook)
+			{
+				EnhancedInputComponent->BindAction(IA_SpectateLook, ETriggerEvent::Triggered, this, &ATeamProject_MOUPlayerController::OnSpectatorLook);
+			}
+			if (IA_SpectateZoom)
+			{
+				EnhancedInputComponent->BindAction(IA_SpectateZoom, ETriggerEvent::Triggered, this, &ATeamProject_MOUPlayerController::OnSpectatorZoom);
+			}
+		}
+
+		if (InputComponent)
+		{
+			InputComponent->BindAxisKey(EKeys::MouseWheelAxis, this, &ATeamProject_MOUPlayerController::OnSpectatorMouseWheel);
+			InputComponent->BindAxisKey(EKeys::MouseX, this, &ATeamProject_MOUPlayerController::OnSpectatorTurn);
+			InputComponent->BindAxisKey(EKeys::MouseY, this, &ATeamProject_MOUPlayerController::OnSpectatorLookUp);
 		}
 	}
 }
@@ -206,47 +261,6 @@ bool ATeamProject_MOUPlayerController::ShouldUseTouchControls() const
 {
 	// are we on a mobile platform? Should we force touch?
 	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
-}
-
-void ATeamProject_MOUPlayerController::ShowLoginWidgetIfNeeded()
-{
-	if (!bAutoShowLoginWidget || !IsLocalPlayerController())
-	{
-		return;
-	}
-
-	UGameInstance* GameInstance = GetGameInstance();
-	UServerSubsystem* Chat = GameInstance ? GameInstance->GetSubsystem<UServerSubsystem>() : nullptr;
-	if (Chat == nullptr)
-	{
-		UE_LOG(LogTeamProject_MOU, Warning, TEXT("채팅 서브시스템을 찾지 못해 로그인 화면을 띄우지 못했다."));
-		return;
-	}
-
-	// 이미 로그인되어 있으면 다시 묻지 않는다.
-	// (방장이 방을 만들고 리슨서버로 여행해온 경우 ServerSubsystem 은 GameInstance 소유라
-	//  레벨을 넘어가도 로그인 상태가 그대로 살아있다.)
-	if (Chat->GetConnectionState() == EChatConnectionState::LoggedIn)
-	{
-		return;
-	}
-
-	UClass* WidgetClass = LoginWidgetClass ? LoginWidgetClass.Get() : ULoginWidgetBase::StaticClass();
-	ULoginWidgetBase* LoginWidget = CreateWidget<ULoginWidgetBase>(this, WidgetClass);
-	if (LoginWidget == nullptr)
-	{
-		return;
-	}
-
-	// 비워두면 위젯이 설정(Config/DefaultGame.ini)에서 읽는다. 컨트롤러가 굳이
-	// 기본 주소를 알 필요는 없으므로, 예외적으로 지정했을 때만 덮어쓴다.
-	LoginWidget->ServerHost = ServerHostOverride;
-	LoginWidget->ServerPort = ServerPortOverride;
-	LoginWidget->AddToViewport();
-
-	// 로그인 화면은 마우스로 조작하므로 커서를 켜준다. NativeConstruct 가 입력 모드까지
-	// 바꾸지는 않으므로(위젯은 게임 흐름을 몰라도 되게 만들었다) 여기서 챙긴다.
-	SetShowMouseCursor(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -360,6 +374,31 @@ void ATeamProject_MOUPlayerController::PlayerTick(float DeltaTime)
 	if (bIsSpectating)
 	{
 		CheckSpectateTargetAlive();
+
+		if (CurrentSpectateTarget.IsValid() && IsLocalPlayerController())
+		{
+			float MouseX = 0.0f;
+			float MouseY = 0.0f;
+			GetInputMouseDelta(MouseX, MouseY);
+			if (!FMath::IsNearlyZero(MouseX) || !FMath::IsNearlyZero(MouseY))
+			{
+				CurrentSpectateTarget->AddSpectatorOrbit(MouseY, MouseX);
+			}
+
+			float WheelDelta = GetInputAnalogKeyState(EKeys::MouseWheelAxis);
+			if (!FMath::IsNearlyZero(WheelDelta))
+			{
+				CurrentSpectateTarget->AddSpectatorZoom(WheelDelta);
+			}
+			else if (IsInputKeyDown(EKeys::MouseScrollUp))
+			{
+				CurrentSpectateTarget->AddSpectatorZoom(1.0f);
+			}
+			else if (IsInputKeyDown(EKeys::MouseScrollDown))
+			{
+				CurrentSpectateTarget->AddSpectatorZoom(-1.0f);
+			}
+		}
 	}
 }
 
@@ -447,7 +486,13 @@ void ATeamProject_MOUPlayerController::SetSpectateTarget(AMainCharacter* NewTarg
 		return;
 	}
 
+	if (CurrentSpectateTarget.IsValid() && CurrentSpectateTarget.Get() != NewTarget)
+	{
+		CurrentSpectateTarget->EnableSpectatorCamera(false);
+	}
+
 	CurrentSpectateTarget = NewTarget;
+	NewTarget->EnableSpectatorCamera(true);
 
 	SetViewTargetWithBlend(NewTarget, BlendTime, EViewTargetBlendFunction::VTBlend_EaseInOut, 2.0f, true);
 
@@ -472,7 +517,17 @@ void ATeamProject_MOUPlayerController::StartSpectating()
 		return;
 	}
 
+	AMainCharacter* MyChar = Cast<AMainCharacter>(GetPawn());
+	if (!MyChar || !MyChar->bIsDead)
+	{
+		return;
+	}
+
 	bIsSpectating = true;
+
+	bShowMouseCursor = false;
+	FInputModeGameOnly InputMode;
+	SetInputMode(InputMode);
 
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 	{
@@ -498,9 +553,20 @@ void ATeamProject_MOUPlayerController::StartSpectating()
 
 void ATeamProject_MOUPlayerController::StopSpectating()
 {
+	if (CurrentSpectateTarget.IsValid())
+	{
+		CurrentSpectateTarget->EnableSpectatorCamera(false);
+	}
+
 	bIsSpectating = false;
 	CurrentSpectateTarget = nullptr;
 	CurrentSpectateIndex = -1;
+
+	if (SpectatorCameraActor)
+	{
+		SpectatorCameraActor->Destroy();
+		SpectatorCameraActor = nullptr;
+	}
 
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 	{
@@ -538,6 +604,7 @@ void ATeamProject_MOUPlayerController::StartDeathSpectatorSequence()
 		return;
 	}
 
+	bIsDeathSequenceActive = true;
 	SetInGameUIHidden(true);
 	ShowTurnOffDisplay();
 
@@ -554,7 +621,18 @@ void ATeamProject_MOUPlayerController::OnTurnOffDisplayFinished()
 {
 	GetWorldTimerManager().ClearTimer(SpectatorTransitionTimerHandle);
 	HideTurnOffDisplay();
-	StartSpectating();
+
+	if (!bIsDeathSequenceActive)
+	{
+		return;
+	}
+	bIsDeathSequenceActive = false;
+
+	AMainCharacter* MyChar = Cast<AMainCharacter>(GetPawn());
+	if (MyChar && MyChar->bIsDead)
+	{
+		StartSpectating();
+	}
 }
 
 void ATeamProject_MOUPlayerController::ShowTurnOffDisplay()
@@ -662,3 +740,57 @@ void ATeamProject_MOUPlayerController::SetInGameUIHidden(bool bInHidden)
 	}
 	OnInGameUIVisibilityChanged(!bInHidden);
 }
+
+void ATeamProject_MOUPlayerController::OnSpectatorLook(const FInputActionValue& Value)
+{
+	if (!bIsSpectating || !CurrentSpectateTarget.IsValid())
+	{
+		return;
+	}
+
+	FVector2D LookAxisVector = Value.Get<FVector2D>();
+	CurrentSpectateTarget->AddSpectatorOrbit(LookAxisVector.Y, LookAxisVector.X);
+}
+
+void ATeamProject_MOUPlayerController::OnSpectatorZoom(const FInputActionValue& Value)
+{
+	if (!bIsSpectating || !CurrentSpectateTarget.IsValid())
+	{
+		return;
+	}
+
+	float ZoomDelta = Value.Get<float>();
+	CurrentSpectateTarget->AddSpectatorZoom(ZoomDelta);
+}
+
+void ATeamProject_MOUPlayerController::OnSpectatorMouseWheel(float Val)
+{
+	if (!bIsSpectating || !CurrentSpectateTarget.IsValid() || FMath::IsNearlyZero(Val))
+	{
+		return;
+	}
+
+	CurrentSpectateTarget->AddSpectatorZoom(Val);
+}
+
+void ATeamProject_MOUPlayerController::OnSpectatorTurn(float Val)
+{
+	if (!bIsSpectating || !CurrentSpectateTarget.IsValid() || FMath::IsNearlyZero(Val))
+	{
+		return;
+	}
+
+	CurrentSpectateTarget->AddSpectatorOrbit(0.0f, Val);
+}
+
+void ATeamProject_MOUPlayerController::OnSpectatorLookUp(float Val)
+{
+	if (!bIsSpectating || !CurrentSpectateTarget.IsValid() || FMath::IsNearlyZero(Val))
+	{
+		return;
+	}
+
+	CurrentSpectateTarget->AddSpectatorOrbit(Val, 0.0f);
+}
+
+

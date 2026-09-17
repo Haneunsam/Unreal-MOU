@@ -12,6 +12,8 @@
 #include "GameFramework/PlayerState.h"
 #include "Item/PackageItemSaveData.h"
 #include "Item/WarehouseInitialDataAsset.h"
+#include "Game/LevelTimerState.h"
+#include "TeamProject_MOUGameMode.h"
 #include "Player/MainCharacter.h"
 
 void UWarehouseDataSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -52,7 +54,7 @@ void UWarehouseDataSubsystem::NotifyStoredWarehouseChanged()
 }
 
 void UWarehouseDataSubsystem::ApplyReplicatedStorage(const TArray<FStoredItemData>& Items,
-	const TArray<FStoredItemInstanceData>& Instances)
+	const TArray<FStoredItemInstanceData>& Instances, const FDeliveryData& PendingDelivery)
 {
 	if (!GetWorld() || GetWorld()->GetNetMode() != NM_Client) return;
 	if (UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance()))
@@ -60,9 +62,81 @@ void UWarehouseDataSubsystem::ApplyReplicatedStorage(const TArray<FStoredItemDat
 		// Update the legacy getters without calling the server publication path.
 		Instance->SavedStoredItems = Items;
 		Instance->SavedStoredItemInstances = Instances;
+		Instance->PendingDeliveryData = PendingDelivery;
 		Instance->bWarehouseInitialized = true;
 		NotifyStoredWarehouseChanged();
+		OnPendingDeliveryChanged.Broadcast();
 	}
+}
+
+void UWarehouseDataSubsystem::NotifyPendingDeliveryChanged()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (AProjectGameStateBase* State = World->GetGameState<AProjectGameStateBase>())
+		{
+			if (State->HasAuthority()) State->PublishWarehouseStorage();
+		}
+	}
+	OnPendingDeliveryChanged.Broadcast();
+}
+
+bool UWarehouseDataSubsystem::CanEditPendingDelivery() const
+{
+	UWorld* World = GetWorld();
+	if (!World || World->IsInSeamlessTravel()) return false;
+	if (const ALevelTimerState* Timer = ALevelTimerState::GetLevelTimerState(this))
+	{
+		if (Timer->Snapshot.bActive || Timer->Snapshot.bExpired) return false;
+	}
+	const ATeamProject_MOUGameMode* Mode = World->GetAuthGameMode<ATeamProject_MOUGameMode>();
+	return Mode && Mode->IsLobbyLevel();
+}
+
+bool UWarehouseDataSubsystem::RemovePendingDeliveryItem(TSubclassOf<AItemBase> ItemClass, int32 Quantity)
+{
+	UWorld* World = GetWorld();
+	UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance());
+	if (!World || World->GetNetMode() == NM_Client || !Instance || !ItemClass || Quantity <= 0
+		|| !CanEditPendingDelivery()) return false;
+
+	FDeliveryData Pending = Instance->PendingDeliveryData;
+	const int32 PendingIndex = Pending.SelectedItems.IndexOfByPredicate(
+		[ItemClass](const FStoredItemData& Item) { return Item.ItemClass == ItemClass; });
+	if (PendingIndex == INDEX_NONE || Pending.SelectedItems[PendingIndex].Quantity < Quantity) return false;
+
+	TArray<FStoredItemData> Stored = Instance->SavedStoredItems;
+	TArray<FStoredItemInstanceData> StoredInstances = Instance->SavedStoredItemInstances;
+	const int32 StoredIndex = Stored.IndexOfByPredicate(
+		[ItemClass](const FStoredItemData& Item) { return Item.ItemClass == ItemClass; });
+	if (StoredIndex != INDEX_NONE && Stored[StoredIndex].Quantity > MAX_int32 - Quantity) return false;
+
+	// Validate and prepare everything before mutating persistent data.
+	for (int32 Count = 0; Count < Quantity; ++Count)
+	{
+		const int32 Index = Pending.SelectedItemInstances.IndexOfByPredicate(
+			[ItemClass](const FStoredItemInstanceData& Item) { return Item.ItemClass == ItemClass; });
+		if (Index == INDEX_NONE) return false;
+		StoredInstances.Add(Pending.SelectedItemInstances[Index]);
+		Pending.SelectedItemInstances.RemoveAt(Index);
+	}
+	Pending.SelectedItems[PendingIndex].Quantity -= Quantity;
+	if (Pending.SelectedItems[PendingIndex].Quantity == 0) Pending.SelectedItems.RemoveAt(PendingIndex);
+	if (StoredIndex != INDEX_NONE) Stored[StoredIndex].Quantity += Quantity;
+	else
+	{
+		FStoredItemData Returned;
+		Returned.ItemClass = ItemClass;
+		Returned.Quantity = Quantity;
+		Stored.Add(Returned);
+	}
+
+	Instance->SavedStoredItems = MoveTemp(Stored);
+	Instance->SavedStoredItemInstances = MoveTemp(StoredInstances);
+	Instance->PendingDeliveryData = MoveTemp(Pending);
+	NotifyStoredWarehouseChanged();
+	NotifyPendingDeliveryChanged();
+	return true;
 }
 
 void UWarehouseDataSubsystem::InitializeWarehouseFromDataAsset()
@@ -476,6 +550,17 @@ bool UWarehouseDataSubsystem::CanBuildDeliveryData(const TArray<FStoredItemData>
 	return BuildValidatedDeliveryData(RequestedItems, DummyData);
 }
 
+bool UWarehouseDataSubsystem::AddPendingDeliveryItem(TSubclassOf<AItemBase> ItemClass, int32 Quantity)
+{
+	if (!ItemClass || Quantity <= 0 || !CanEditPendingDelivery()) return false;
+	FStoredItemData Request;
+	Request.ItemClass = ItemClass;
+	Request.Quantity = Quantity;
+	TArray<FStoredItemData> RequestedItems;
+	RequestedItems.Add(Request);
+	return SavePendingDeliveryDataFromRequest(RequestedItems);
+}
+
 bool UWarehouseDataSubsystem::SavePendingDeliveryDataFromRequest(const TArray<FStoredItemData>& RequestedItems)
 {
 	// Clients must request this through their owning PlayerController RPC.
@@ -522,6 +607,8 @@ bool UWarehouseDataSubsystem::SavePendingDeliveryDataFromRequest(const TArray<FS
 	}
 
 	SavePendingDeliveryData(AccumulatedData);
+	// Both stock and manifest are committed before either list rebuilds its widgets.
+	NotifyStoredWarehouseChanged();
 	return true;
 }
 
@@ -705,7 +792,10 @@ bool UWarehouseDataSubsystem::ConsumeStoredItemsForDelivery(const FDeliveryData&
 		}
 	}
 
-	ProjectGameInstance->SaveStoredItems(UpdatedStoredItems);
-	ProjectGameInstance->SaveStoredItemInstances(UpdatedStoredItemInstances);
+	// This private helper is only called by SavePendingDeliveryDataFromRequest.
+	// Do not notify here: the new manifest has not been committed yet.
+	ProjectGameInstance->SavedStoredItems = MoveTemp(UpdatedStoredItems);
+	ProjectGameInstance->SavedStoredItemInstances = MoveTemp(UpdatedStoredItemInstances);
+	ProjectGameInstance->bWarehouseInitialized = true;
 	return true;
 }

@@ -21,6 +21,9 @@ struct FWarehouseStorageSnapshot
 	TArray<FStoredItemInstanceData> Instances;
 
 	UPROPERTY()
+	FDeliveryData PendingDelivery;
+
+	UPROPERTY()
 	int32 Revision = 0;
 };
 

@@ -374,11 +374,26 @@ void UCarryingComponent::ServerGrabOrDrop_Implementation()
 	GrabOrDrop();
 }
 
-void UCarryingComponent::Throw()
+void UCarryingComponent::Throw(const FVector& CustomThrowDir)
 {
+	// 1. 던지는 방향 계산 (입력값이 없으면 현재 소유자의 시선/조준 방향 사용)
+	FVector AimDir = CustomThrowDir;
+	if (AimDir.IsNearlyZero())
+	{
+		if (APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+		{
+			AimDir = OwnerPawn->GetBaseAimRotation().Vector();
+		}
+		else if (GetOwner())
+		{
+			AimDir = GetOwner()->GetActorForwardVector();
+		}
+	}
+	AimDir.Normalize();
+
 	if (!GetOwner()->HasAuthority())
 	{
-		ServerThrow();
+		ServerThrow(AimDir);
 		return;
 	}
 
@@ -405,14 +420,14 @@ void UCarryingComponent::Throw()
 				Package->RemoveCarrier(GetOwner());
 			}
 			
-			// 캐릭터의 전방과 위쪽(사선) 방향으로 힘(임펄스) 계산
-			FVector ThrowVel = GetOwner()->GetActorForwardVector() * DefaultThrowForce + FVector(0, 0, DefaultThrowForce * 0.4f);
+			// [개선] 캐릭터가 바라보는 시선(Aim) 방향으로 투척 속도 적용
+			FVector ThrowVel = AimDir * DefaultThrowForce;
 			Item->Throw(ThrowVel, GetOwner());
 		}
 		else if (AMainCharacter* CharacterToThrow = Cast<AMainCharacter>(CarriedActor))
 		{
-			// 사람을 던지는 로직
-			FVector ThrowVel = GetOwner()->GetActorForwardVector() * DefaultThrowForce + FVector(0, 0, DefaultThrowForce * 0.4f);
+			// 사람을 던지는 로직 (바라보는 방향으로 런치)
+			FVector ThrowVel = AimDir * DefaultThrowForce;
 			
 			CharacterToThrow->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 			
@@ -452,12 +467,12 @@ void UCarryingComponent::Throw()
 	CarriedActor = nullptr;
 	UpdateCharacterTotalWeight();
 	OnCarriedStateChanged.Broadcast(nullptr);
-	UE_LOG(LogTemp, Log, TEXT("물건을 던졌습니다."));
+	UE_LOG(LogTemp, Log, TEXT("물건을 바라보는 방향으로 던졌습니다."));
 }
 
-void UCarryingComponent::ServerThrow_Implementation()
+void UCarryingComponent::ServerThrow_Implementation(const FVector& InThrowDir)
 {
-	Throw();
+	Throw(InThrowDir);
 }
 
 void UCarryingComponent::EquipItem(AActor* ItemToEquip)

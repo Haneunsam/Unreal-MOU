@@ -23,13 +23,13 @@ public:
 	void GrabOrDrop();
 
 	UFUNCTION(BlueprintCallable, Category = "Carrying")
-	void Throw();
+	void Throw(const FVector& CustomThrowDir = FVector::ZeroVector);
 
 	UFUNCTION(Server, Reliable)
 	void ServerGrabOrDrop();
 
 	UFUNCTION(Server, Reliable)
-	void ServerThrow();
+	void ServerThrow(const FVector& InThrowDir);
 
 	UFUNCTION(BlueprintCallable, Category = "Carrying")
 	bool IsCarrying() const { return CarriedActor != nullptr; }

@@ -23,9 +23,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Stock|Graph")
 	void ResetStockGraph();
 	
-	// 그래프 진행 시작
+	// 서버 시작 시간을 기준으로 그래프 진행 시작
 	UFUNCTION(BlueprintCallable, Category = "Stock|Graph")
-	void StartStockGraph(float InStopMultiplier);
+	void StartStockGraph(float InStopMultiplier, float InStartServerTime);
 
 	// 그래프 진행 정지
 	UFUNCTION(BlueprintCallable, Category = "Stock|Graph")
@@ -76,7 +76,7 @@ private:
 	// 그래프의 급등 정도
 	// 값이 높을수록 초반은 완만하고 후반에 급격하게 상승
 	UPROPERTY(EditDefaultsOnly, Category = "Stock|Graph", meta = (ClampMin = "0.1"))
-	float CurvePower = 2.8f;
+	float CurvePower = 2.2f;
 
 	// 현재 그래프 X 위치
 	float CurrentX = 100.0f;
@@ -89,6 +89,9 @@ private:
 
 	// 이번 라운드에서 그래프가 멈출 배율
 	float StopMultiplier = 1.0f;
+
+	// 이번 라운드가 서버에서 시작된 시간
+	float RoundStartServerTime = 0.0f;
 
 	// 그래프가 시작된 후 경과 시간
 	float ElapsedTime = 0.0f;

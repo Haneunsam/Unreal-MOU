@@ -45,24 +45,36 @@ else()
 endif()
 
 add_executable(Server
-    Server/Server.cpp
-    Server/ChatLog.cpp
-    Server/Accounts.cpp
-    Server/Crypto.cpp
-    Server/Rooms.cpp
-    Server/Session.cpp
+    Code/Server/Server.cpp
+    Code/EndpointService/EndpointService.cpp
+    Code/RelayRouteService/RelayRouteService.cpp
+    Code/ServerApp/ServerApp.cpp
+    Code/ChatHandler/ChatHandler.cpp
+    Code/AuthHandler/AuthHandler.cpp
+    Code/SessionMessaging/SessionMessaging.cpp
+    Code/SocialHandler/SocialHandler.cpp
+    Code/RoomHandler/RoomHandler.cpp
+    Code/PacketDispatcher/PacketDispatcher.cpp
+    Code/ServerConfig/ServerConfig.cpp
+    Code/ServerContext/ServerContext.cpp
+    Code/ServerLog/ServerLog.cpp
+    Code/ChatLog/ChatLog.cpp
+    Code/Accounts/Accounts.cpp
+    Code/Crypto/Crypto.cpp
+    Code/Rooms/Rooms.cpp
+    Code/Session/Session.cpp
     # v7 친구 + 메신저. 둘 다 Accounts 와 같은 동기 SQLite 다
     # (ChatLog 의 비동기 큐와 다른 이유는 각 헤더 주석 참고).
-    Server/Friends.cpp
-    Server/DirectMessages.cpp
+    Code/Friends/Friends.cpp
+    Code/DirectMessages/DirectMessages.cpp
     # 공유기(UPnP)에 자기 리슨 포트를 열어달라고 요청한다. --upnp 로만 동작한다.
     # 언리얼 쪽에도 같은 이름의 파일이 있지만 여는 포트가 달라서 별개다
     # (여기는 Server.exe 의 9000/TCP, 저기는 리슨서버의 7777/UDP).
-    Server/NatPortMapping.cpp
+    Code/NatPortMapping/NatPortMapping.cpp
     # 직접 P2P가 성립하지 않을 때만 쓰는, 게임 패킷 비해석 UDP relay.
-    Server/UdpRelay.cpp
+    Code/UdpRelay/UdpRelay.cpp
 )
-target_include_directories(Server PRIVATE Server)
+target_include_directories(Server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Code)
 target_link_libraries(Server PRIVATE mou_shared sqlite3)
 
 add_executable(TestClient
@@ -77,10 +89,17 @@ target_link_libraries(TestClient PRIVATE mou_shared)
 # 종료 코드 0 = 전부 통과.
 add_executable(FriendsTest
     Tests/FriendsTest.cpp
-    Server/Friends.cpp
-    Server/DirectMessages.cpp
-    Server/Accounts.cpp
-    Server/Crypto.cpp
+    Code/ServerLog/ServerLog.cpp
+    Code/Friends/Friends.cpp
+    Code/DirectMessages/DirectMessages.cpp
+    Code/Accounts/Accounts.cpp
+    Code/Crypto/Crypto.cpp
 )
-target_include_directories(FriendsTest PRIVATE Server)
+target_include_directories(FriendsTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Code)
 target_link_libraries(FriendsTest PRIVATE mou_shared sqlite3)
+
+enable_testing()
+add_executable(RoomSlotsTest Tests/RoomSlotsTest.cpp Code/Rooms/Rooms.cpp)
+target_include_directories(RoomSlotsTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Code)
+target_link_libraries(RoomSlotsTest PRIVATE mou_shared)
+add_test(NAME RoomSlotsTest COMMAND RoomSlotsTest)

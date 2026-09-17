@@ -457,6 +457,7 @@ void FServerClientRunnable::HandlePacket(const MOU::PacketHeader& Header, const 
 			Member.Name    = MOUChat::ReadFixedString(Src.Name, static_cast<int32>(MOU::kMaxNameLen));
 			Member.bIsHost = (Src.bIsHost != 0);
 			Member.bReady  = (Src.bReady != 0);
+			Member.SlotIndex = Src.SlotIndex;
 			Event.Members.Add(MoveTemp(Member));
 		}
 

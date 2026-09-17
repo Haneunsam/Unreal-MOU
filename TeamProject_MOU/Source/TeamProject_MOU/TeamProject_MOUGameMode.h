@@ -23,6 +23,9 @@ public:
 	virtual void InitGameState() override;
 	virtual void BeginPlay() override;
 
+	// Server-side preparation checks use the configured lobby, not a physical warehouse actor.
+	bool IsLobbyLevel() const;
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Run|Time")
 	void AdvanceHalfDay();
 

@@ -8,8 +8,12 @@
 class UInteractionComponent;
 class UCarryingComponent;
 class UInventoryComponent;
+class UCharacterCustomizationComponent;
+class ACustomizationNPC;
 class UInputAction;
 class AItemBase;
+class USpringArmComponent;
+class UCameraComponent;
 
 UCLASS()
 class TEAMPROJECT_MOU_API AMainCharacter : public ACharacterBase, public IInteractableInterface
@@ -47,7 +51,24 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Rotation")
 	float TurnInPlaceInterpSpeed = 10.0f;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera|Spectator", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<USpringArmComponent> SpectatorCameraBoom;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera|Spectator", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCameraComponent> SpectatorCamera;
+
+	FRotator CurrentSpectatorOrbitRotation = FRotator(-15.0f, 0.0f, 0.0f);
+
 public:
+	UFUNCTION(BlueprintCallable, Category = "Camera|Spectator")
+	void EnableSpectatorCamera(bool bEnable);
+
+	void AddSpectatorOrbit(float PitchDelta, float YawDelta);
+	void AddSpectatorZoom(float WheelDelta);
+
+	FORCEINLINE USpringArmComponent* GetSpectatorCameraBoom() const { return SpectatorCameraBoom; }
+	FORCEINLINE UCameraComponent* GetSpectatorCamera() const { return SpectatorCamera; }
+
 	// 다른 클라이언트가 이 플레이어의 좌우 에임 회전을 볼 수 있도록 복제
 	UPROPERTY(BlueprintReadOnly, Replicated, Category = "Animation|Aim")
 	float ReplicatedAimYaw = 0.0f;
@@ -63,6 +84,18 @@ public:
 	// 인벤토리 컴포넌트 반환
 	UFUNCTION(BlueprintCallable, Category = "Components")
 	UInventoryComponent* GetInventoryComponent() const { return InventoryComponent; }
+
+	// 커스터마이징 컴포넌트 반환
+	UFUNCTION(BlueprintCallable, Category = "Components")
+	UCharacterCustomizationComponent* GetCustomizationComponent() const { return CustomizationComponent; }
+
+	// 현재 사망 상태 여부 반환
+	UFUNCTION(BlueprintPure, Category = "Player|Status")
+	bool IsDead() const { return bIsDead; }
+
+	// 현재 그로기 상태 여부 반환
+	UFUNCTION(BlueprintPure, Category = "Player|Status")
+	bool IsGroggy() const { return bIsGroggy; }
 
 	// 현재 달리기(Sprint) 중인지 여부 반환
 	UFUNCTION(BlueprintCallable, Category = "Player|Movement")
@@ -339,6 +372,47 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UInventoryComponent> InventoryComponent;
 
+	// 외형 머티리얼 커스터마이징 컴포넌트
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UCharacterCustomizationComponent> CustomizationComponent;
+
+public:
+	// ---------------------------------------------------------
+	// [외형 커스터마이징 시스템]
+	// ---------------------------------------------------------
+	UFUNCTION(BlueprintCallable, Category = "Player|Customization")
+	void StartCustomization(ACustomizationNPC* TargetNPC);
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Customization")
+	void EndCustomization();
+
+	UFUNCTION(Server, Reliable)
+	void ServerStartCustomization(ACustomizationNPC* TargetNPC);
+
+	UFUNCTION(Server, Reliable)
+	void ServerEndCustomization(FRotator FinalRotation);
+
+	UFUNCTION(BlueprintPure, Category = "Player|Customization")
+	bool IsInCustomizationMode() const { return bIsInCustomizationMode; }
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Customization")
+	void AddCustomizationCharacterYaw(float DeltaYaw);
+
+	// 커스터마이징 모드 진입 시 호출되는 Blueprint 이벤트 (UI 위젯 생성/표시용)
+	UFUNCTION(BlueprintImplementableEvent, Category = "Player|Customization")
+	void OnCustomizationStarted(ACustomizationNPC* TargetNPC);
+
+	// 커스터마이징 모드 종료 시 호출되는 Blueprint 이벤트 (UI 위젯 닫기용)
+	UFUNCTION(BlueprintImplementableEvent, Category = "Player|Customization")
+	void OnCustomizationEnded();
+
+protected:
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Player|Customization")
+	bool bIsInCustomizationMode = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Player|Customization")
+	TWeakObjectPtr<ACustomizationNPC> ActiveCustomizationNPC;
+
 public:
 	// ---------------------------------------------------------
 	// [GAS 이동 및 상호작용 어빌리티 설정]
@@ -453,6 +527,9 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> Slot3Action;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> SlapAction;
 
 	// ---------------------------------------------------------
 	// [발광(손전등 대체) 및 배터리 시스템]
@@ -689,4 +766,44 @@ public:
 	// 피격 반응 발생 시 블루프린트에서 추가 연출을 넣을 수 있는 이벤트
 	UFUNCTION(BlueprintImplementableEvent, Category = "Player|Status")
 	void OnPlayHitReaction(float Duration);
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Slap")
+	TObjectPtr<class UAnimMontage> SlapMontage;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Slap")
+	TObjectPtr<class USoundBase> SlapHitSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Slap")
+	float SlapTraceDistance = 180.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Slap")
+	float SlapTraceRadius = 35.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Slap")
+	float SlapHitDelay = 0.2f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Slap")
+	float SlapCooldown = 0.8f;
+
+	void OnSlapStarted();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Slap")
+	void Slap();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSlap();
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlaySlapMontage();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Slap")
+	void PerformSlapTrace();
+
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPlaySlapHitSound(const FVector& Location);
+
+protected:
+	float LastSlapTime = -100.0f;
+	FTimerHandle SlapHitTimerHandle;
 };
