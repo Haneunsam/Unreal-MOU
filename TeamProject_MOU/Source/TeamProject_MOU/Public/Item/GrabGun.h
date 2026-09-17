@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Item/WeaponItemBase.h"
@@ -31,12 +31,17 @@ class TEAMPROJECT_MOU_API AGrabGun : public AWeaponItemBase
 	GENERATED_BODY()
 
 public:
+	// [GRAB-017] 초기 컴포넌트와 기본값 설정
 	AGrabGun();
 
 protected:
+	// [GRAB-018] 플레이 시작 시 상태와 이벤트 바인딩 초기화
 	virtual void BeginPlay() override;
+	// [GRAB-019] 구성 변경에 맞춰 링크 부품과 자세 갱신
 	virtual void OnConstruction(const FTransform& Transform) override;
+	// [GRAB-020] 매 프레임 무기 상태와 동작 갱신
 	virtual void Tick(float DeltaTime) override;
+	// [GRAB-021] 네트워크 복제 대상 속성 등록
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 #pragma region [GRAB] 컴포넌트
@@ -162,44 +167,66 @@ protected:
 #pragma endregion
 
 #pragma region [GRAB] 사용/발사 (WeaponItemBase 훅)
-	// [GRAB-001] 발사 override: 잡고 있으면 놓기, 아니면 트레이스해서 잡기 (재발사 토글)
+	// GRAB-001 발사 override: 잡고 있으면 놓기, 아니면 트레이스해서 잡기 (재발사 토글)
+	// [GRAB-001] 서버에서 무기 사용과 발사 처리
 	virtual void Fire() override;
 
-	// [GRAB-002] 잡는 순간에만 내구도 1 소모. (놓기는 소모 안 함 → Fire 안에서 조건부 처리)
+	// GRAB-002 잡는 순간에만 내구도 1 소모. (놓기는 소모 안 함 → Fire 안에서 조건부 처리)
 	//   토글이라 발사 시점 자동차감을 끄고, 실제 잡기 성공 시에만 서버에서 수동 차감한다.
+	// [GRAB-002] 발사 시 공통 내구도 차감 여부 반환
 	virtual bool ShouldConsumeUseOnFire() const override { return false; }
 
-	// 그래버는 뻗기~당기기 시퀀스 동안 "사용 중"이라 슬롯 변경을 막는다. [WEAPON-015]
+	// 그래버는 뻗기~당기기 시퀀스 동안 "사용 중"이라 슬롯 변경을 막는다. WEAPON-015
+	// [GRAB-022] 발사 후 사용 중 상태 유지 여부 반환
 	virtual bool bUsesInUseState() const override { return true; }
 
-	// [GRAB-003] 무기 공통 히트 처리 override: 맞은 캐릭터를 GrabFollowComponent로 집기
+	// GRAB-003 무기 공통 히트 처리 override: 맞은 캐릭터를 GrabFollowComponent로 집기
+	// [GRAB-003] 명중 대상의 효과 처리
 	virtual void ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResult& Hit) override;
 #pragma endregion
 
 #pragma region [GRAB] 소유권/생명주기
 	// 뻗기~당기기 시퀀스(bGrabArmed/bPulling/GrabbedTarget) 중에는 버리기/던지기를 막는다.
 	// 시퀀스가 끝나(대상이 당겨져 놓이거나 헛방 접힘 완료) 사용 중이 아니게 되면 다시 허용.
+	// [GRAB-023] 사용 상태에 따른 내려놓기 허용 여부 반환
 	virtual bool CanBeDropped() const override;
 
+	// GRAB-004 놓을 때(G키) 잡고 있던 대상도 자동 해제
 	// [GRAB-004] 놓을 때(G키) 잡고 있던 대상도 자동 해제
 	virtual void Drop_Implementation(FVector DropLocation, AActor* Dropper = nullptr) override;
 
+	// GRAB-005 던질 때도 잡고 있던 대상 해제
 	// [GRAB-005] 던질 때도 잡고 있던 대상 해제
 	virtual void Throw_Implementation(FVector ThrowVelocity, AActor* Thrower = nullptr) override;
 #pragma endregion
 
 #pragma region [GRAB] 연출 훅 (Blueprint VFX)
-	// [GRAB-006] 발사 이펙트 훅 (집게 발사/명중 등). 시작/끝 지점 전달, 모든 클라 재생
+	// GRAB-006 발사 이펙트 훅 (집게 발사/명중 등). 시작/끝 지점 전달, 모든 클라 재생
 	UFUNCTION(NetMulticast, Unreliable)
+	// [GRAB-006] 발사 이펙트 훅 (집게 발사/명중 등). 시작/끝 지점 전달, 모든 클라 재생
 	void MulticastPlayFireEffect(FVector Start, FVector End, bool bHit);
 
 	// 블루프린트에서 실제 나이아가라/케이블 VFX를 붙이는 이벤트
 	UFUNCTION(BlueprintImplementableEvent, Category = "GrabGun|FX")
+	// [GRAB-024] BP에서 구현하는 발사 연출 이벤트
 	void OnFireEffect(FVector Start, FVector End, bool bHit);
 #pragma endregion
 
 private:
 #pragma region [GRAB] 잡기 상태
+	// 발사 순간의 조준 목표를 공유한다. 접히는 동안에도 같은 목표 방향을 유지한다.
+	UPROPERTY(Replicated)
+	FVector ShotAimTarget = FVector::ZeroVector;
+
+	UPROPERTY(Replicated)
+	bool bShotAimActive = false;
+
+	FQuat RestLinkageRotation = FQuat::Identity;
+	// [GRAB-025] 집게를 조준 목표로 회전하고 접힘 완료 시 자세 복원
+	void UpdateShotAim();
+	// [GRAB-026] 서버에서 발사 순간 조준 목표 계산과 복제
+	void CaptureShotAim();
+
 	// 현재 이 그래버가 집고 있는 대상. 서버 권한에서만 갱신, 재발사 토글 판단에 사용.
 	UPROPERTY(Replicated)
 	TObjectPtr<ACharacterBase> GrabbedTarget;
@@ -216,28 +243,35 @@ private:
 	bool bOwnerInputLocked = false;
 
 	UFUNCTION()
+	// [GRAB-027] 복제된 입력 잠금을 로컬 플레이어에게 반영
 	void OnRep_OwnerInputLocked();
 
 	// 마지막으로 로컬 컨트롤러에 적용한 잠금 상태 (중복 적용 방지, Ignore 카운터 짝 맞춤)
 	bool bLocalInputLockApplied = false;
 
 	// 실제 로컬 PlayerController에 Ignore 적용 (서버·클라 공통 진입점)
+	// [GRAB-028] 이동·시점·점프 입력 잠금 적용 또는 해제
 	void ApplyLocalInputLock(bool bLock);
 
-	// [GRAB-002B] 집게 콜라이더 오버랩 콜백 - 펴짐 중(bGrabArmed) player/enemy 닿으면 잡기
+	// GRAB-002B 집게 콜라이더 오버랩 콜백 - 펴짐 중(bGrabArmed) player/enemy 닿으면 잡기
 	UFUNCTION()
+	// [GRAB-029] OnJawOverlap 처리
 	void OnJawOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
 		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
+	// GRAB-010 대상을 집는다 (서버). 집게에 attach + 이동정지 + 당기기 시작. 성공 시 내구도 1 소모.
 	// [GRAB-010] 대상을 집는다 (서버). 집게에 attach + 이동정지 + 당기기 시작. 성공 시 내구도 1 소모.
 	void GrabTarget(ACharacterBase* Target);
 
+	// GRAB-011 잡고 있던 대상을 놓는다 (서버). detach + 이동복원 + 사용자 잠금해제.
 	// [GRAB-011] 잡고 있던 대상을 놓는다 (서버). detach + 이동복원 + 사용자 잠금해제.
 	void ReleaseTarget();
 
 	// 집게 콜라이더 on/off (펴짐 시작/접힘에서 호출)
+	// [GRAB-030] 집게 접촉 콜라이더 활성화 또는 비활성화
 	void SetJawColliderActive(bool bActive);
 
+	// GRAB-015 사용자(그래버 든 플레이어)의 이동+카메라 입력 잠금/해제 (PlayerController Ignore).
 	// [GRAB-015] 사용자(그래버 든 플레이어)의 이동+카메라 입력 잠금/해제 (PlayerController Ignore).
 	void SetOwnerInputLocked(bool bLock);
 
@@ -261,11 +295,13 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "GrabGun|Break")
 	float BreakImpulseStrength = 150.0f;
 
-	// [GRAB-016] 내구도 0 도달 시 빨간 부품(bar/pin/jaw/yoke)을 물리로 분해 (모든 클라 재생)
+	// GRAB-016 내구도 0 도달 시 빨간 부품(bar/pin/jaw/yoke)을 물리로 분해 (모든 클라 재생)
 	UFUNCTION(NetMulticast, Reliable)
+	// [GRAB-016] 내구도 0 도달 시 빨간 부품(bar/pin/jaw/yoke)을 물리로 분해 (모든 클라 재생)
 	void MulticastBreakApart();
 
 	// 실제 분해 처리 (부모 detach + 물리/콜라이더 ON + 임펄스 + 수명 타이머)
+	// [GRAB-031] 집게 부품 분리와 물리 분해 연출 적용
 	void BreakApartLinkage();
 #pragma endregion
 
@@ -317,26 +353,32 @@ private:
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> TriggerMesh;
 
+	// GRAB-012 생성자에서 고정 부품(집게·트리거·콜라이더)을 스폰
 	// [GRAB-012] 생성자에서 고정 부품(집게·트리거·콜라이더)을 스폰
 	void BuildLinkageComponents();
 
-	// [GRAB-012B] CellCount만큼 셀(cell/bar/pin)을 런타임 재생성.
+	// GRAB-012B CellCount만큼 셀(cell/bar/pin)을 런타임 재생성.
 	//   CreateDefaultSubobject(생성자 전용) 대신 NewObject+RegisterComponent를 써서
 	//   OnConstruction/BeginPlay에서 CellCount가 바뀌면 다시 만든다.
+	// [GRAB-032] RebuildCells 처리
 	void RebuildCells();
 
 	// 마지막으로 셀을 지은 개수 (같으면 재생성 스킵)
 	int32 BuiltCellCount = -1;
 
+	// GRAB-013 CurrentExtendAlpha에 맞춰 링크/집게/트리거 트랜스폼 갱신 (Tick에서 호출)
 	// [GRAB-013] CurrentExtendAlpha에 맞춰 링크/집게/트리거 트랜스폼 갱신 (Tick에서 호출)
 	void UpdateLinkagePose(float Alpha);
 
+	// GRAB-014 부품 메시 하나 로드 헬퍼 (extending-arm-toy-gun 폴더 기준)
 	// [GRAB-014] 부품 메시 하나 로드 헬퍼 (extending-arm-toy-gun 폴더 기준)
 	UStaticMesh* LoadPartMesh(const FString& PartName) const;
 
 	// GLB matrix 실측 좌표를 UE 로컬 위치 벡터로 만든다.
+	// [GRAB-033] 부품의 로컬 위치 벡터 구성
 	FVector MakeLocal(float X, float Y, float Z) const;
 	// Z축(Yaw) 회전을 UE 로컬 회전으로 만든다.
+	// [GRAB-034] 부품의 로컬 Yaw 회전 구성
 	FRotator MakeYawRot(float DegZ) const;
 #pragma endregion
 };

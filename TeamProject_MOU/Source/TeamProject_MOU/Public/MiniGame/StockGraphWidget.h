@@ -35,6 +35,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Stock|Graph")
 	float GetCurrentMultiplier() const { return CurrentMultiplier; }
 
+	// 현금화 한 배율 위치에 마커 표시
+	UFUNCTION(BlueprintCallable, Category = "Stock|Graph")
+	void SetCashOutMarker(float InMultiplier);
+
+	// 현금화 마커 초기화
+	UFUNCTION(BlueprintCallable, Category = "Stock|Graph")
+	void ResetCashOutMarker();
 protected:
 	// 위젯 생성 시 호출
 	virtual void NativeConstruct() override;
@@ -104,6 +111,12 @@ private:
 
 	// 그래프 진행 여부
 	bool GraphRunning = false;
+
+	// 현금화 지점 표시 여부
+	bool ShowCashOutMarker = false;
+
+	// 현금화한 그래프 위치
+	FVector2D CashOutMarkerPoint = FVector2D::ZeroVector;
 
 	// 그래프 갱신 Timer
 	FTimerHandle GraphTimerHandle;

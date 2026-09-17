@@ -108,6 +108,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Item|Action")
 	virtual bool CanBeDropped() const { return true; }
 
+	// 손 소켓에 붙인 후 바운딩박스 중심 보정을 적용할지 여부.
+	// 손잡이 피벗을 그대로 소켓에 맞추는 아이템은 false를 반환한다.
+	virtual bool ShouldCenterOnCarrySocket() const { return true; }
+	virtual FName GetCarrySocketOverride() const { return NAME_None; }
+	virtual FVector GetCarryLocationOffset() const { return FVector::ZeroVector; }
+	virtual FRotator GetCarryRotationOffset() const { return FRotator::ZeroRotator; }
+
 	// ---------------------------------------------------------
 	// [핵심 행동 함수]
 	// ---------------------------------------------------------
@@ -141,6 +148,12 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Item|Action")
 	void OnUse();
 	virtual void OnUse_Implementation();
+
+	// [ITEM-100] 사용 입력 해제를 자식 아이템에 전달한다.
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Item|Action")
+	void OnUseReleased();
+	// [ITEM-100] 사용 입력 해제의 기본 동작은 비워 둔다.
+	virtual void OnUseReleased_Implementation();
 
 	// 손에 장착될 때 (인벤토리에서 활성화될 때)
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Item|Action")
