@@ -264,7 +264,10 @@ void UCarryingComponent::GrabOrDrop()
 				{
 					if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
 					{
-						HitItem->AttachToComponent(Character->GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, CarrySocketName);
+						const FName Socket = HitItem->GetCarrySocketOverride().IsNone() ? CarrySocketName : HitItem->GetCarrySocketOverride();
+						HitItem->AttachToComponent(Character->GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, Socket);
+						HitItem->SetActorRelativeLocation(HitItem->GetCarryLocationOffset());
+						HitItem->SetActorRelativeRotation(HitItem->GetCarryRotationOffset());
 
 						if (APackageBase* Package = Cast<APackageBase>(HitItem))
 						{
@@ -273,7 +276,7 @@ void UCarryingComponent::GrabOrDrop()
 
 						FVector BoxCenter = HitItem->GetComponentsBoundingBox().GetCenter();
 						FVector Origin = HitItem->GetActorLocation();
-						if (!Origin.Equals(BoxCenter, 1.0f))
+						if (HitItem->ShouldCenterOnCarrySocket() && !Origin.Equals(BoxCenter, 1.0f))
 						{
 							FVector Offset = Origin - BoxCenter;
 							Offset = HitItem->GetActorTransform().InverseTransformVectorNoScale(Offset);
@@ -515,12 +518,20 @@ void UCarryingComponent::MulticastEquipItem_Implementation(AActor* ItemToEquip)
 
 	if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
 	{
-		ItemToEquip->AttachToComponent(Character->GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, CarrySocketName);
+		const AItemBase* CarryItem = Cast<AItemBase>(ItemToEquip);
+		const FName Socket = CarryItem && !CarryItem->GetCarrySocketOverride().IsNone() ? CarryItem->GetCarrySocketOverride() : CarrySocketName;
+		ItemToEquip->AttachToComponent(Character->GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, Socket);
+		if (CarryItem)
+		{
+			ItemToEquip->SetActorRelativeLocation(CarryItem->GetCarryLocationOffset());
+			ItemToEquip->SetActorRelativeRotation(CarryItem->GetCarryRotationOffset());
+		}
 
 		// 중심점 오프셋 적용
 		FVector BoxCenter = ItemToEquip->GetComponentsBoundingBox().GetCenter();
 		FVector Origin = ItemToEquip->GetActorLocation();
-		if (!Origin.Equals(BoxCenter, 1.0f))
+		const AItemBase* Item = Cast<AItemBase>(ItemToEquip);
+		if ((!Item || Item->ShouldCenterOnCarrySocket()) && !Origin.Equals(BoxCenter, 1.0f))
 		{
 			FVector Offset = Origin - BoxCenter;
 			Offset = ItemToEquip->GetActorTransform().InverseTransformVectorNoScale(Offset);

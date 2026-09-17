@@ -63,6 +63,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation|State")
 	bool bIsCarrying = false;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Animation|State")
+	bool bIsHoldingHealingMelee = false;
+
 	// 캐릭터가 물체를 밀고(Pushing) 있는 상태인지 여부
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation|State")
 	bool bIsPushing = false;

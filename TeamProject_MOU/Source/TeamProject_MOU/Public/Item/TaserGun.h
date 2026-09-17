@@ -19,6 +19,7 @@ class TEAMPROJECT_MOU_API ATaserGun : public AWeaponItemBase
 	GENERATED_BODY()
 
 public:
+	// [TASER-008] 초기 컴포넌트와 기본값 설정
 	ATaserGun();
 
 #pragma region [TASER] 컴포넌트
@@ -39,14 +40,17 @@ public:
 #pragma endregion
 
 #pragma region [TASER] 사용/발사
-	// [TASER-001] 발사 override: 카메라 조준 방향으로 피아식별 트레이스 + VFX
+	// TASER-001 발사 override: 카메라 조준 방향으로 피아식별 트레이스 + VFX
 	// (좌클릭→횟수차감→서버권한 분기는 부모 WeaponItemBase가 처리)
+	// [TASER-001] 서버에서 무기 사용과 발사 처리
 	virtual void Fire() override;
 
-	// [TASER-007] 발사 1회당 내구도 25 차감 (명중 무관). 최대 100이라 4번 쏘면 소진. [WEAPON-014]
+	// TASER-007 발사 1회당 내구도 25 차감 (명중 무관). 최대 100이라 4번 쏘면 소진. WEAPON-014
+	// [TASER-007] 발사 1회당 내구도 25 차감 (명중 무관). 최대 100이라 4번 쏘면 소진. WEAPON-014
 	virtual float GetDurabilityCostPerUse() const override { return 25.0f; }
 
-	// 테이저는 발사 후 짧은 쿨(FireCooldown) 동안 "사용 중"이라 슬롯 변경을 막는다. [WEAPON-015]
+	// 테이저는 발사 후 짧은 쿨(FireCooldown) 동안 "사용 중"이라 슬롯 변경을 막는다. WEAPON-015
+	// [TASER-009] 발사 후 사용 중 상태 유지 여부 반환
 	virtual bool bUsesInUseState() const override { return true; }
 
 	// 발사 후 슬롯 잠금이 유지되는 시간 (초). 이 시간 뒤 FinishUse로 해제.
@@ -58,17 +62,20 @@ private:
 	FTimerHandle FireCooldownTimer;
 protected:
 
-	// [TASER-006] 무기 공통 히트 처리 override: 맞은 캐릭터에 기절 부여
+	// TASER-006 무기 공통 히트 처리 override: 맞은 캐릭터에 기절 부여
+	// [TASER-006] 명중 대상의 효과 처리
 	virtual void ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResult& Hit) override;
 #pragma endregion
 
 #pragma region [TASER] 연출 훅 (Blueprint VFX)
-	// [TASER-005] 발사 이펙트 훅 (전기 줄기 등). 시작/끝 지점 전달, 모든 클라 재생
+	// TASER-005 발사 이펙트 훅 (전기 줄기 등). 시작/끝 지점 전달, 모든 클라 재생
 	UFUNCTION(NetMulticast, Unreliable)
+	// [TASER-005] 발사 이펙트 훅 (전기 줄기 등). 시작/끝 지점 전달, 모든 클라 재생
 	void MulticastPlayFireEffect(FVector Start, FVector End, bool bHit);
 
 	// 블루프린트에서 실제 나이아가라/케이블 VFX를 붙이는 이벤트
 	UFUNCTION(BlueprintImplementableEvent, Category = "Taser|FX")
+	// [TASER-010] BP에서 구현하는 발사 연출 이벤트
 	void OnFireEffect(FVector Start, FVector End, bool bHit);
 #pragma endregion
 
