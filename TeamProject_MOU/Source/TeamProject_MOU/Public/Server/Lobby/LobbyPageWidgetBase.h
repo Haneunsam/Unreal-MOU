@@ -126,6 +126,7 @@ private:
 	UFUNCTION() void HandleCustomizeClicked();
 	UFUNCTION() void HandleLeaveClicked();
 	void BuildDefaultLayout();
+	void EnsurePlayerSlots();
 	void RebuildMemberList(const UServerSubsystem* Server);
 
 	UPROPERTY()

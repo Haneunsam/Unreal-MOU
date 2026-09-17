@@ -43,6 +43,13 @@ void URoomPlayerSlotWidgetBase::NativeOnInitialized()
 	RefreshVisuals();
 }
 
+void URoomPlayerSlotWidgetBase::NativeConstruct()
+{
+	Super::NativeConstruct();
+	// Restore current member state after Blueprint PreConstruct/Construct and on reattachment.
+	RefreshVisuals();
+}
+
 void URoomPlayerSlotWidgetBase::SetMember(const FMOURoomMember& InMember, bool bInIsSelf)
 {
 	if (bOccupied && Member.UserId == InMember.UserId && Member.Name == InMember.Name &&

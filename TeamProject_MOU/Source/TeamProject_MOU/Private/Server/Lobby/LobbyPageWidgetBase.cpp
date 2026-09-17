@@ -1,6 +1,7 @@
 #include "Server/Lobby/LobbyPageWidgetBase.h"
 #include "Server/Lobby/RoomPlayerSlotWidgetBase.h"
 #include "Components/UniformGridPanel.h"
+#include "Components/UniformGridSlot.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -147,6 +148,7 @@ void URoomLobbyWidgetBase::NativeOnInitialized()
 void URoomLobbyWidgetBase::NativeConstruct()
 {
 	Super::NativeConstruct();
+	EnsurePlayerSlots();
 	if (ReadyButton) { ReadyButton->OnClicked.AddUniqueDynamic(this, &URoomLobbyWidgetBase::HandleReadyClicked); }
 	if (StartGameButton) { StartGameButton->OnClicked.AddUniqueDynamic(this, &URoomLobbyWidgetBase::HandleStartClicked); }
 	if (CustomizeButton) { CustomizeButton->OnClicked.AddUniqueDynamic(this, &URoomLobbyWidgetBase::HandleCustomizeClicked); }
@@ -160,6 +162,7 @@ void URoomLobbyWidgetBase::BuildDefaultLayout()
 	StatusText = AddText(WidgetTree, Box, TEXT("StatusText"), TEXT(""));
 	PlayerSlotGrid = WidgetTree->ConstructWidget<UUniformGridPanel>(UUniformGridPanel::StaticClass(), TEXT("PlayerSlotGrid"));
 	AddRow(Box, PlayerSlotGrid, 12.f);
+	CastChecked<UVerticalBoxSlot>(PlayerSlotGrid->Slot)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 	UTextBlock* ReadyLabel = nullptr;
 	UTextBlock* StartLabel = nullptr;
 	ReadyButton = AddButton(WidgetTree, Box, TEXT("ReadyButton"), TEXT("준비하기"), &ReadyLabel);
@@ -205,14 +208,16 @@ void URoomLobbyWidgetBase::Refresh(const UServerSubsystem* Server)
 	RebuildMemberList(Server);
 }
 
-void URoomLobbyWidgetBase::RebuildMemberList(const UServerSubsystem* Server)
+void URoomLobbyWidgetBase::EnsurePlayerSlots()
 {
-	if (!Server) { return; }
 	if (!PlayerSlotGrid && MemberListBox)
 	{
 		PlayerSlotGrid = WidgetTree->ConstructWidget<UUniformGridPanel>();
 		MemberListBox->ClearChildren();
-		MemberListBox->AddChild(PlayerSlotGrid);
+		UVerticalBoxSlot* GridSlot = MemberListBox->AddChildToVerticalBox(PlayerSlotGrid);
+		GridSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		GridSlot->SetHorizontalAlignment(HAlign_Fill);
+		GridSlot->SetVerticalAlignment(VAlign_Fill);
 	}
 	if (!PlayerSlotGrid) { return; }
 	if (PlayerSlots.Num() < 4)
@@ -224,9 +229,19 @@ void URoomLobbyWidgetBase::RebuildMemberList(const UServerSubsystem* Server)
 			auto* PlayerSlot = CreateWidget<URoomPlayerSlotWidgetBase>(GetOwningPlayer(), SlotClass);
 			if (!PlayerSlot) { return; }
 			PlayerSlots.Add(PlayerSlot);
-			PlayerSlotGrid->AddChildToUniformGrid(PlayerSlot, Index / FMath::Clamp(SlotColumns, 1, 4), Index % FMath::Clamp(SlotColumns, 1, 4));
+			UUniformGridSlot* GridSlot = PlayerSlotGrid->AddChildToUniformGrid(
+				PlayerSlot, Index / FMath::Clamp(SlotColumns, 1, 4), Index % FMath::Clamp(SlotColumns, 1, 4));
+			// Canvas-based WBP cards must receive the whole cell, not only their desired size.
+			GridSlot->SetHorizontalAlignment(HAlign_Fill);
+			GridSlot->SetVerticalAlignment(VAlign_Fill);
 		}
 	}
+}
+
+void URoomLobbyWidgetBase::RebuildMemberList(const UServerSubsystem* Server)
+{
+	if (!Server) { return; }
+	EnsurePlayerSlots();
 	const auto Members = Server->GetRoomMembers();
 	for (int32 Index = 0; Index < PlayerSlots.Num(); ++Index)
 	{

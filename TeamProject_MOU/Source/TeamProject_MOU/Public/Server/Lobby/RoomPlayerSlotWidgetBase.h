@@ -16,6 +16,7 @@ class TEAMPROJECT_MOU_API URoomPlayerSlotWidgetBase : public UUserWidget
 	GENERATED_BODY()
 public:
 	virtual void NativeOnInitialized() override;
+	virtual void NativeConstruct() override;
 
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby|Slot")
 	void SetMember(const FMOURoomMember& InMember, bool bInIsSelf);
