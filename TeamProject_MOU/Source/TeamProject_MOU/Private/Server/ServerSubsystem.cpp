@@ -1,4 +1,4 @@
-﻿// MOU 채팅 - 서브시스템 구현.
+// MOU 채팅 - 서브시스템 구현.
 //
 // 이 파일이 하는 일은 결국 4가지다.
 //   1. 백엔드(ILobbyBackend) 수명 관리 (생성 / 안전한 파괴)
@@ -16,6 +16,8 @@
 //   여기서 다시 적으면 서버가 상한을 바꿨을 때 조용히 어긋난다.
 
 #include "Server/ServerSubsystem.h"
+#include "Components/CharacterCustomizationComponent.h"
+#include "Server/Net/CustomizationWire.h"
 
 #include "Server/Net/ChatFraming.h"   // 계정/방 비밀번호 길이 규칙 상수 (패킷 조립에는 쓰지 않는다)
 #include "Server/Lobby/LobbyBackend.h"
@@ -488,6 +490,31 @@ void UServerSubsystem::LeaveRoom()
 	ClearRoomState();
 }
 
+FCharacterCustomizationData UServerSubsystem::GetLocalCustomization()
+{
+	if (!bLocalCustomizationLoaded)
+	{
+		auto* Storage = NewObject<UCharacterCustomizationComponent>(this);
+		if (!Storage->LoadCustomizationFromDisk(LocalCustomization) ||
+			!MOU::IsValidCustomization(MOUCustomization::ToWire(LocalCustomization)))
+		{
+			LocalCustomization = MOUCustomization::FromWire(MOU::CharacterCustomization{});
+		}
+		bLocalCustomizationLoaded = true;
+	}
+	return LocalCustomization;
+}
+
+bool UServerSubsystem::SubmitCustomization(const FCharacterCustomizationData& Data)
+{
+	if (!Backend.IsValid() || !Backend->IsRunning() || CurrentRoomId == 0 || bCustomizationPending ||
+		!MOU::IsValidCustomization(MOUCustomization::ToWire(Data))) return false;
+	if (!Backend->SetCustomization(CurrentRoomId, ++CustomizationRequestId, Data)) return false;
+	bCustomizationPending = true;
+	CustomizationRequestTime = FPlatformTime::Seconds();
+	return true;
+}
+
 void UServerSubsystem::SetReady(bool bReady)
 {
 	if (!Backend.IsValid() || CurrentRoomId == 0)
@@ -659,6 +686,13 @@ bool UServerSubsystem::IsSelfReady() const
 
 void UServerSubsystem::ClearRoomState()
 {
+	++CustomizationRequestId; // Ignore replies from a previous room/session.
+	if (bCustomizationPending)
+	{
+		bCustomizationPending = false;
+		OnLobbyCustomizationResult.Broadcast(false, false);
+	}
+
 	MyRoomId      = 0;
 	CurrentRoomId = 0;
 	RoomMembers.Reset();
@@ -712,6 +746,12 @@ void UServerSubsystem::Disconnect()
 
 bool UServerSubsystem::Tick(float DeltaTime)
 {
+	if (bCustomizationPending && FPlatformTime::Seconds() - CustomizationRequestTime > 10.0)
+	{
+		bCustomizationPending = false;
+		OnLobbyCustomizationResult.Broadcast(false, false);
+	}
+
 	if (!Backend.IsValid())
 	{
 		return true;   // false 를 돌려주면 틱이 영구 해제된다. 항상 true
@@ -820,6 +860,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			{
 				MyRoomId      = Event.RoomId;
 				CurrentRoomId = Event.RoomId;   // 방장도 그 방의 멤버다
+				SubmitCustomization(GetLocalCustomization());
 				UE_LOG(LogMOUServer, Log, TEXT("방 생성 완료. 방번호 #%d"), MyRoomId);
 			}
 			else
@@ -839,6 +880,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			if (Event.Join.bSuccess)
 			{
 				CurrentRoomId = Event.Join.RoomId;   // 대기실 입장. 방장은 아니다
+				SubmitCustomization(GetLocalCustomization());
 				UE_LOG(LogMOUServer, Log, TEXT("방 #%d 입장. 호스트 후보 %s"),
 					Event.Join.RoomId, *Event.Join.ToDisplayString());
 			}
@@ -863,6 +905,22 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			}
 			break;
 
+		case EServerClientEventType::RoomCustomizationAck:
+			if (Event.RoomId == CurrentRoomId && Event.CustomizationRequestId == CustomizationRequestId)
+			{
+				bCustomizationPending = false;
+				const bool bSuccess = Event.RoomResult == EMOURoomResultBP::Success;
+				bool bSaved = false;
+				if (bSuccess)
+				{
+					LocalCustomization = Event.Customization;
+					bLocalCustomizationLoaded = true;
+					auto* Storage = NewObject<UCharacterCustomizationComponent>(this);
+					bSaved = Storage->SaveCustomizationToDisk(LocalCustomization);
+				}
+				OnLobbyCustomizationResult.Broadcast(bSuccess, bSaved);
+			}
+			break;
 		case EServerClientEventType::RoomClosed:
 			UE_LOG(LogMOUServer, Log, TEXT("방 #%d 이(가) 닫혔다. 방장이 나갔다."), Event.RoomId);
 			ClearRoomState();

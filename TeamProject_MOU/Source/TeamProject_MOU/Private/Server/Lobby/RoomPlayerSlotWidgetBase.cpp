@@ -1,4 +1,6 @@
 #include "Server/Lobby/RoomPlayerSlotWidgetBase.h"
+#include "Components/CharacterCustomizationComponent.h"
+#include "GameFramework/Actor.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Image.h"
@@ -54,7 +56,7 @@ void URoomPlayerSlotWidgetBase::SetMember(const FMOURoomMember& InMember, bool b
 {
 	if (bOccupied && Member.UserId == InMember.UserId && Member.Name == InMember.Name &&
 		Member.bReady == InMember.bReady && Member.bIsHost == InMember.bIsHost &&
-		Member.SlotIndex == InMember.SlotIndex && bIsSelf == bInIsSelf)
+		Member.SlotIndex == InMember.SlotIndex && Member.Customization == InMember.Customization && bIsSelf == bInIsSelf)
 	{
 		return;
 	}
@@ -75,8 +77,20 @@ void URoomPlayerSlotWidgetBase::ClearMember()
 	OnSlotChanged();
 }
 
+void URoomPlayerSlotWidgetBase::SetPreviewComponent(UCharacterCustomizationComponent* Component)
+{
+	PreviewComponent = Component;
+	RefreshVisuals();
+}
+
 void URoomPlayerSlotWidgetBase::RefreshVisuals()
 {
+	if (PreviewComponent.IsValid())
+	{
+		if (AActor* Actor = PreviewComponent->GetOwner()) Actor->SetActorHiddenInGame(!bOccupied);
+		if (bOccupied) PreviewComponent->ApplyPreview(Member.Customization);
+	}
+
 	if (EmptyPanel) { EmptyPanel->SetVisibility(bOccupied ? ESlateVisibility::Collapsed : ESlateVisibility::Visible); }
 	if (OccupiedPanel) { OccupiedPanel->SetVisibility(bOccupied ? ESlateVisibility::Visible : ESlateVisibility::Collapsed); }
 	if (NicknameText) { NicknameText->SetText(FText::FromString(Member.Name)); }

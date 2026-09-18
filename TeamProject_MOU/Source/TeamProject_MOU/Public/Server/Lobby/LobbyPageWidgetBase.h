@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "UI/CharacterCustomizationWidget.h"
 #include "LobbyPageWidgetBase.generated.h"
 
 class UButton;
@@ -156,21 +157,53 @@ private:
 
 /** 방 대기실 위에 Push되는 커스터마이징 페이지. */
 UCLASS()
-class TEAMPROJECT_MOU_API ULobbyCustomizeWidgetBase : public UUserWidget
+class TEAMPROJECT_MOU_API ULobbyCustomizeWidgetBase : public UCharacterCustomizationWidget
 {
 	GENERATED_BODY()
 
 public:
 	virtual void NativeOnInitialized() override;
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
+	virtual void ConfirmAndSave() override;
+	virtual void CancelAndExit() override;
+	virtual void RotateCharacter(float DeltaX) override;
+
+	/** Register a lobby preview actor's CharacterCustomizationComponent. */
+	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby|Customization")
+	void SetPreviewComponent(UCharacterCustomizationComponent* Component);
+
+	UPROPERTY(BlueprintReadOnly, Category = "MOU|Lobby|Customization")
+	bool bWaitingForConfirmation = false;
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "MOU|Lobby|Customization")
+	void OnCustomizationStatus(const FText& Message, bool bSuccess);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "MOU|Lobby|Customization")
+	void OnCustomizationPreviewChanged(const FCharacterCustomizationData& Data);
 
 	FOnLobbyPageAction OnBack;
 
 protected:
+	virtual void InitializeCustomization() override;
+	virtual void UpdatePreview() override;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
+	TObjectPtr<UButton> ConfirmButton;
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
+	TObjectPtr<UButton> ResetButton;
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
+	TObjectPtr<UTextBlock> CustomizationStatusText;
+
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
 	TObjectPtr<UButton> BackButton;
 
 private:
+	UFUNCTION() void HandleConfirmClicked();
+	UFUNCTION() void HandleResetClicked();
+	UFUNCTION() void HandleCustomizationResult(bool bSuccess, bool bSavedToDisk);
+	void ShowStatus(const FText& Message, bool bSuccess);
+	TWeakObjectPtr<UCharacterCustomizationComponent> PreviewComponent;
 	UFUNCTION() void HandleBackClicked();
 	void BuildDefaultLayout();
 };

@@ -12,6 +12,8 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Server/ServerSubsystem.h"
+#include "Components/CharacterCustomizationComponent.h"
+#include "GameFramework/Actor.h"
 
 namespace
 {
@@ -296,14 +298,113 @@ void ULobbyCustomizeWidgetBase::NativeConstruct()
 {
 	Super::NativeConstruct();
 	if (BackButton) { BackButton->OnClicked.AddUniqueDynamic(this, &ULobbyCustomizeWidgetBase::HandleBackClicked); }
+	if (ConfirmButton) { ConfirmButton->OnClicked.AddUniqueDynamic(this, &ULobbyCustomizeWidgetBase::HandleConfirmClicked); }
+	if (ResetButton) { ResetButton->OnClicked.AddUniqueDynamic(this, &ULobbyCustomizeWidgetBase::HandleResetClicked); }
+	if (auto* Server = UServerSubsystem::Get(this))
+		Server->OnLobbyCustomizationResult.AddUniqueDynamic(this, &ULobbyCustomizeWidgetBase::HandleCustomizationResult);
 }
 
 void ULobbyCustomizeWidgetBase::BuildDefaultLayout()
 {
 	UVerticalBox* Box = BuildPagePanel(WidgetTree, TEXT("LobbyCustomizeRoot"), FVector2D(520.f, 420.f));
 	AddText(WidgetTree, Box, TEXT("TitleText"), TEXT("커스터마이징"));
-	AddText(WidgetTree, Box, TEXT("DescriptionText"), TEXT("WBP에서 커스터마이징 항목을 배치하세요."));
+	AddText(WidgetTree, Box, TEXT("DescriptionText"), TEXT("몸 색상 / 금속성 / 거칠기 A·B / 데칼 / 데칼 색상 / 반복 X·Y"));
+	ConfirmButton = AddButton(WidgetTree, Box, TEXT("ConfirmButton"), TEXT("적용 및 저장"));
+	ResetButton = AddButton(WidgetTree, Box, TEXT("ResetButton"), TEXT("기본값"));
+	CustomizationStatusText = AddText(WidgetTree, Box, TEXT("CustomizationStatusText"), TEXT(""));
 	BackButton = AddButton(WidgetTree, Box, TEXT("BackButton"), TEXT("뒤로가기"));
 }
 
-void ULobbyCustomizeWidgetBase::HandleBackClicked() { OnBack.ExecuteIfBound(); }
+void ULobbyCustomizeWidgetBase::HandleBackClicked() { CancelAndExit(); }
+void ULobbyCustomizeWidgetBase::HandleConfirmClicked() { ConfirmAndSave(); }
+void ULobbyCustomizeWidgetBase::HandleResetClicked() { if (!bWaitingForConfirmation) ResetToDefault(); }
+
+void ULobbyCustomizeWidgetBase::InitializeCustomization()
+{
+	if (!EditingDataAsset) EditingDataAsset = NewObject<UCustomizationDataAsset>(this);
+	if (auto* Server = UServerSubsystem::Get(this)) CurrentData = Server->GetLocalCustomization();
+	OriginalData = CurrentData;
+	OnCustomizationDataInitialized(CurrentData);
+	UpdatePreview();
+}
+
+void ULobbyCustomizeWidgetBase::SetPreviewComponent(UCharacterCustomizationComponent* Component)
+{
+	if (PreviewComponent.IsValid()) PreviewComponent->ApplyPreview(OriginalData);
+	PreviewComponent = Component;
+	UpdatePreview();
+}
+
+void ULobbyCustomizeWidgetBase::UpdatePreview()
+{
+	if (bWaitingForConfirmation) return;
+	if (PreviewComponent.IsValid()) PreviewComponent->ApplyPreview(CurrentData);
+	OnCustomizationPreviewChanged(CurrentData);
+}
+
+void ULobbyCustomizeWidgetBase::RotateCharacter(float DeltaX)
+{
+	if (PreviewComponent.IsValid() && PreviewComponent->GetOwner())
+		PreviewComponent->GetOwner()->AddActorLocalRotation(FRotator(0, DeltaX * DragRotationSpeed, 0));
+}
+
+void ULobbyCustomizeWidgetBase::ShowStatus(const FText& Message, bool bSuccess)
+{
+	if (CustomizationStatusText) CustomizationStatusText->SetText(Message);
+	OnCustomizationStatus(Message, bSuccess);
+}
+
+void ULobbyCustomizeWidgetBase::ConfirmAndSave()
+{
+	if (bWaitingForConfirmation) return;
+	CloseColorPickers();
+	auto* Server = UServerSubsystem::Get(this);
+	if (!Server || !Server->SubmitCustomization(CurrentData))
+	{
+		ShowStatus(FText::FromString(TEXT("외형을 전송할 수 없습니다. 연결/입장 상태 또는 진행 중인 요청을 확인하세요.")), false);
+		return;
+	}
+	bWaitingForConfirmation = true;
+	SetIsEnabled(false);
+	ShowStatus(FText::FromString(TEXT("외형 적용 중...")), false);
+}
+
+void ULobbyCustomizeWidgetBase::HandleCustomizationResult(bool bSuccess, bool bSavedToDisk)
+{
+	if (!bWaitingForConfirmation) return;
+	bWaitingForConfirmation = false;
+	SetIsEnabled(true);
+	if (!bSuccess)
+	{
+		ShowStatus(FText::FromString(TEXT("외형 적용 실패. 방 상태/서버 연결을 확인한 뒤 다시 시도하세요.")), false);
+		return;
+	}
+	if (auto* Server = UServerSubsystem::Get(this)) CurrentData = Server->GetLocalCustomization();
+	OriginalData = CurrentData;
+	UpdatePreview();
+	if (!bSavedToDisk)
+	{
+		ShowStatus(FText::FromString(TEXT("외형은 적용되었습니다. 디스크 저장에 실패하여 다음 실행에는 유지되지 않을 수 있습니다.")), true);
+		return;
+	}
+	OnBack.ExecuteIfBound();
+}
+
+void ULobbyCustomizeWidgetBase::CancelAndExit()
+{
+	if (bWaitingForConfirmation) return;
+	CloseColorPickers();
+	CurrentData = OriginalData;
+	UpdatePreview();
+	OnBack.ExecuteIfBound();
+}
+
+void ULobbyCustomizeWidgetBase::NativeDestruct()
+{
+	if (auto* Server = UServerSubsystem::Get(this))
+	{
+		Server->OnLobbyCustomizationResult.RemoveDynamic(this, &ULobbyCustomizeWidgetBase::HandleCustomizationResult);
+		if (PreviewComponent.IsValid()) PreviewComponent->ApplyPreview(Server->GetLocalCustomization());
+	}
+	Super::NativeDestruct();
+}

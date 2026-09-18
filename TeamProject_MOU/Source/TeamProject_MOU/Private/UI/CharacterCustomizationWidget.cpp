@@ -9,6 +9,11 @@ void UCharacterCustomizationWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
+	InitializeCustomization();
+}
+
+void UCharacterCustomizationWidget::InitializeCustomization()
+{
 	APlayerController* PC = GetOwningPlayer();
 	if (PC)
 	{
@@ -52,6 +57,7 @@ void UCharacterCustomizationWidget::SetRoughnessA(float InRoughnessA)
 
 void UCharacterCustomizationWidget::SetDecalIndex(int32 InIndex)
 {
+	if (InIndex < 0 || InIndex >= GetAvailableDecalCount()) return;
 	CurrentData.DecalIndex = InIndex;
 	UpdatePreview();
 }
@@ -64,13 +70,13 @@ void UCharacterCustomizationWidget::SetDecalsColor(FLinearColor InColor)
 
 void UCharacterCustomizationWidget::SetTilingX(float InTilingX)
 {
-	CurrentData.TilingX = InTilingX;
+	CurrentData.TilingX = FMath::Clamp(InTilingX, 0.01f, 20.0f);
 	UpdatePreview();
 }
 
 void UCharacterCustomizationWidget::SetTilingY(float InTilingY)
 {
-	CurrentData.TilingY = InTilingY;
+	CurrentData.TilingY = FMath::Clamp(InTilingY, 0.01f, 20.0f);
 	UpdatePreview();
 }
 
@@ -106,39 +112,19 @@ void UCharacterCustomizationWidget::CancelAndExit()
 
 void UCharacterCustomizationWidget::ResetToDefault()
 {
-	if (CachedCustomizationComp.IsValid())
-	{
-		if (UCustomizationDataAsset* DataAsset = CachedCustomizationComp->GetCustomizationDataAsset())
-		{
-			if (DataAsset->DefaultPresets.Num() > 0)
-			{
-				CurrentData = DataAsset->DefaultPresets[0];
-				UpdatePreview();
-				OnCustomizationDataInitialized(CurrentData);
-				return;
-			}
-		}
-	}
-
-	CurrentData = FCharacterCustomizationData();
+	const auto* Asset = GetEditingDataAsset();
+	CurrentData = Asset && Asset->DefaultPresets.Num() > 0 ? Asset->DefaultPresets[0] : FCharacterCustomizationData();
 	UpdatePreview();
 	OnCustomizationDataInitialized(CurrentData);
 }
 
 void UCharacterCustomizationWidget::ApplyPreset(int32 PresetIndex)
 {
-	if (CachedCustomizationComp.IsValid())
-	{
-		if (UCustomizationDataAsset* DataAsset = CachedCustomizationComp->GetCustomizationDataAsset())
-		{
-			if (DataAsset->DefaultPresets.IsValidIndex(PresetIndex))
-			{
-				CurrentData = DataAsset->DefaultPresets[PresetIndex];
-				UpdatePreview();
-				OnCustomizationDataInitialized(CurrentData);
-			}
-		}
-	}
+	const auto* Asset = GetEditingDataAsset();
+	if (!Asset || !Asset->DefaultPresets.IsValidIndex(PresetIndex)) return;
+	CurrentData = Asset->DefaultPresets[PresetIndex];
+	UpdatePreview();
+	OnCustomizationDataInitialized(CurrentData);
 }
 
 void UCharacterCustomizationWidget::RotateCharacter(float DeltaX)
@@ -151,26 +137,14 @@ void UCharacterCustomizationWidget::RotateCharacter(float DeltaX)
 
 int32 UCharacterCustomizationWidget::GetAvailableDecalCount() const
 {
-	if (CachedCustomizationComp.IsValid())
-	{
-		if (UCustomizationDataAsset* DataAsset = CachedCustomizationComp->GetCustomizationDataAsset())
-		{
-			return DataAsset->AvailableDecals.Num();
-		}
-	}
-	return 0;
+	const auto* Asset = GetEditingDataAsset();
+	return Asset ? Asset->AvailableDecals.Num() : 0;
 }
 
 UTexture2D* UCharacterCustomizationWidget::GetDecalTexture(int32 Index) const
 {
-	if (CachedCustomizationComp.IsValid())
-	{
-		if (UCustomizationDataAsset* DataAsset = CachedCustomizationComp->GetCustomizationDataAsset())
-		{
-			return DataAsset->GetDecalTexture(Index);
-		}
-	}
-	return nullptr;
+	const auto* Asset = GetEditingDataAsset();
+	return Asset ? Asset->GetDecalTexture(Index) : nullptr;
 }
 
 void UCharacterCustomizationWidget::UpdatePreview()
@@ -191,10 +165,12 @@ UColorPickerWidget* UCharacterCustomizationWidget::OpenBodyColorPicker()
 	UColorPickerWidget* Picker = CreateWidget<UColorPickerWidget>(GetOwningPlayer(), ColorPickerWidgetClass);
 	if (Picker)
 	{
+		CloseColorPickers();
 		Picker->InitializeColor(CurrentData.BodyColor);
 		Picker->OnColorChanged.AddDynamic(this, &UCharacterCustomizationWidget::SetBodyColor);
 		Picker->OnColorCancelled.AddDynamic(this, &UCharacterCustomizationWidget::SetBodyColor);
 		Picker->AddToViewport(100);
+		OpenColorPickers.Add(Picker);
 	}
 	return Picker;
 }
@@ -209,11 +185,43 @@ UColorPickerWidget* UCharacterCustomizationWidget::OpenDecalColorPicker()
 	UColorPickerWidget* Picker = CreateWidget<UColorPickerWidget>(GetOwningPlayer(), ColorPickerWidgetClass);
 	if (Picker)
 	{
+		CloseColorPickers();
 		Picker->InitializeColor(CurrentData.DecalsColor);
 		Picker->OnColorChanged.AddDynamic(this, &UCharacterCustomizationWidget::SetDecalsColor);
 		Picker->OnColorCancelled.AddDynamic(this, &UCharacterCustomizationWidget::SetDecalsColor);
 		Picker->AddToViewport(100);
+		OpenColorPickers.Add(Picker);
 	}
 	return Picker;
 }
 
+
+UCustomizationDataAsset* UCharacterCustomizationWidget::GetEditingDataAsset() const
+{
+	if (CachedCustomizationComp.IsValid()) return CachedCustomizationComp->GetCustomizationDataAsset();
+	return EditingDataAsset;
+}
+
+int32 UCharacterCustomizationWidget::GetAvailablePresetCount() const
+{
+	const auto* Asset = GetEditingDataAsset();
+	return Asset ? Asset->DefaultPresets.Num() : 0;
+}
+
+void UCharacterCustomizationWidget::CloseColorPickers()
+{
+	for (UColorPickerWidget* Picker : OpenColorPickers)
+	{
+		if (!Picker) continue;
+		Picker->OnColorChanged.RemoveAll(this);
+		Picker->OnColorCancelled.RemoveAll(this);
+		Picker->RemoveFromParent();
+	}
+	OpenColorPickers.Reset();
+}
+
+void UCharacterCustomizationWidget::NativeDestruct()
+{
+	CloseColorPickers();
+	Super::NativeDestruct();
+}

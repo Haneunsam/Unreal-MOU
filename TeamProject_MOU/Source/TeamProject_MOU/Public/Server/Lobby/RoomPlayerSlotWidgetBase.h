@@ -6,6 +6,7 @@
 #include "RoomPlayerSlotWidgetBase.generated.h"
 
 class UImage;
+class UCharacterCustomizationComponent;
 class UTextBlock;
 class UWidget;
 
@@ -17,6 +18,11 @@ class TEAMPROJECT_MOU_API URoomPlayerSlotWidgetBase : public UUserWidget
 public:
 	virtual void NativeOnInitialized() override;
 	virtual void NativeConstruct() override;
+
+	/** Each slot must register its own preview actor, never another player's live pawn. */
+	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby|Slot")
+	void SetPreviewComponent(UCharacterCustomizationComponent* Component);
+
 
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby|Slot")
 	void SetMember(const FMOURoomMember& InMember, bool bInIsSelf);
@@ -52,4 +58,5 @@ protected:
 	TObjectPtr<UWidget> SelfHighlight;
 private:
 	void RefreshVisuals();
+	TWeakObjectPtr<UCharacterCustomizationComponent> PreviewComponent;
 };
