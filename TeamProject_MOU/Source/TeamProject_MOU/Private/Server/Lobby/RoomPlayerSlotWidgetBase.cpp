@@ -1,6 +1,9 @@
 #include "Server/Lobby/RoomPlayerSlotWidgetBase.h"
 #include "Components/CharacterCustomizationComponent.h"
 #include "GameFramework/Actor.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "UObject/UnrealType.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Image.h"
@@ -63,6 +66,7 @@ void URoomPlayerSlotWidgetBase::SetMember(const FMOURoomMember& InMember, bool b
 	Member = InMember;
 	bOccupied = true;
 	bIsSelf = bInIsSelf;
+	if (!PreviewComponent.IsValid()) FindPreviewActorForSlot(Member.SlotIndex);
 	RefreshVisuals();
 	OnSlotChanged();
 }
@@ -73,6 +77,7 @@ void URoomPlayerSlotWidgetBase::ClearMember()
 	Member = FMOURoomMember();
 	bOccupied = false;
 	bIsSelf = false;
+	bHasAppliedCustomization = false;
 	RefreshVisuals();
 	OnSlotChanged();
 }
@@ -80,7 +85,53 @@ void URoomPlayerSlotWidgetBase::ClearMember()
 void URoomPlayerSlotWidgetBase::SetPreviewComponent(UCharacterCustomizationComponent* Component)
 {
 	PreviewComponent = Component;
+	bHasAppliedCustomization = false;
 	RefreshVisuals();
+}
+
+UCharacterCustomizationComponent* URoomPlayerSlotWidgetBase::GetOrCreatePreviewComponent(AActor* Actor)
+{
+	if (!Actor) return nullptr;
+	auto* Mesh = Actor->FindComponentByClass<USkeletalMeshComponent>();
+	if (!Mesh) return nullptr;
+	auto* Component = Actor->FindComponentByClass<UCharacterCustomizationComponent>();
+	if (!Component)
+	{
+		Component = NewObject<UCharacterCustomizationComponent>(Actor);
+		Component->SetIsReplicated(false);
+		Actor->AddInstanceComponent(Component);
+		Component->RegisterComponent();
+	}
+	Component->SetPreviewMesh(Mesh);
+	return Component;
+}
+
+void URoomPlayerSlotWidgetBase::SetPreviewActor(AActor* Actor)
+{
+	if (auto* Component = GetOrCreatePreviewComponent(Actor)) SetPreviewComponent(Component);
+}
+
+AActor* URoomPlayerSlotWidgetBase::FindLobbyPreviewActor(const UObject* WorldContextObject, int32 SlotIndex)
+{
+	if (SlotIndex < 0 || !WorldContextObject) return nullptr;
+	UClass* PreviewClass = LoadClass<AActor>(nullptr,
+		TEXT("/Game/02_JSY/MainLobby/LobbyCharacter/BP_LobbyCharacterPreview.BP_LobbyCharacterPreview_C"));
+	if (!PreviewClass) return nullptr;
+	TArray<AActor*> Actors;
+	UGameplayStatics::GetAllActorsOfClass(WorldContextObject, PreviewClass, Actors);
+	for (AActor* Actor : Actors)
+	{
+		if (!Actor) continue;
+		const auto* Property = FindFProperty<FNumericProperty>(Actor->GetClass(), TEXT("PreviewSlotIndex"));
+		if (Property && Property->GetSignedIntPropertyValue(Property->ContainerPtrToValuePtr<void>(Actor)) == SlotIndex)
+			return Actor;
+	}
+	return nullptr;
+}
+
+void URoomPlayerSlotWidgetBase::FindPreviewActorForSlot(int32 SlotIndex)
+{
+	SetPreviewActor(FindLobbyPreviewActor(this, SlotIndex));
 }
 
 void URoomPlayerSlotWidgetBase::RefreshVisuals()
@@ -88,7 +139,12 @@ void URoomPlayerSlotWidgetBase::RefreshVisuals()
 	if (PreviewComponent.IsValid())
 	{
 		if (AActor* Actor = PreviewComponent->GetOwner()) Actor->SetActorHiddenInGame(!bOccupied);
-		if (bOccupied) PreviewComponent->ApplyPreview(Member.Customization);
+		if (bOccupied && (!bHasAppliedCustomization || LastAppliedCustomization != Member.Customization))
+		{
+			PreviewComponent->ApplyPreview(Member.Customization);
+			LastAppliedCustomization = Member.Customization;
+			bHasAppliedCustomization = true;
+		}
 	}
 
 	if (EmptyPanel) { EmptyPanel->SetVisibility(bOccupied ? ESlateVisibility::Collapsed : ESlateVisibility::Visible); }

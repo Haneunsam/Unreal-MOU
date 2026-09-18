@@ -168,6 +168,7 @@ UColorPickerWidget* UCharacterCustomizationWidget::OpenBodyColorPicker()
 		CloseColorPickers();
 		Picker->InitializeColor(CurrentData.BodyColor);
 		Picker->OnColorChanged.AddDynamic(this, &UCharacterCustomizationWidget::SetBodyColor);
+		Picker->OnColorConfirmed.AddDynamic(this, &UCharacterCustomizationWidget::SetBodyColor);
 		Picker->OnColorCancelled.AddDynamic(this, &UCharacterCustomizationWidget::SetBodyColor);
 		Picker->AddToViewport(100);
 		OpenColorPickers.Add(Picker);
@@ -188,6 +189,7 @@ UColorPickerWidget* UCharacterCustomizationWidget::OpenDecalColorPicker()
 		CloseColorPickers();
 		Picker->InitializeColor(CurrentData.DecalsColor);
 		Picker->OnColorChanged.AddDynamic(this, &UCharacterCustomizationWidget::SetDecalsColor);
+		Picker->OnColorConfirmed.AddDynamic(this, &UCharacterCustomizationWidget::SetDecalsColor);
 		Picker->OnColorCancelled.AddDynamic(this, &UCharacterCustomizationWidget::SetDecalsColor);
 		Picker->AddToViewport(100);
 		OpenColorPickers.Add(Picker);
@@ -214,6 +216,7 @@ void UCharacterCustomizationWidget::CloseColorPickers()
 	{
 		if (!Picker) continue;
 		Picker->OnColorChanged.RemoveAll(this);
+		Picker->OnColorConfirmed.RemoveAll(this);
 		Picker->OnColorCancelled.RemoveAll(this);
 		Picker->RemoveFromParent();
 	}

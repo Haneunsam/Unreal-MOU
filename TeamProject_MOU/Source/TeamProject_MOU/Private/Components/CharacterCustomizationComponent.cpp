@@ -51,6 +51,7 @@ void UCharacterCustomizationComponent::ApplyLocalCustomization()
 
 void UCharacterCustomizationComponent::SetPreviewMesh(USkeletalMeshComponent* Mesh)
 {
+	if (PreviewMesh.Get() == Mesh) return;
 	PreviewMesh = Mesh;
 	ReinitializeAndApply();
 }

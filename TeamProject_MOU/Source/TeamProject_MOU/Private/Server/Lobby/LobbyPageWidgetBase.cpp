@@ -8,12 +8,18 @@
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/Image.h"
+#include "Components/SceneCaptureComponent2D.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Server/ServerSubsystem.h"
 #include "Components/CharacterCustomizationComponent.h"
 #include "GameFramework/Actor.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 
 namespace
 {
@@ -297,11 +303,107 @@ void ULobbyCustomizeWidgetBase::NativeOnInitialized()
 void ULobbyCustomizeWidgetBase::NativeConstruct()
 {
 	Super::NativeConstruct();
+	ConnectOwnSlotPreview();
 	if (BackButton) { BackButton->OnClicked.AddUniqueDynamic(this, &ULobbyCustomizeWidgetBase::HandleBackClicked); }
 	if (ConfirmButton) { ConfirmButton->OnClicked.AddUniqueDynamic(this, &ULobbyCustomizeWidgetBase::HandleConfirmClicked); }
 	if (ResetButton) { ResetButton->OnClicked.AddUniqueDynamic(this, &ULobbyCustomizeWidgetBase::HandleResetClicked); }
 	if (auto* Server = UServerSubsystem::Get(this))
+	{
 		Server->OnLobbyCustomizationResult.AddUniqueDynamic(this, &ULobbyCustomizeWidgetBase::HandleCustomizationResult);
+		Server->OnRoomMembersChanged.AddUniqueDynamic(this, &ULobbyCustomizeWidgetBase::HandlePreviewRoomMembersChanged);
+	}
+}
+
+void ULobbyCustomizeWidgetBase::ConnectOwnSlotPreview()
+{
+	// The room snapshot is authoritative for the local seat. Never default to slot 0.
+	const UServerSubsystem* Server = UServerSubsystem::Get(this);
+	if (!GetWorld() || !Server || Server->GetCurrentRoomId() == 0) return;
+	const int64 SelfUserId = Server->GetLoginResult().UserId;
+	const TArray<FMOURoomMember> Members = Server->GetRoomMembers();
+	const FMOURoomMember* Self = Members.FindByPredicate(
+		[SelfUserId](const FMOURoomMember& Member) { return Member.UserId == SelfUserId; });
+	if (!Self || Self->SlotIndex < 0 || Self->SlotIndex > 3)
+	{
+		if (PreviewImage) PreviewImage->SetVisibility(ESlateVisibility::Collapsed);
+		ShowStatus(FText::FromString(TEXT("내 슬롯 정보 수신을 기다리는 중...")), false);
+		return;
+	}
+
+	// A designer-placed PreviewImage controls placement; a Canvas-only WBP gets a fallback.
+	if (!PreviewImage)
+	{
+		if (auto* Canvas = Cast<UCanvasPanel>(WidgetTree ? WidgetTree->RootWidget : nullptr))
+		{
+			PreviewImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("PreviewImage"));
+			if (auto* CanvasSlot = Canvas->AddChildToCanvas(PreviewImage))
+			{
+				CanvasSlot->SetAnchors(FAnchors(0.02f, 0.12f, 0.38f, 0.92f));
+				CanvasSlot->SetOffsets(FMargin(0));
+				CanvasSlot->SetZOrder(-1);
+			}
+		}
+	}
+	if (!PreviewImage)
+	{
+		ShowStatus(FText::FromString(TEXT("PreviewImage가 없습니다. WBP에 Image를 추가하세요.")), false);
+		return;
+	}
+	PreviewImage->SetVisibility(ESlateVisibility::Collapsed);
+
+	const int32 SlotIndex = Self->SlotIndex;
+	const FString TargetPath = FString::Printf(
+		TEXT("/Game/02_JSY/MainLobby/LobbyCharacter/RenderTarget/RT_LobbySlot%d.RT_LobbySlot%d"),
+		SlotIndex, SlotIndex);
+	UTextureRenderTarget2D* SlotTarget = LoadObject<UTextureRenderTarget2D>(nullptr, *TargetPath);
+	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr,
+		TEXT("/Game/02_JSY/MainLobby/LobbyCharacter/M_UI_LobbyCharacter.M_UI_LobbyCharacter"));
+	AActor* SlotActor = URoomPlayerSlotWidgetBase::FindLobbyPreviewActor(this, SlotIndex);
+	USceneCaptureComponent2D* Capture = SlotActor ? SlotActor->FindComponentByClass<USceneCaptureComponent2D>() : nullptr;
+	if (!SlotTarget || !Material || !SlotActor || !Capture)
+	{
+		ShowStatus(FText::FromString(FString::Printf(
+			TEXT("슬롯 %d의 RenderTarget 또는 프리뷰 액터를 찾지 못했습니다."), SlotIndex)), false);
+		return;
+	}
+	UCharacterCustomizationComponent* Component =
+		URoomPlayerSlotWidgetBase::GetOrCreatePreviewComponent(SlotActor);
+	if (!Component)
+	{
+		ShowStatus(FText::FromString(TEXT("내 슬롯 프리뷰에 SkeletalMesh가 없습니다.")), false);
+		return;
+	}
+
+	if (PreviewCapture.IsValid() && PreviewCapture.Get() != Capture)
+		PreviewCapture->bCaptureEveryFrame = bPreviewCaptureEveryFrameBeforeEdit;
+	LocalSlotIndex = SlotIndex;
+	PreviewRenderTarget = SlotTarget;
+	if (PreviewCapture.Get() != Capture)
+	{
+		PreviewCapture = Capture;
+		bPreviewCaptureEveryFrameBeforeEdit = Capture->bCaptureEveryFrame;
+	}
+	Capture->TextureTarget = SlotTarget;
+	Capture->bCaptureEveryFrame = true;
+	Capture->Activate(true);
+	SlotActor->SetActorHiddenInGame(false);
+	if (!PreviewUIMaterial) PreviewUIMaterial = UMaterialInstanceDynamic::Create(Material, this);
+	PreviewUIMaterial->SetTextureParameterValue(TEXT("RT_LobbySlot0"), SlotTarget);
+	PreviewImage->SetBrushFromMaterial(PreviewUIMaterial);
+	PreviewImage->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	SetPreviewComponent(Component);
+	Capture->CaptureScene();
+	ShowStatus(FText::GetEmpty(), true);
+}
+
+void ULobbyCustomizeWidgetBase::HandlePreviewRoomMembersChanged(
+	int32 RoomId, const TArray<FMOURoomMember>& /*Members*/, bool /*bAllReady*/)
+{
+	if (!PreviewComponent.IsValid())
+	{
+		if (const UServerSubsystem* Server = UServerSubsystem::Get(this))
+			if (RoomId == Server->GetCurrentRoomId()) ConnectOwnSlotPreview();
+	}
 }
 
 void ULobbyCustomizeWidgetBase::BuildDefaultLayout()
@@ -339,6 +441,7 @@ void ULobbyCustomizeWidgetBase::UpdatePreview()
 {
 	if (bWaitingForConfirmation) return;
 	if (PreviewComponent.IsValid()) PreviewComponent->ApplyPreview(CurrentData);
+	if (PreviewCapture.IsValid()) PreviewCapture->CaptureScene();
 	OnCustomizationPreviewChanged(CurrentData);
 }
 
@@ -357,6 +460,11 @@ void ULobbyCustomizeWidgetBase::ShowStatus(const FText& Message, bool bSuccess)
 void ULobbyCustomizeWidgetBase::ConfirmAndSave()
 {
 	if (bWaitingForConfirmation) return;
+	if (LocalSlotIndex == INDEX_NONE || !PreviewComponent.IsValid() || !PreviewRenderTarget)
+	{
+		ShowStatus(FText::FromString(TEXT("내 슬롯 미리보기가 준비되지 않았습니다. 슬롯 정보와 RenderTarget을 확인하세요.")), false);
+		return;
+	}
 	CloseColorPickers();
 	auto* Server = UServerSubsystem::Get(this);
 	if (!Server || !Server->SubmitCustomization(CurrentData))
@@ -404,7 +512,17 @@ void ULobbyCustomizeWidgetBase::NativeDestruct()
 	if (auto* Server = UServerSubsystem::Get(this))
 	{
 		Server->OnLobbyCustomizationResult.RemoveDynamic(this, &ULobbyCustomizeWidgetBase::HandleCustomizationResult);
+		Server->OnRoomMembersChanged.RemoveDynamic(this, &ULobbyCustomizeWidgetBase::HandlePreviewRoomMembersChanged);
 		if (PreviewComponent.IsValid()) PreviewComponent->ApplyPreview(Server->GetLocalCustomization());
 	}
+	if (PreviewCapture.IsValid())
+	{
+		PreviewCapture->CaptureScene();
+		PreviewCapture->bCaptureEveryFrame = bPreviewCaptureEveryFrameBeforeEdit;
+	}
+	PreviewCapture.Reset();
+	PreviewComponent.Reset();
+	PreviewRenderTarget = nullptr;
+	PreviewUIMaterial = nullptr;
 	Super::NativeDestruct();
 }

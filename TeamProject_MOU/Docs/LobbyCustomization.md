@@ -53,28 +53,32 @@
 RenderTarget의 Image tint를 바꾸는 방식이 아니라 프리뷰 액터의 메쉬 머티리얼을 바꾼다.
 기존 `BP_LobbyCharacterPreview`, `RT_LobbySlot0~3`, UI 머티리얼 구성을 사용할 수 있다.
 
-1. 각 슬롯에 **서로 다른 프리뷰 액터, SkeletalMeshComponent, RenderTarget**을 배정한다.
-   프리뷰 액터는 로컬 Actor로 두고 CharacterCustomizationComponent를 추가한다.
-   CharacterVisualComponent는 추가할 필요가 없다.
-2. 프리뷰 액터 BeginPlay에서 `CharacterCustomizationComponent.SetPreviewMesh(자신의 SkeletalMesh)`를
-   호출한다. 이 API로 ACharacter가 아닌 기존 SceneCapture 액터도 지원한다.
-3. 각 WBP_PlayerSlotWidget이 자신의 프리뷰 액터 참조를 확보한 다음
-   `RoomPlayerSlotWidgetBase.SetPreviewComponent(해당 액터의 CharacterCustomizationComponent)`를 호출한다.
-   OnSlotChanged에서 처음 연결해도 즉시 현재 Member.Customization을 적용한다.
-   참조는 생성하는 BP에서 전달하거나 SlotIndex별로 관리한다. GetAllActorsOfClass의 반환 순서로
-   좌석을 판단하면 안 된다.
-4. 이후 서버 멤버 목록이 바뀌면 C++ SetMember가 `Member.Customization`을 자동 적용한다.
+1. MainLobby 레벨에 기존처럼 네 프리뷰 액터가 있고 각각 `PreviewSlotIndex`가 0~3이며
+   각자 다른 RenderTarget을 쓰는지 확인한다. C++ SetMember가 이 인덱스로 액터를 찾는다.
+   현재 MainLobby 에셋을 에디터 스크립트로 읽어 0→RT_LobbySlot0, 1→RT_LobbySlot1,
+   2→RT_LobbySlot2, 3→RT_LobbySlot3 설정을 확인했다.
+2. C++가 프리뷰 액터의 SkeletalMesh를 찾아 CharacterCustomizationComponent를 등록하고
+   Member.Customization을 적용한다. 기존 WBP_PlayerSlotWidget이 PreviewActor 참조를 이미
+   갖고 있다면 `SetPreviewActor(PreviewActor)`를 한 번 호출해 명시적으로 연결할 수도 있다.
+3. 이후 서버 멤버 목록이 바뀌면 C++ SetMember가 `Member.Customization`을 자동 적용한다.
    외형만 바뀌어도 OnSlotChanged를 호출한다. 빈 슬롯의 등록된 프리뷰 액터는 숨기고,
    새 멤버가 들어오면 다시 표시하면서 새 멤버 외형을 적용한다.
-5. SceneCapture가 Capture Every Frame=false라면 `OnSlotChanged` 뒤 CaptureScene을 호출한다.
+4. SceneCapture가 Capture Every Frame=false라면 `OnSlotChanged` 뒤 CaptureScene을 호출한다.
    메쉬/머티리얼 자체를 교체했다면 ReinitializeAndApply 후 Member.Customization을 ApplyPreview한다.
 
-커스터마이징 페이지도 `LobbyCustomizeWidgetBase.SetPreviewComponent`로 **편집용 프리뷰**를
-등록한다. 슬롯용과 별도 액터를 사용하는 것이 좋다. 확정 전 편집은 이 액터에만 표시되고,
-확정 후 멤버 스냅샷으로 모든 클라이언트의 해당 슬롯이 갱신된다.
+커스터마이징 페이지는 서버 멤버 목록에서 로그인한 본인의 `SlotIndex`를 찾는다.
+그 인덱스의 `BP_LobbyCharacterPreview`와 `RT_LobbySlot{Index}`를 사용한다.
+`M_UI_LobbyCharacter` 동적 머티리얼의 텍스처 파라미터(`RT_LobbySlot0`)에 **선택한
+슬롯의 RT**를 넣어 `PreviewImage`에 표시한다. 이 파라미터 이름은 원본 머티리얼의
+이름일 뿐, 호스트 RT0를 강제로 선택하는 의미가 아니다. 본인 슬롯 정보를 받기
+전에는 PreviewImage를 숨기고 `OnRoomMembersChanged` 후 다시 연결한다.
+디자이너에 **Image를 `PreviewImage` 이름으로 추가**하면 원하는 위치/크기에 표시한다.
+없으면 Canvas 루트의 왼쪽에 Image가 자동 추가된다. 색상 피커의 OnColorConfirmed도
+SetBodyColor/SetDecalsColor에 연결되므로 확인을 누른 최종값이 CurrentData에 남는다.
+확정 전 편집은 **본인 클라이언트의 본인 슬롯 메쉬/RT**에만 표시된다.
+`ApplyPreview`에는 서버 RPC가 없다. 확정 후 서버로 전송된 멤버 스냅샷을
+다른 클라이언트가 받아 각자의 해당 슬롯 메쉬에 적용한다.
 회전 입력은 RotateCharacter(마우스 DeltaX)에 연결한다.
-Capture Every Frame=false라면 OnCustomizationPreviewChanged에서 CaptureScene도 호출한다.
-등록한 프리뷰 액터의 생성/제거와 RenderTarget 할당은 기존 WBP가 관리한다.
 
 ## 데이터 흐름
 
@@ -82,13 +86,13 @@ Capture Every Frame=false라면 OnCustomizationPreviewChanged에서 CaptureScene
 슬라이더 / 컬러 피커
   → CharacterCustomizationWidget의 CurrentData
   → LobbyCustomizeWidgetBase.UpdatePreview
-  → 편집용 CharacterCustomizationComponent.ApplyPreview (로컬)
+  → 본인 슬롯 CharacterCustomizationComponent.ApplyPreview (로컬 메쉬 / RT)
 
 확정
   → UServerSubsystem.SubmitCustomization
   → TCP RoomCustomizationReq (RoomId, RequestId, 외형값)
   → 서버가 로그인 세션 UserId / 방 / 대기 상태 / 값 범위 검사
-  → 해당 멤버 외형 저장 + 요청자 ACK + 전체 RoomMemberList
+  → 해당 멤버 외형 저장 + 요청자 ACK + 전체 RoomMemberList 전송
   → ACK: GameInstance 서브시스템 메모리 + 기존 SaveGame에 저장
   → RoomMemberList: SlotIndex별 SetMember → 슬롯 프리뷰 메쉬 적용
 
@@ -103,6 +107,9 @@ Capture Every Frame=false라면 OnCustomizationPreviewChanged에서 CaptureScene
 로비에서는 게임 Pawn이 없어도 편집/저장할 수 있다. 게임맵에서 소유권이 생긴 후에도
 다시 적용하므로 클라이언트 BeginPlay가 possession보다 먼저 실행되는 경우를 처리한다.
 프리뷰 Actor는 복제하지 않으며 ServerSetCustomizationData를 직접 호출하지 않는다.
+로비는 독립 TCP 서버가 RoomMemberList를 방 전원에게 배포한다. 게임맵에서는 기존
+CharacterCustomizationComponent의 Unreal 복제 경로가 사용된다. 별도의 UE Multicast RPC는
+로비 외형 공유에 필요하지 않다.
 
 취소/뒤로가기/Escape는 편집용 프리뷰를 원래 값으로 복원한 뒤 기존 로비 스택을 Pop한다.
 확정 대기 중에는 일반 뒤로가기를 막는다. 방 종료나 맵 이동으로 페이지가 제거될 때에는
@@ -119,11 +126,12 @@ EOS 백엔드는 기존 프로젝트에서 미구현 상태이며 이번 외형 
 - 프로토콜은 **v14**, RoomMemberInfo는 **99바이트**다. Server.exe와 UE 클라이언트를 함께 빌드/교체한다.
 - RoomCustomizationTest: 자기 외형 변경, 다른 멤버 보호, NaN/범위/이전 방 요청 거절,
   늦은 참가자의 스냅샷, 빈 좌석 재사용 시 외형 초기화, 게임 시작 후 수정 거절.
-- 에디터 확인: 두 클라이언트 입장 → 한 명 몸 색/데칼 변경 → 확정 전에는 편집 프리뷰만 변화
-  → 확정 후 두 화면에서 해당 슬롯 변화 → 게임 시작 → 두 화면에서 해당 Pawn 외형 확인.
+- 에디터 확인: 두 클라이언트 입장 → 슬롯 1 참여자가 몸 색/데칼 변경 → 확정 전에는
+  참여자 화면의 슬롯 1 메쉬/CustomizeWidget만 변화하고 방장 화면은 그대로인지 확인
+  → 확정 후 양쪽 화면의 슬롯 1이 변화 → 게임 시작 후 양쪽 Pawn 외형 확인.
 - 취소, Escape, 페이지 재진입, 접속 종료, 다른 슬롯 재사용, 게임맵 재스폰도 확인한다.
 - 이 변경은 C++ 연결 기반이다. 기존 수정 중인 WBP/uasset의 디자이너와 그래프는 편집하지 않았다.
-  위 프리뷰 참조 연결 및 실제 두 클라이언트 화면 검증은 에디터에서 해야 한다.
+  WBP의 PreviewImage 배치와 실제 두 클라이언트 화면 검증은 에디터에서 해야 한다.
 
 구현 검증: UE 5.8 UHT/C++ 컴파일 및 별도 출력 경로 DLL 링크 성공,
 Server/TestClient Release 빌드 성공, CTest의 RoomSlotsTest / RoomCustomizationTest /
