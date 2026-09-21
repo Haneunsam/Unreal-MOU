@@ -74,9 +74,9 @@ private:
 
 	// 최대 종료 배율
 	UPROPERTY(EditDefaultsOnly, Category = "Stock|Graph")
-	float MaxStopMultiplier = 5.0f;
+	float MaxStopMultiplier = 3.0f;
 
-	// 1.00x에서 5.00x까지 도달하는 전체 시간
+	// 1.0x에서 3.00x까지 도달하는 전체 시간
 	UPROPERTY(EditDefaultsOnly, Category = "Stock|Graph", meta = (ClampMin = "0.1"))
 	float GraphDuration = 4.0f;
 
@@ -120,4 +120,10 @@ private:
 
 	// 그래프 갱신 Timer
 	FTimerHandle GraphTimerHandle;
+
+	// 실제 그래프 선에서 현금화 위치 갱신
+	void UpdateCashOutMarkerPoint();
+
+	// 현금화한 배율 저장
+	float CashOutMarkerMultiplier = 0.0f;
 };
