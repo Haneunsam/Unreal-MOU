@@ -1,25 +1,16 @@
 #include "UI/MOU_CharacterStatusHUD.h"
 #include "Components/Image.h"
-#include "Materials/MaterialInstanceDynamic.h"
+#include "Components/ProgressBar.h"
 #include "Engine/Texture2D.h"
 #include "Math/UnrealMathUtility.h"
 #include "Player/MainCharacter.h"
 #include "Base/BaseAttributeSet.h"
+#include "GameFramework/PlayerController.h"
 
 void UMOU_CharacterStatusHUD::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	if (Image_HPBar)
-	{
-		MID_HPBar = Image_HPBar->GetDynamicMaterial();
-	}
-
-	if (Image_StaminaBar)
-	{
-		MID_StaminaBar = Image_StaminaBar->GetDynamicMaterial();
-	}
-	
 	// Initial State Update
 	SetPortraitTextureByState(ECharacterStatusState::Happy);
 }
@@ -49,10 +40,9 @@ void UMOU_CharacterStatusHUD::NativeTick(const FGeometry& MyGeometry, float InDe
 	{
 		CurrentHPPercent = FMath::FInterpTo(CurrentHPPercent, TargetHPPercent, InDeltaTime, CatchUpInterpSpeed);
 		
-		if (MID_HPBar)
+		if (ProgressBar_HP)
 		{
-			// Material parameter name matching the M_UI_RadialProgressBar
-			MID_HPBar->SetScalarParameterValue(FName("Percent"), CurrentHPPercent);
+			ProgressBar_HP->SetPercent(CurrentHPPercent);
 		}
 		
 		bHPUpdated = true;
@@ -61,9 +51,9 @@ void UMOU_CharacterStatusHUD::NativeTick(const FGeometry& MyGeometry, float InDe
 	{
 		// 목표치 도달 시 정확한 값으로 스냅 (0.0009f 등에 머무는 현상 방지)
 		CurrentHPPercent = TargetHPPercent;
-		if (MID_HPBar)
+		if (ProgressBar_HP)
 		{
-			MID_HPBar->SetScalarParameterValue(FName("Percent"), CurrentHPPercent);
+			ProgressBar_HP->SetPercent(CurrentHPPercent);
 		}
 		bHPUpdated = true;
 	}
@@ -73,17 +63,17 @@ void UMOU_CharacterStatusHUD::NativeTick(const FGeometry& MyGeometry, float InDe
 	{
 		CurrentStaminaPercent = FMath::FInterpTo(CurrentStaminaPercent, TargetStaminaPercent, InDeltaTime, CatchUpInterpSpeed);
 		
-		if (MID_StaminaBar)
+		if (ProgressBar_Stamina)
 		{
-			MID_StaminaBar->SetScalarParameterValue(FName("Percent"), CurrentStaminaPercent);
+			ProgressBar_Stamina->SetPercent(CurrentStaminaPercent);
 		}
 	}
 	else if (CurrentStaminaPercent != TargetStaminaPercent)
 	{
 		CurrentStaminaPercent = TargetStaminaPercent;
-		if (MID_StaminaBar)
+		if (ProgressBar_Stamina)
 		{
-			MID_StaminaBar->SetScalarParameterValue(FName("Percent"), CurrentStaminaPercent);
+			ProgressBar_Stamina->SetPercent(CurrentStaminaPercent);
 		}
 	}
 
@@ -112,14 +102,14 @@ void UMOU_CharacterStatusHUD::ForceUpdateStatus(float NewHPPercent, float NewSta
 	TargetStaminaPercent = FMath::Clamp(NewStaminaPercent, 0.0f, 1.0f);
 	CurrentStaminaPercent = TargetStaminaPercent;
 
-	if (MID_HPBar)
+	if (ProgressBar_HP)
 	{
-		MID_HPBar->SetScalarParameterValue(FName("Percent"), CurrentHPPercent);
+		ProgressBar_HP->SetPercent(CurrentHPPercent);
 	}
 
-	if (MID_StaminaBar)
+	if (ProgressBar_Stamina)
 	{
-		MID_StaminaBar->SetScalarParameterValue(FName("Percent"), CurrentStaminaPercent);
+		ProgressBar_Stamina->SetPercent(CurrentStaminaPercent);
 	}
 
 	UpdatePortraitState(CurrentHPPercent);
@@ -174,39 +164,28 @@ void UMOU_CharacterStatusHUD::UpdatePortraitState(float InCurrentHP)
 void UMOU_CharacterStatusHUD::SetPortraitTextureByState(ECharacterStatusState NewState)
 {
 	UTexture2D* TargetPortrait = nullptr;
-	UTexture2D* TargetBg = nullptr;
 
 	switch (NewState)
 	{
 		case ECharacterStatusState::Happy:
 			TargetPortrait = Tex_Happy;
-			TargetBg = Tex_Bg_Happy;
 			break;
 		case ECharacterStatusState::OK:
 			TargetPortrait = Tex_OK;
-			TargetBg = Tex_Bg_OK;
 			break;
 		case ECharacterStatusState::Warning:
 			TargetPortrait = Tex_Warning;
-			TargetBg = Tex_Bg_Warning;
 			break;
 		case ECharacterStatusState::Critical:
 			TargetPortrait = Tex_Critical;
-			TargetBg = Tex_Bg_Critical;
 			break;
 		case ECharacterStatusState::Offline:
 			TargetPortrait = Tex_Offline;
-			TargetBg = Tex_Bg_Offline;
 			break;
 	}
 
 	if (Image_CenterPortrait && TargetPortrait)
 	{
 		Image_CenterPortrait->SetBrushFromTexture(TargetPortrait);
-	}
-
-	if (Image_Background && TargetBg)
-	{
-		Image_Background->SetBrushFromTexture(TargetBg);
 	}
 }

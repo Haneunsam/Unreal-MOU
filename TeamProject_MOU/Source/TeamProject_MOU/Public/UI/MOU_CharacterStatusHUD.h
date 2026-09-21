@@ -5,8 +5,9 @@
 #include "MOU_CharacterStatusHUD.generated.h"
 
 class UImage;
+class UProgressBar;
 class UTexture2D;
-class UMaterialInstanceDynamic;
+class UWidget;
 class AMainCharacter;
 
 UENUM(BlueprintType)
@@ -55,16 +56,13 @@ protected:
 	// -- UI Components --
 
 	UPROPERTY(meta = (BindWidget))
-	UImage* Image_HPBar;
+	UProgressBar* ProgressBar_HP;
 
 	UPROPERTY(meta = (BindWidget))
-	UImage* Image_StaminaBar;
+	UProgressBar* ProgressBar_Stamina;
 
 	UPROPERTY(meta = (BindWidget))
 	UImage* Image_CenterPortrait;
-
-	UPROPERTY(meta = (BindWidget))
-	UImage* Image_Background;
 
 	// -- Portrait Textures --
 
@@ -83,23 +81,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "UI|Status|Portrait")
 	UTexture2D* Tex_Offline;
 
-	// -- Background Textures --
-
-	UPROPERTY(EditDefaultsOnly, Category = "UI|Status|Background")
-	UTexture2D* Tex_Bg_Happy;
-
-	UPROPERTY(EditDefaultsOnly, Category = "UI|Status|Background")
-	UTexture2D* Tex_Bg_OK;
-
-	UPROPERTY(EditDefaultsOnly, Category = "UI|Status|Background")
-	UTexture2D* Tex_Bg_Warning;
-
-	UPROPERTY(EditDefaultsOnly, Category = "UI|Status|Background")
-	UTexture2D* Tex_Bg_Critical;
-
-	UPROPERTY(EditDefaultsOnly, Category = "UI|Status|Background")
-	UTexture2D* Tex_Bg_Offline;
-
 	// -- Interpolation Setting --
 
 	UPROPERTY(EditDefaultsOnly, Category = "UI|Status|Interpolation")
@@ -113,12 +94,6 @@ private:
 	float CurrentStaminaPercent = 1.0f;
 
 	ECharacterStatusState CurrentState = ECharacterStatusState::Happy;
-
-	UPROPERTY()
-	UMaterialInstanceDynamic* MID_HPBar;
-
-	UPROPERTY()
-	UMaterialInstanceDynamic* MID_StaminaBar;
 
 	UPROPERTY()
 	TWeakObjectPtr<AMainCharacter> BoundCharacter;
