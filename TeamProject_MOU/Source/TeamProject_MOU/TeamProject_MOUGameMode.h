@@ -8,6 +8,8 @@
 #include "Game/LevelSettlementState.h"
 #include "TeamProject_MOUGameMode.generated.h"
 
+class APlayerState;
+
 /**
  *  Simple GameMode for a third person game
  */
@@ -22,6 +24,7 @@ public:
 	ATeamProject_MOUGameMode();
 	virtual void InitGameState() override;
 	virtual void BeginPlay() override;
+	virtual void Logout(AController* Exiting) override;
 
 	// Server-side preparation checks use the configured lobby, not a physical warehouse actor.
 	bool IsLobbyLevel() const;
@@ -39,6 +42,9 @@ public:
 	// 배달/약탈 시스템이 성공 정산 데이터를 확정할 때 호출합니다.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Run|Settlement")
 	bool NotifyLevelSettlement(const FLevelSettlementData& Result);
+
+	// [SETTLE-001] 플레이어의 정산 확인 또는 취소 상태를 등록합니다.
+	void SetSettlementConfirmedForPlayer(APlayerState* PlayerState, bool bConfirmed);
 
 	// 타임아웃 UI/정산 연출이 끝난 뒤 서버에서 호출하여 로비로 이동합니다.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Run|Level Timer")
@@ -62,6 +68,10 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Run|GameOver")
 	void OnRunGameOver(ERunEndReason Reason);
 
+	// [SETTLE-002] 정상 정산에 참여한 플레이어 전원이 확인했을 때 서버에서 호출됩니다.
+	UFUNCTION(BlueprintImplementableEvent, Category = "Run|Settlement")
+	void OnAllPlayersConfirmedSettlement();
+
 private:
 	UPROPERTY()
 	TObjectPtr<class ARunState> RunState;
@@ -82,6 +92,10 @@ private:
 	FTimerHandle ResetTimerHandle;
 	bool bKillingPlayersForLevelTimeout = false;
 	bool bTimeoutTravelStarted = false;
+	TSet<TWeakObjectPtr<APlayerState>> SettlementRequiredPlayers;
+	TSet<TWeakObjectPtr<APlayerState>> SettlementConfirmedPlayers;
+	bool bSettlementConfirmationActive = false;
+	bool bSettlementTravelStarted = false;
 
 	void TryStartLevelTimer();
 	void UpdateLevelTimer();
@@ -95,6 +109,9 @@ private:
 	void TravelToLobbyAfterWipe();
 	void TravelToLobbyAfterTimeout();
 	void EnrichSettlementData(FLevelSettlementData& Result) const;
+
+	// [SETTLE-003] 정상 정산에 참여한 플레이어 전원의 확인 여부를 검사합니다.
+	void TryCompleteSettlementConfirmation();
 };
 
 

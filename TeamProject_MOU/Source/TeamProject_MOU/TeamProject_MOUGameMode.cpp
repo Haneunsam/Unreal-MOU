@@ -86,12 +86,104 @@ bool ATeamProject_MOUGameMode::NotifyLevelSettlement(const FLevelSettlementData&
 		return false;
 	}
 
+	SettlementRequiredPlayers.Reset();
+	SettlementConfirmedPlayers.Reset();
+	bSettlementTravelStarted = false;
+	bSettlementConfirmationActive = EnrichedResult.bSucceeded
+		&& EnrichedResult.Reason == ELevelSettlementReason::Cleared;
+
+	if (bSettlementConfirmationActive && GameState)
+	{
+		for (APlayerState* PlayerState : GameState->PlayerArray)
+		{
+			if (IsValid(PlayerState))
+			{
+				SettlementRequiredPlayers.Add(PlayerState);
+			}
+		}
+	}
+
 	GetWorldTimerManager().ClearTimer(LevelTimerUpdateHandle);
 	if (LevelTimerState)
 	{
 		LevelTimerState->StopTimer();
 	}
 	return true;
+}
+
+// [SETTLE-001] 플레이어의 정산 확인 또는 취소 상태를 등록합니다.
+void ATeamProject_MOUGameMode::SetSettlementConfirmedForPlayer(
+	APlayerState* PlayerState, bool bConfirmed)
+{
+	const TWeakObjectPtr<APlayerState> PlayerKey(PlayerState);
+	if (!HasAuthority()
+		|| !bSettlementConfirmationActive
+		|| bSettlementTravelStarted
+		|| !PlayerKey.IsValid()
+		|| !SettlementRequiredPlayers.Contains(PlayerKey))
+	{
+		return;
+	}
+
+	if (bConfirmed)
+	{
+		SettlementConfirmedPlayers.Add(PlayerKey);
+	}
+	else
+	{
+		SettlementConfirmedPlayers.Remove(PlayerKey);
+	}
+
+	TryCompleteSettlementConfirmation();
+}
+
+// [SETTLE-003] 정상 정산에 참여한 플레이어 전원의 확인 여부를 검사합니다.
+void ATeamProject_MOUGameMode::TryCompleteSettlementConfirmation()
+{
+	if (!HasAuthority() || !bSettlementConfirmationActive || bSettlementTravelStarted)
+	{
+		return;
+	}
+
+	int32 ValidRequiredPlayerCount = 0;
+	for (const TWeakObjectPtr<APlayerState>& RequiredPlayer : SettlementRequiredPlayers)
+	{
+		if (!RequiredPlayer.IsValid())
+		{
+			continue;
+		}
+
+		++ValidRequiredPlayerCount;
+		if (!SettlementConfirmedPlayers.Contains(RequiredPlayer))
+		{
+			return;
+		}
+	}
+
+	if (ValidRequiredPlayerCount <= 0)
+	{
+		return;
+	}
+
+	bSettlementTravelStarted = true;
+	bSettlementConfirmationActive = false;
+	OnAllPlayersConfirmedSettlement();
+}
+
+void ATeamProject_MOUGameMode::Logout(AController* Exiting)
+{
+	const TWeakObjectPtr<APlayerState> ExitingPlayer = Exiting
+		? Exiting->PlayerState
+		: nullptr;
+	SettlementRequiredPlayers.Remove(ExitingPlayer);
+	SettlementConfirmedPlayers.Remove(ExitingPlayer);
+
+	Super::Logout(Exiting);
+
+	if (bSettlementConfirmationActive)
+	{
+		TryCompleteSettlementConfirmation();
+	}
 }
 
 void ATeamProject_MOUGameMode::TryStartLevelTimer()
