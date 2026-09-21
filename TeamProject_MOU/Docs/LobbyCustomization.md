@@ -68,9 +68,9 @@ RenderTarget의 Image tint를 바꾸는 방식이 아니라 프리뷰 액터의 
 
 커스터마이징 페이지는 서버 멤버 목록에서 로그인한 본인의 `SlotIndex`를 찾는다.
 그 인덱스의 `BP_LobbyCharacterPreview`와 `RT_LobbySlot{Index}`를 사용한다.
-`M_UI_LobbyCharacter` 동적 머티리얼의 텍스처 파라미터(`RT_LobbySlot0`)에 **선택한
-슬롯의 RT**를 넣어 `PreviewImage`에 표시한다. 이 파라미터 이름은 원본 머티리얼의
-이름일 뿐, 호스트 RT0를 강제로 선택하는 의미가 아니다. 본인 슬롯 정보를 받기
+`M_UI_LobbyCharacter` 동적 머티리얼의 텍스처 파라미터 **`PortraitRT`**에 선택한
+슬롯의 RT를 넣어 `PreviewImage`에 표시한다. 머티리얼의 기본값은 RT_LobbySlot0이므로
+파라미터 이름을 잘못 지정하면 교체가 조용히 실패해 항상 호스트가 보인다. 본인 슬롯 정보를 받기
 전에는 PreviewImage를 숨기고 `OnRoomMembersChanged` 후 다시 연결한다.
 디자이너에 **Image를 `PreviewImage` 이름으로 추가**하면 원하는 위치/크기에 표시한다.
 없으면 Canvas 루트의 왼쪽에 Image가 자동 추가된다. 색상 피커의 OnColorConfirmed도

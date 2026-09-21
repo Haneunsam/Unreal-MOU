@@ -388,7 +388,9 @@ void ULobbyCustomizeWidgetBase::ConnectOwnSlotPreview()
 	Capture->Activate(true);
 	SlotActor->SetActorHiddenInGame(false);
 	if (!PreviewUIMaterial) PreviewUIMaterial = UMaterialInstanceDynamic::Create(Material, this);
-	PreviewUIMaterial->SetTextureParameterValue(TEXT("RT_LobbySlot0"), SlotTarget);
+	// M_UI_LobbyCharacter's texture parameter is PortraitRT. Its default value happens
+	// to be RT_LobbySlot0, so using the asset name as the parameter silently showed the host.
+	PreviewUIMaterial->SetTextureParameterValue(TEXT("PortraitRT"), SlotTarget);
 	PreviewImage->SetBrushFromMaterial(PreviewUIMaterial);
 	PreviewImage->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	SetPreviewComponent(Component);
