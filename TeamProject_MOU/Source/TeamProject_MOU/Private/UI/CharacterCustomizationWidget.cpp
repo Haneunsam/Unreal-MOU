@@ -31,6 +31,12 @@ void UCharacterCustomizationWidget::InitializeCustomization()
 	}
 }
 
+void UCharacterCustomizationWidget::NativeDestruct()
+{
+	CloseColorPicker();
+	Super::NativeDestruct();
+}
+
 void UCharacterCustomizationWidget::SetBodyColor(FLinearColor InColor)
 {
 	CurrentData.BodyColor = InColor;
@@ -82,6 +88,8 @@ void UCharacterCustomizationWidget::SetTilingY(float InTilingY)
 
 void UCharacterCustomizationWidget::ConfirmAndSave()
 {
+	CloseColorPicker();
+
 	if (CachedCustomizationComp.IsValid())
 	{
 		CachedCustomizationComp->ConfirmAndApplyCustomization(CurrentData);
@@ -97,6 +105,8 @@ void UCharacterCustomizationWidget::ConfirmAndSave()
 
 void UCharacterCustomizationWidget::CancelAndExit()
 {
+	CloseColorPicker();
+
 	if (CachedCustomizationComp.IsValid())
 	{
 		CachedCustomizationComp->ApplyPreview(OriginalData);
@@ -155,15 +165,41 @@ void UCharacterCustomizationWidget::UpdatePreview()
 	}
 }
 
+void UCharacterCustomizationWidget::CloseColorPicker()
+{
+	if (ActiveColorPicker)
+	{
+		ActiveColorPicker->RemoveFromParent();
+		ActiveColorPicker = nullptr;
+	}
+	ActiveColorPickerType = 0;
+}
+
+bool UCharacterCustomizationWidget::IsColorPickerOpen() const
+{
+	return ActiveColorPicker != nullptr && ActiveColorPicker->IsInViewport();
+}
+
 UColorPickerWidget* UCharacterCustomizationWidget::OpenBodyColorPicker()
 {
+	// 1. 이미 바디 컬러 피커가 열려있는 경우: 닫고 nullptr 반환 (토글 OFF)
+	if (ActiveColorPicker && ActiveColorPicker->IsInViewport() && ActiveColorPickerType == 1)
+	{
+		CloseColorPicker();
+		return nullptr;
+	}
+
+	// 2. 다른 피커(예: 데칼)가 열려있다면 기존 피커 먼저 닫기
+	CloseColorPicker();
+
 	if (!ColorPickerWidgetClass)
 	{
 		return nullptr;
 	}
 
-	UColorPickerWidget* Picker = CreateWidget<UColorPickerWidget>(GetOwningPlayer(), ColorPickerWidgetClass);
-	if (Picker)
+	// 3. 새로 생성하여 화면에 띄우기 (토글 ON)
+	ActiveColorPicker = CreateWidget<UColorPickerWidget>(GetOwningPlayer(), ColorPickerWidgetClass);
+	if (ActiveColorPicker)
 	{
 		CloseColorPickers();
 		Picker->InitializeColor(CurrentData.BodyColor);
@@ -173,18 +209,29 @@ UColorPickerWidget* UCharacterCustomizationWidget::OpenBodyColorPicker()
 		Picker->AddToViewport(100);
 		OpenColorPickers.Add(Picker);
 	}
-	return Picker;
+	return ActiveColorPicker;
 }
 
 UColorPickerWidget* UCharacterCustomizationWidget::OpenDecalColorPicker()
 {
+	// 1. 이미 데칼 컬러 피커가 열려있는 경우: 닫고 nullptr 반환 (토글 OFF)
+	if (ActiveColorPicker && ActiveColorPicker->IsInViewport() && ActiveColorPickerType == 2)
+	{
+		CloseColorPicker();
+		return nullptr;
+	}
+
+	// 2. 다른 피커(예: 바디)가 열려있다면 기존 피커 먼저 닫기
+	CloseColorPicker();
+
 	if (!ColorPickerWidgetClass)
 	{
 		return nullptr;
 	}
 
-	UColorPickerWidget* Picker = CreateWidget<UColorPickerWidget>(GetOwningPlayer(), ColorPickerWidgetClass);
-	if (Picker)
+	// 3. 새로 생성하여 화면에 띄우기 (토글 ON)
+	ActiveColorPicker = CreateWidget<UColorPickerWidget>(GetOwningPlayer(), ColorPickerWidgetClass);
+	if (ActiveColorPicker)
 	{
 		CloseColorPickers();
 		Picker->InitializeColor(CurrentData.DecalsColor);
@@ -194,7 +241,7 @@ UColorPickerWidget* UCharacterCustomizationWidget::OpenDecalColorPicker()
 		Picker->AddToViewport(100);
 		OpenColorPickers.Add(Picker);
 	}
-	return Picker;
+	return ActiveColorPicker;
 }
 
 

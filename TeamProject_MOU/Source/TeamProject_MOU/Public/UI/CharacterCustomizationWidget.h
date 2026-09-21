@@ -53,15 +53,23 @@ public:
 	void SetTilingY(float InTilingY);
 
 	// ---------------------------------------------------------
-	// [컬러 피커 팝업 연동]
+	// [컬러 피커 팝업 연동 (토글 지원)]
 	// ---------------------------------------------------------
-	// 바디 컬러 피커 팝업 열기
+	// 바디 컬러 피커 팝업 열기/닫기 토글 (이미 열려있으면 닫힘)
 	UFUNCTION(BlueprintCallable, Category = "Customization|UI")
 	UColorPickerWidget* OpenBodyColorPicker();
 
-	// 데칼 컬러 피커 팝업 열기
+	// 데칼 컬러 피커 팝업 열기/닫기 토글 (이미 열려있으면 닫힘)
 	UFUNCTION(BlueprintCallable, Category = "Customization|UI")
 	UColorPickerWidget* OpenDecalColorPicker();
+
+	// 현재 열려있는 컬러 피커 팝업 닫기
+	UFUNCTION(BlueprintCallable, Category = "Customization|UI")
+	void CloseColorPicker();
+
+	// 현재 컬러 피커가 열려있는지 여부
+	UFUNCTION(BlueprintPure, Category = "Customization|UI")
+	bool IsColorPickerOpen() const;
 
 	// 컬러 피커 위젯 클래스 (WBP_ColorPicker 할당)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Customization|UI")
@@ -131,6 +139,14 @@ protected:
 	// 마우스 드래그 회전 감도
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Customization|UI")
 	float DragRotationSpeed = 0.5f;
+
+	// 현재 활성화된 컬러 피커 팝업 위젯 (토글 및 중복 방지용)
+	UPROPERTY(BlueprintReadOnly, Category = "Customization|UI")
+	TObjectPtr<class UColorPickerWidget> ActiveColorPicker = nullptr;
+
+	// 현재 열려있는 피커 종류 (0: 없음, 1: 바디 컬러, 2: 데칼 컬러)
+	UPROPERTY(BlueprintReadOnly, Category = "Customization|UI")
+	int32 ActiveColorPickerType = 0;
 
 	// UI 위젯의 초기 슬라이더/버튼 값 세팅을 알리는 Blueprint 이벤트
 	UFUNCTION(BlueprintImplementableEvent, Category = "Customization|UI")

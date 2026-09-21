@@ -831,6 +831,8 @@ void AMainCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	if (UseAction)
 	{
 		EnhancedInputComponent->BindAction(UseAction, ETriggerEvent::Started, this, &AMainCharacter::OnUse);
+		EnhancedInputComponent->BindAction(UseAction, ETriggerEvent::Completed, this, &AMainCharacter::OnUseReleased);
+		EnhancedInputComponent->BindAction(UseAction, ETriggerEvent::Canceled, this, &AMainCharacter::OnUseReleased);
 	}
 
 	// Space키: 점프 (ATeamProject_MOUCharacter 상속 JumpAction 사용)
@@ -1487,6 +1489,16 @@ void AMainCharacter::OnJumpEndInput()
 	DoJumpEnd();
 }
 
+// [SPRAYINPUT-000] 사용을 시작한 아이템에 입력 해제를 전달한다.
+void AMainCharacter::OnUseReleased()
+{
+	if (ActiveUseItem.IsValid())
+	{
+		ActiveUseItem->OnUseReleased();
+	}
+	ActiveUseItem.Reset();
+}
+
 void AMainCharacter::OnUse()
 {
 	if (!CanAct())
@@ -1499,6 +1511,7 @@ void AMainCharacter::OnUse()
 	{
 		if (AItemBase* HandItem = Cast<AItemBase>(CarryingComponent->GetCarriedActor()))
 		{
+			ActiveUseItem = HandItem;
 			HandItem->OnUse();
 		}
 		return;
