@@ -2,7 +2,6 @@
 
 
 #include "TeamProject_MOUPlayerController.h"
-#include "TeamProject_MOUGameMode.h"
 #include "Subsystems/WarehouseDataSubsystem.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -36,20 +35,6 @@ ATeamProject_MOUPlayerController::ATeamProject_MOUPlayerController()
 	//   이유는 헤더의 VoiceComponent 주석 참고.
 	VoiceComponent = CreateDefaultSubobject<UVoiceComponent>(TEXT("MOUVoiceComponent"));
 }
-
-// [SETTLE-000] 로컬 플레이어의 정산 확인 상태를 서버에 전달합니다.
-void ATeamProject_MOUPlayerController::ServerSetSettlementConfirmed_Implementation(bool bConfirmed)
-{
-	ATeamProject_MOUGameMode* GameMode = GetWorld()
-		? GetWorld()->GetAuthGameMode<ATeamProject_MOUGameMode>()
-		: nullptr;
-
-	if (GameMode)
-	{
-		GameMode->SetSettlementConfirmedForPlayer(PlayerState, bConfirmed);
-	}
-}
-
 void ATeamProject_MOUPlayerController::ServerSaveWarehouseDelivery_Implementation(
 	const TArray<FStoredItemData>& RequestedItems)
 {
