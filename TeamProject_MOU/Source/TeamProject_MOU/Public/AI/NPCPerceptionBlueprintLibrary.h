@@ -5,6 +5,7 @@
 #include "NPCPerceptionBlueprintLibrary.generated.h"
 
 class UAIPerceptionComponent;
+class UNPCData;
 
 UCLASS()
 class TEAMPROJECT_MOU_API UNPCPerceptionBlueprintLibrary : public UBlueprintFunctionLibrary
@@ -18,4 +19,19 @@ public:
 		UAIPerceptionComponent* PerceptionComponent,
 		float SightRadius,
 		float LoseSightRadius);
+
+	/** 타깃의 시점 방향과 장애물을 기준으로 ObservedActor를 보고 있는지 확인한다. */
+	UFUNCTION(BlueprintPure, Category = "NPC|Perception")
+	static bool IsTargetLookingAtActor(
+		AActor* TargetActor,
+		AActor* ObservedActor,
+		float ViewDotThreshold = 0.65f,
+		bool bRequireLineOfSight = true);
+
+	/** NPC 데이터의 이동 정책과 주변 모든 플레이어의 시선에 따라 현재 타깃을 추적해도 되는지 확인한다. */
+	UFUNCTION(BlueprintPure, Category = "NPC|Perception")
+	static bool CanChaseTarget(
+		const UNPCData* NPCData,
+		AActor* ControlledPawn,
+		AActor* TargetActor);
 };

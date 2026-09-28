@@ -112,6 +112,7 @@ void UWarehouseComponent::ClearStoredItems()
 	if (!GetOwner() || !GetOwner()->HasAuthority()) return;
 	StoredItems.Reset();
 	StoredItemInstances.Reset();
+	ItemReservations.Reset();
 	BroadcastWarehouseChanged();
 }
 
@@ -161,6 +162,8 @@ bool UWarehouseComponent::HandleActorExitedWarehouse(AActor* OtherActor)
 		return false;
 	}
 
+	ItemReservations.Remove(ItemInstance);
+
 	const int32 RemovedCount = StoredItemInstances.Remove(ItemInstance);
 	if (RemovedCount <= 0)
 	{
@@ -168,6 +171,109 @@ bool UWarehouseComponent::HandleActorExitedWarehouse(AActor* OtherActor)
 	}
 
 	return RemoveStoredItem(ItemInstance->GetClass(), RemovedCount);
+}
+
+AItemBase* UWarehouseComponent::ReserveNearestAvailableItem(AActor* Requester)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !IsValid(Requester))
+	{
+		return nullptr;
+	}
+
+	CleanupItemReservations();
+
+	AItemBase* NearestItem = nullptr;
+	float NearestDistanceSquared = TNumericLimits<float>::Max();
+	for (AItemBase* ItemInstance : StoredItemInstances)
+	{
+		if (!IsValid(ItemInstance) || !ItemInstance->CanBePickedUpBy(Requester))
+		{
+			continue;
+		}
+
+		const TWeakObjectPtr<AActor>* ExistingRequester = ItemReservations.Find(ItemInstance);
+		if (ExistingRequester && ExistingRequester->IsValid() && ExistingRequester->Get() != Requester)
+		{
+			continue;
+		}
+
+		const float DistanceSquared = FVector::DistSquared(
+			Requester->GetActorLocation(),
+			ItemInstance->GetActorLocation());
+		if (DistanceSquared < NearestDistanceSquared)
+		{
+			NearestDistanceSquared = DistanceSquared;
+			NearestItem = ItemInstance;
+		}
+	}
+
+	if (NearestItem)
+	{
+		ItemReservations.FindOrAdd(NearestItem) = Requester;
+	}
+
+	return NearestItem;
+}
+
+bool UWarehouseComponent::ReserveItemFor(AItemBase* ItemInstance, AActor* Requester)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !IsValid(ItemInstance) || !IsValid(Requester))
+	{
+		return false;
+	}
+
+	CleanupItemReservations();
+	if (!StoredItemInstances.Contains(ItemInstance) || !ItemInstance->CanBePickedUpBy(Requester))
+	{
+		return false;
+	}
+
+	const TWeakObjectPtr<AActor>* ExistingRequester = ItemReservations.Find(ItemInstance);
+	if (ExistingRequester && ExistingRequester->IsValid() && ExistingRequester->Get() != Requester)
+	{
+		return false;
+	}
+
+	ItemReservations.FindOrAdd(ItemInstance) = Requester;
+	return true;
+}
+
+void UWarehouseComponent::ReleaseItemReservation(AItemBase* ItemInstance, AActor* Requester)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !ItemInstance)
+	{
+		return;
+	}
+
+	const TWeakObjectPtr<AActor>* ExistingRequester = ItemReservations.Find(ItemInstance);
+	if (ExistingRequester && (!Requester || ExistingRequester->Get() == Requester))
+	{
+		ItemReservations.Remove(ItemInstance);
+	}
+}
+
+bool UWarehouseComponent::IsItemReservedBy(const AItemBase* ItemInstance, const AActor* Requester) const
+{
+	if (!IsValid(ItemInstance) || !IsValid(Requester))
+	{
+		return false;
+	}
+
+	const TWeakObjectPtr<AActor>* ExistingRequester = ItemReservations.Find(ItemInstance);
+	return ExistingRequester && ExistingRequester->IsValid() && ExistingRequester->Get() == Requester;
+}
+
+void UWarehouseComponent::CleanupItemReservations()
+{
+	for (auto Iterator = ItemReservations.CreateIterator(); Iterator; ++Iterator)
+	{
+		AItemBase* ItemInstance = Iterator.Key().Get();
+		AActor* Requester = Iterator.Value().Get();
+		if (!IsValid(ItemInstance) || !IsValid(Requester) || !StoredItemInstances.Contains(ItemInstance))
+		{
+			Iterator.RemoveCurrent();
+		}
+	}
 }
 
 bool UWarehouseComponent::SaveStoredItemsToGameInstance()
