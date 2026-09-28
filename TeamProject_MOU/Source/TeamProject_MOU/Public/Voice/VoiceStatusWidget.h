@@ -56,6 +56,7 @@
 class UImage;
 class UProgressBar;
 class UTextBlock;
+class UTexture2D;
 class UVoiceSubsystem;
 
 /**
@@ -114,6 +115,14 @@ public:
 	bool bShowLevelGauge = true;
 
 	// --- WBP 아이콘 설정 ------------------------------------------------------
+
+	/** 기본 및 발화 상태에서 공통으로 사용할 마이크 이미지. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MOU|Voice|UI")
+	TObjectPtr<UTexture2D> NormalMicTexture;
+
+	/** 음소거 상태에서 사용할 이미지. 원본 PNG의 색상을 유지한다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MOU|Voice|UI")
+	TObjectPtr<UTexture2D> MutedMicTexture;
 
 	/**
 	 * 상태별 마이크 아이콘. WBP 의 클래스 디폴트에서 한 번에 지정한다.
@@ -200,6 +209,7 @@ private:
 	EMicIconState EvaluateMicState() const;
 
 	/** 축약된 상태를 실제 브러시/색으로 옮긴다. MicIcon 이 없으면 아무것도 안 한다. */
+	// [VUI-001] 마이크 상태에 따라 텍스처와 색상을 적용하고 상태 변경을 알린다.
 	void ApplyMicState(EMicIconState NewState);
 
 	/**

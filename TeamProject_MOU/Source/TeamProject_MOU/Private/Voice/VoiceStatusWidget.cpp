@@ -15,6 +15,7 @@
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
@@ -269,6 +270,7 @@ EMicIconState UVoiceStatusWidget::EvaluateMicState() const
 // 상태 -> 아이콘
 // ---------------------------------------------------------------------------
 
+// [VUI-001] 마이크 상태에 따라 텍스처와 색상을 적용하고 상태 변경을 알린다.
 void UVoiceStatusWidget::ApplyMicState(EMicIconState NewState)
 {
 	// ★ 안 바뀌었으면 아무것도 안 한다. 브러시를 매번 다시 넣으면 Slate 가
@@ -287,15 +289,51 @@ void UVoiceStatusWidget::ApplyMicState(EMicIconState NewState)
 	// WBP 없이 텍스트 폴백만 쓰는 경우다. 아이콘은 건너뛰고 이벤트만 보낸다.
 	if (MicIcon != nullptr)
 	{
-		// 비워둔 상태는 브러시를 안 건드린다 - WBP 에서 찍어둔 그림이 남는다.
-		// (아이콘 3장 중 그 상태에 해당하는 것이 없을 수 있다)
-		if (const FSlateBrush* Brush = IconBrushes.Find(NewState))
+		UTexture2D* Texture = nullptr;
+
+		switch (NewState)
+		{
+		case EMicIconState::Idle:
+		case EMicIconState::Speaking:
+			Texture = NormalMicTexture.Get();
+			break;
+
+		case EMicIconState::Muted:
+			Texture = MutedMicTexture.Get();
+			break;
+
+		default:
+			break;
+		}
+
+		const FLinearColor* CustomTint = IconTints.Find(NewState);
+		FLinearColor Tint = CustomTint ? *CustomTint : GetDefaultMicTint(NewState);
+
+		if (Texture != nullptr)
+		{
+			// 이미지 교체 시 위젯의 표시 크기를 유지한다.
+			MicIcon->SetBrushFromTexture(Texture, false);
+
+			// 기존 브러시 색상이 PNG 색상에 중복 적용되지 않도록 한다.
+			MicIcon->SetBrushTintColor(FSlateColor(FLinearColor::White));
+
+			// 대기·음소거는 원본 색상, 발화 중에는 초록색으로 표시한다.
+			Tint = (NewState == EMicIconState::Speaking)
+				? FLinearColor(0.3f, 1.f, 0.3f, 1.f)
+				: FLinearColor::White;
+		}
+		else if (const FSlateBrush* Brush = IconBrushes.Find(NewState))
 		{
 			MicIcon->SetBrush(*Brush);
 		}
+		else if (NormalMicTexture != nullptr)
+		{
+			// 별도 이미지가 없는 특수 상태에서도 이전 음소거 그림이 남지 않는다.
+			MicIcon->SetBrushFromTexture(NormalMicTexture.Get(), false);
+			MicIcon->SetBrushTintColor(FSlateColor(FLinearColor::White));
+		}
 
-		const FLinearColor* Tint = IconTints.Find(NewState);
-		MicIcon->SetColorAndOpacity(Tint ? *Tint : GetDefaultMicTint(NewState));
+		MicIcon->SetColorAndOpacity(Tint);
 	}
 
 	OnMicStateChanged(NewState, OldState);
