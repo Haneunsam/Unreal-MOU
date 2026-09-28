@@ -16,7 +16,7 @@
 //   여기서 다시 적으면 서버가 상한을 바꿨을 때 조용히 어긋난다.
 
 #include "Server/ServerSubsystem.h"
-#include "Components/CharacterCustomizationComponent.h"
+#include "Data/CustomizationTypes.h"
 #include "Server/Net/CustomizationWire.h"
 
 #include "Server/Net/ChatFraming.h"   // 계정/방 비밀번호 길이 규칙 상수 (패킷 조립에는 쓰지 않는다)
@@ -490,15 +490,51 @@ void UServerSubsystem::LeaveRoom()
 	ClearRoomState();
 }
 
+// [PROFILE-001] 로그인 계정의 저장 경로를 반환하며 접속이 끊겨도 마지막 계정 연결을 유지한다.
+FString UServerSubsystem::GetCustomizationSaveSlotName() const
+{
+	const int64 UserId = LoginResult.bSuccess && LoginResult.UserId > 0
+		? LoginResult.UserId : LocalCustomizationUserId;
+	return UserId > 0
+		? FString::Printf(TEXT("MOU_Customization_User_%lld"), UserId)
+		: UCustomizationSaveGame::SaveSlotName;
+}
+
+// [PROFILE-002] 본인 외형을 메모리에 보관하고 계정별 파일에 저장한다.
+bool UServerSubsystem::CacheLocalCustomization(const FCharacterCustomizationData& Data)
+{
+	if (!MOU::IsValidCustomization(MOUCustomization::ToWire(Data))) return false;
+	if (LoginResult.bSuccess && LoginResult.UserId > 0) LocalCustomizationUserId = LoginResult.UserId;
+	LocalCustomization = Data;
+	bLocalCustomizationLoaded = true;
+
+	// 저장 실패 시에도 서버가 승인한 현재 외형은 메모리에 남겨 게임맵에 전달한다.
+	UCustomizationSaveGame* Saved = Cast<UCustomizationSaveGame>(
+		UGameplayStatics::CreateSaveGameObject(UCustomizationSaveGame::StaticClass()));
+	if (!Saved) return false;
+	Saved->SavedCustomization = Data;
+	return UGameplayStatics::SaveGameToSlot(Saved, GetCustomizationSaveSlotName(), UCustomizationSaveGame::SaveUserIndex);
+}
+
+// [PROFILE-003] 계정이 바뀌면 해당 계정 파일을 읽고 맵 이동 중에는 본인 외형을 유지한다.
 FCharacterCustomizationData UServerSubsystem::GetLocalCustomization()
 {
-	if (!bLocalCustomizationLoaded)
+	const int64 UserId = LoginResult.bSuccess && LoginResult.UserId > 0
+		? LoginResult.UserId : LocalCustomizationUserId;
+	if (!bLocalCustomizationLoaded || LocalCustomizationUserId != UserId)
 	{
-		auto* Storage = NewObject<UCharacterCustomizationComponent>(this);
-		if (!Storage->LoadCustomizationFromDisk(LocalCustomization) ||
-			!MOU::IsValidCustomization(MOUCustomization::ToWire(LocalCustomization)))
+		LocalCustomizationUserId = UserId;
+		LocalCustomization = MOUCustomization::FromWire(MOU::CharacterCustomization{});
+		const FString SlotName = GetCustomizationSaveSlotName();
+		// 계정 파일이 없을 때 공용 파일로 대체하면 모든 PIE 계정이 마지막 저장자의 외형을 읽는다.
+		if (UGameplayStatics::DoesSaveGameExist(SlotName, UCustomizationSaveGame::SaveUserIndex))
 		{
-			LocalCustomization = MOUCustomization::FromWire(MOU::CharacterCustomization{});
+			const UCustomizationSaveGame* Saved = Cast<UCustomizationSaveGame>(
+				UGameplayStatics::LoadGameFromSlot(SlotName, UCustomizationSaveGame::SaveUserIndex));
+			if (Saved && MOU::IsValidCustomization(MOUCustomization::ToWire(Saved->SavedCustomization)))
+			{
+				LocalCustomization = Saved->SavedCustomization;
+			}
 		}
 		bLocalCustomizationLoaded = true;
 	}
@@ -744,6 +780,7 @@ void UServerSubsystem::Disconnect()
 // 게임 스레드 틱 - 백엔드 -> UI 방향의 유일한 통로
 // ---------------------------------------------------------------------------
 
+// [PROFILE-004] 백엔드 이벤트를 처리하고 외형 승인·게임 시작 시 본인 계정값을 보관한다.
 bool UServerSubsystem::Tick(float DeltaTime)
 {
 	if (bCustomizationPending && FPlatformTime::Seconds() - CustomizationRequestTime > 10.0)
@@ -913,10 +950,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 				bool bSaved = false;
 				if (bSuccess)
 				{
-					LocalCustomization = Event.Customization;
-					bLocalCustomizationLoaded = true;
-					auto* Storage = NewObject<UCharacterCustomizationComponent>(this);
-					bSaved = Storage->SaveCustomizationToDisk(LocalCustomization);
+					bSaved = CacheLocalCustomization(Event.Customization);
 				}
 				OnLobbyCustomizationResult.Broadcast(bSuccess, bSaved);
 			}
@@ -929,6 +963,14 @@ bool UServerSubsystem::Tick(float DeltaTime)
 
 		case EServerClientEventType::RoomStart:
 		{
+			if (Event.RoomId == 0 || Event.RoomId != CurrentRoomId) break;
+			// 로비 슬롯 번호나 방장 값이 아니라 로그인한 본인의 서버 확정값을 맵 이동 전에 보관한다.
+			const FMOURoomMember* Self = RoomMembers.FindByPredicate(
+				[this](const FMOURoomMember& Member) { return Member.UserId == LoginResult.UserId; });
+			if (Self && !CacheLocalCustomization(Self->Customization))
+			{
+				UE_LOG(LogMOUServer, Warning, TEXT("게임 시작 외형의 계정별 저장 실패. 현재 세션의 메모리 외형은 유지합니다."));
+			}
 			// bIsHost 를 여기서 계산해 넘긴다. 받는 쪽은 호스트냐 참여자냐에 따라
 			// "리슨서버를 연다" 와 "기다린다" 로 갈리는데, 그 판단 근거가
 			// 이미 여기 있으므로 UI 가 다시 따지게 하지 않는다.

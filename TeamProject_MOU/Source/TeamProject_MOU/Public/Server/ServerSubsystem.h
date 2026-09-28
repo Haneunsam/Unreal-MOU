@@ -135,7 +135,7 @@ class TEAMPROJECT_MOU_API UServerSubsystem : public UGameInstanceSubsystem
 	GENERATED_BODY()
 
 public:
-	/** Accepted local appearance survives map travel in this GameInstance subsystem. */
+	// [PROFILE-003] 계정이 바뀌면 해당 계정 파일을 읽고 맵 이동 중에는 본인 외형을 유지한다.
 	UFUNCTION(BlueprintPure, Category = "MOU|Lobby|Customization")
 	FCharacterCustomizationData GetLocalCustomization();
 
@@ -145,7 +145,8 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MOU|Lobby|Customization")
 	FOnLobbyCustomizationResult OnLobbyCustomizationResult;
 
-	void CacheLocalCustomization(const FCharacterCustomizationData& Data) { LocalCustomization = Data; bLocalCustomizationLoaded = true; }
+	// [PROFILE-002] 본인 외형을 메모리에 보관하고 계정별 파일에 저장한다.
+	bool CacheLocalCustomization(const FCharacterCustomizationData& Data);
 
 	bool IsCustomizationPending() const { return bCustomizationPending; }
 	// --- UGameInstanceSubsystem ------------------------------------------
@@ -704,7 +705,7 @@ public:
 	int32 GetTotalUnreadCount() const;
 
 private:
-	/** 게임 스레드 틱. 백엔드 큐를 비우고 델리게이트를 브로드캐스트한다. */
+	// [PROFILE-004] 백엔드 이벤트를 처리하고 외형 승인·게임 시작 시 본인 계정값을 보관한다.
 	bool Tick(float DeltaTime);
 
 	/** 백엔드를 정리하고 버린다. 워커 스레드가 있으면 끝날 때까지 기다린다. */
@@ -996,7 +997,11 @@ private:
 
 	/** 방을 떠났을 때 대기실 관련 상태를 한 번에 비운다. */
 	void ClearRoomState();
+	// [PROFILE-001] 로그인 계정의 저장 경로를 반환하며 접속이 끊겨도 마지막 계정 연결을 유지한다.
+	FString GetCustomizationSaveSlotName() const;
 	FCharacterCustomizationData LocalCustomization;
+	// 캐시와 저장 파일을 소유하는 계정. 로그인 전의 오프라인 저장은 0을 사용한다.
+	int64 LocalCustomizationUserId = 0;
 	bool bLocalCustomizationLoaded = false;
 	bool bCustomizationPending = false;
 	double CustomizationRequestTime = 0;
