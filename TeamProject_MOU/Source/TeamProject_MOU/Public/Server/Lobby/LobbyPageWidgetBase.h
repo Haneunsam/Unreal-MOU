@@ -1,4 +1,4 @@
-// MOU 로비 스택에서 사용하는 고정 역할 페이지들.
+﻿// MOU 로비 스택에서 사용하는 고정 역할 페이지들.
 
 #pragma once
 
@@ -88,6 +88,7 @@ public:
 	virtual void NativeOnInitialized() override;
 	virtual void NativeConstruct() override;
 
+	// [RTITLE-005] 현재 방 제목과 준비 상태를 대기실 위젯에 반영한다.
 	void Refresh(const UServerSubsystem* Server);
 	void SetMessage(const FString& Text, bool bIsError);
 

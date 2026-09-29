@@ -251,6 +251,7 @@ public:
 	 * @param RoomPassword 숫자 4자리. 비우면 공개방이 된다.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
+	// [RTITLE-002] 생성 요청 제목을 보관한 뒤 방 생성을 요청한다.
 	void CreateRoom(const FString& Title, const FString& RoomPassword, int32 HostPort = 7777);
 
 	/** 대기 중인 방 목록을 요청한다. 결과는 OnRoomListReceived 로 온다. */
@@ -264,6 +265,7 @@ public:
 	 * 여기서 바로 여행하지 않는다. 게임이 시작될 때(OnRoomGameStarted) 떠난다.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
+	// [RTITLE-003] 목록에서 선택한 방 제목을 보관한 뒤 참여를 요청한다.
 	void JoinRoom(int32 RoomId, const FString& RoomPassword);
 
 	/**
@@ -533,6 +535,9 @@ public:
 	/** 지금 들어가 있는 방 번호. 방장이든 참여자든 상관없다. 0 이면 어느 방에도 없다. */
 	UFUNCTION(BlueprintPure, Category = "MOU|Lobby")
 	int32 GetCurrentRoomId() const { return CurrentRoomId; }
+
+	// [RTITLE-001] 성공한 생성 또는 참여 요청에서 확정한 현재 방 제목을 반환한다.
+	const FString& GetCurrentRoomTitle() const { return CurrentRoomTitle; }
 
 	/** 내가 지금 방의 방장인지. */
 	UFUNCTION(BlueprintPure, Category = "MOU|Lobby")
@@ -1016,6 +1021,7 @@ private:
 	FString PendingRegisterNickname;
 
 	/** 방을 떠났을 때 대기실 관련 상태를 한 번에 비운다. */
+	// [RTITLE-004] 방을 떠날 때 제목과 대기 중 요청을 포함한 방 상태를 비운다.
 	void ClearRoomState();
 	// [PROFILE-001] 로그인 계정의 저장 경로를 반환하며 접속이 끊겨도 마지막 계정 연결을 유지한다.
 	FString GetCustomizationSaveSlotName() const;
@@ -1049,6 +1055,11 @@ private:
 	 * 하나로 합치면 "방장인가" 와 "방에 있는가" 를 구분할 수 없다.
 	 */
 	int32 CurrentRoomId = 0;
+	FString CurrentRoomTitle;
+	FString PendingCreatedRoomTitle;
+	FString PendingJoinedRoomTitle;
+	TMap<int32, FString> RoomTitlesById;
+	friend class FRoomLobbyTitleRegressionTest;
 
 	UPROPERTY()
 	TArray<FMOURoomMember> RoomMembers;

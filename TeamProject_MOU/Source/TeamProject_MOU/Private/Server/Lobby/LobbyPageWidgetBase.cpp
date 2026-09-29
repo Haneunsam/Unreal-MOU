@@ -1,4 +1,4 @@
-#include "Server/Lobby/LobbyPageWidgetBase.h"
+﻿#include "Server/Lobby/LobbyPageWidgetBase.h"
 #include "Server/Lobby/RoomPlayerSlotWidgetBase.h"
 #include "Server/Lobby/LobbyCustomizationComponent.h"
 #include "Components/UniformGridPanel.h"
@@ -186,8 +186,14 @@ void URoomLobbyWidgetBase::BuildDefaultLayout()
 	MessageText = AddText(WidgetTree, Box, TEXT("MessageText"), TEXT(""));
 }
 
+// [RTITLE-005] 현재 방 제목과 준비 상태를 대기실 위젯에 반영한다.
 void URoomLobbyWidgetBase::Refresh(const UServerSubsystem* Server)
 {
+	if (TitleText)
+	{
+		const FString RoomTitle = Server ? Server->GetCurrentRoomTitle() : FString();
+		TitleText->SetText(FText::FromString(RoomTitle.IsEmpty() ? TEXT("방 대기실") : RoomTitle));
+	}
 	if (Server == nullptr)
 	{
 		return;

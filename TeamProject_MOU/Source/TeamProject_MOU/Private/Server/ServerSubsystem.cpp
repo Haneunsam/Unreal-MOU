@@ -461,6 +461,7 @@ FString UServerSubsystem::GetRoomResultText(EMOURoomResultBP Result)
 	}
 }
 
+// [RTITLE-002] 생성 요청 제목을 보관한 뒤 방 생성을 요청한다.
 void UServerSubsystem::CreateRoom(const FString& Title, const FString& RoomPassword, int32 HostPort)
 {
 	if (!Backend.IsValid() || ConnectionState != EChatConnectionState::LoggedIn)
@@ -480,6 +481,7 @@ void UServerSubsystem::CreateRoom(const FString& Title, const FString& RoomPassw
 	// 방 목록만 7777을 계속 가리켜 relay bootstrap과 직접 후보가 서로 어긋날 수 있었다.
 	RegisterGameEndpoint(HostPort);
 	const int32 AdvertisedPort = ReservedGamePort > 0 ? ReservedGamePort : HostPort;
+	PendingCreatedRoomTitle = Title;
 	Backend->CreateRoom(Title, EffectivePassword, AdvertisedPort, GetLocalLanAddress());
 }
 
@@ -495,6 +497,7 @@ void UServerSubsystem::RequestRoomList()
 	Backend->RequestRoomList();
 }
 
+// [RTITLE-003] 목록에서 선택한 방 제목을 보관한 뒤 참여를 요청한다.
 void UServerSubsystem::JoinRoom(int32 RoomId, const FString& RoomPassword)
 {
 	if (!Backend.IsValid() || ConnectionState != EChatConnectionState::LoggedIn)
@@ -508,6 +511,7 @@ void UServerSubsystem::JoinRoom(int32 RoomId, const FString& RoomPassword)
 
 	const FString EffectivePassword = IsValidRoomPassword(RoomPassword) ? RoomPassword : FString();
 
+	PendingJoinedRoomTitle = RoomTitlesById.FindRef(RoomId);
 	Backend->JoinRoom(RoomId, EffectivePassword);
 }
 
@@ -756,6 +760,7 @@ bool UServerSubsystem::IsSelfReady() const
 	return false;
 }
 
+// [RTITLE-004] 방을 떠날 때 제목과 대기 중 요청을 포함한 방 상태를 비운다.
 void UServerSubsystem::ClearRoomState()
 {
 	++CustomizationRequestId; // Ignore replies from a previous room/session.
@@ -767,6 +772,10 @@ void UServerSubsystem::ClearRoomState()
 
 	MyRoomId      = 0;
 	CurrentRoomId = 0;
+	CurrentRoomTitle.Empty();
+	PendingCreatedRoomTitle.Empty();
+	PendingJoinedRoomTitle.Empty();
+	RoomTitlesById.Reset();
 	RoomMembers.Reset();
 	bAllMembersReady = false;
 
@@ -949,6 +958,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			{
 				MyRoomId      = Event.RoomId;
 				CurrentRoomId = Event.RoomId;   // 방장도 그 방의 멤버다
+				CurrentRoomTitle = PendingCreatedRoomTitle;
 				SubmitCustomization(GetLocalCustomization());
 				UE_LOG(LogMOUServer, Log, TEXT("방 생성 완료. 방번호 #%d"), MyRoomId);
 			}
@@ -957,10 +967,16 @@ bool UServerSubsystem::Tick(float DeltaTime)
 				UE_LOG(LogMOUServer, Warning, TEXT("방 생성 실패: %s"),
 					*UServerSubsystem::GetRoomResultText(Event.RoomResult));
 			}
+			PendingCreatedRoomTitle.Empty();
 			OnRoomCreated.Broadcast(Event.bRoomSuccess, Event.RoomId, Event.RoomResult);
 			break;
 
 		case EServerClientEventType::RoomListAck:
+			RoomTitlesById.Reset();
+			for (const FMOURoomInfo& Room : Event.Rooms)
+			{
+				RoomTitlesById.Add(Room.RoomId, Room.Title);
+			}
 			UE_LOG(LogMOUServer, Log, TEXT("방 목록 수신: %d개"), Event.Rooms.Num());
 			OnRoomListReceived.Broadcast(Event.Rooms);
 			break;
@@ -969,6 +985,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			if (Event.Join.bSuccess)
 			{
 				CurrentRoomId = Event.Join.RoomId;   // 대기실 입장. 방장은 아니다
+				CurrentRoomTitle = PendingJoinedRoomTitle;
 				SubmitCustomization(GetLocalCustomization());
 				UE_LOG(LogMOUServer, Log, TEXT("방 #%d 입장. 호스트 후보 %s"),
 					Event.Join.RoomId, *Event.Join.ToDisplayString());
@@ -978,6 +995,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 				UE_LOG(LogMOUServer, Warning, TEXT("방 참여 실패: %s"),
 					*UServerSubsystem::GetRoomResultText(Event.Join.Result));
 			}
+			PendingJoinedRoomTitle.Empty();
 			OnRoomJoinCompleted.Broadcast(Event.Join);
 			break;
 
