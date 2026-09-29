@@ -40,6 +40,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NPC|Patrol", meta = (EditCondition = "UsePatrol && PatrolType == ENPCPatrolType::Spline", EditConditionHides, ClampMin = "0.0", Units = "cm", ToolTip = "스플라인 위 임의 지점을 기준으로 주변 정찰 지점을 찾을 반경입니다."))
     float SplinePatrolRadius;
 
+    /* 정찰, 복귀 및 일반 이동 중 사용할 최대 걷기 속도 */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NPC|Movement", meta = (ClampMin = "0.0", Units = "cm/s", ToolTip = "정찰, 복귀 및 일반 이동 중 사용할 최대 이동 속도입니다."))
+    float PatrolMoveSpeed = 250.0f;
+
+    /* 플레이어를 추적할 때 사용할 최대 걷기 속도 */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NPC|Movement", meta = (ClampMin = "0.0", Units = "cm/s", ToolTip = "플레이어 타깃을 추적할 때 사용할 최대 이동 속도입니다."))
+    float ChaseMoveSpeed = 500.0f;
+
     /* NPC 행동 후 정책 */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NPC|Behavior", meta = (ToolTip = "행동 후 정책"))
     ENPCAfterActionPolicy AfterActionPolicy;

@@ -7,6 +7,8 @@
 #include "Perception/AISenseConfig_Sight.h"
 #include "Data/NPCData.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 
 namespace
@@ -151,4 +153,25 @@ bool UNPCPerceptionBlueprintLibrary::CanChaseTarget(
 	default:
 		return true;
 	}
+}
+
+// [NPCMOVE-000] NPCData의 정찰 또는 추적 속도를 캐릭터 이동 컴포넌트에 적용한다.
+bool UNPCPerceptionBlueprintLibrary::ApplyMovementSpeed(
+	const UNPCData* NPCData,
+	AActor* ControlledPawn,
+	bool bIsChasing)
+{
+	ACharacter* Character = Cast<ACharacter>(ControlledPawn);
+	UCharacterMovementComponent* MovementComponent = Character
+		? Character->GetCharacterMovement()
+		: nullptr;
+	if (!IsValid(NPCData) || !MovementComponent)
+	{
+		return false;
+	}
+
+	MovementComponent->MaxWalkSpeed = FMath::Max(
+		0.0f,
+		bIsChasing ? NPCData->ChaseMoveSpeed : NPCData->PatrolMoveSpeed);
+	return true;
 }

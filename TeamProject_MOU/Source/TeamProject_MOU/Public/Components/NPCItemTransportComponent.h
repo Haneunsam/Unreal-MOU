@@ -5,6 +5,7 @@
 #include "NPCItemTransportComponent.generated.h"
 
 class AItemBase;
+class UStatusComponent;
 class UWarehouseComponent;
 
 /**
@@ -19,6 +20,8 @@ class TEAMPROJECT_MOU_API UNPCItemTransportComponent : public UActorComponent
 public:
 	UNPCItemTransportComponent();
 
+	// [NPCWORK-000] 시작 시 상태 컴포넌트의 CC 변경 이벤트를 구독한다.
+	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -86,6 +89,13 @@ private:
 	bool TryGenerateDestination(const FVector& Origin);
 	void AttachCarriedItem();
 
+	// [NPCWORK-001] 이동 불가 CC가 적용되면 운반물을 현재 위치에 놓고 NPC를 제거한다.
+	UFUNCTION()
+	void HandleCrowdControlChanged(bool bIsCrowdControlled);
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStatusComponent> StatusComponent;
+
 	UPROPERTY(Transient)
 	TObjectPtr<AItemBase> ReservedItem;
 
@@ -97,6 +107,8 @@ private:
 
 	UPROPERTY(Transient)
 	bool bHasDestination = false;
+
+	bool bHandledCrowdControlDeath = false;
 
 	UFUNCTION()
 	void OnRep_CarriedItem();

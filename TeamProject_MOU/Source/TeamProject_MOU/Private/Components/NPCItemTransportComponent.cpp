@@ -2,6 +2,7 @@
 
 #include "Base/ItemBase.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StatusComponent.h"
 #include "Components/WarehouseComponent.h"
 #include "GameFramework/Character.h"
 #include "NavigationSystem.h"
@@ -13,8 +14,30 @@ UNPCItemTransportComponent::UNPCItemTransportComponent()
 	SetIsReplicatedByDefault(true);
 }
 
+// [NPCWORK-000] 시작 시 상태 컴포넌트의 CC 변경 이벤트를 구독한다.
+void UNPCItemTransportComponent::BeginPlay()
+{
+	Super::BeginPlay();
+
+	AActor* Owner = GetOwner();
+	StatusComponent = Owner ? Owner->FindComponentByClass<UStatusComponent>() : nullptr;
+	if (StatusComponent)
+	{
+		StatusComponent->OnCrowdControlChanged.AddUniqueDynamic(
+			this,
+			&UNPCItemTransportComponent::HandleCrowdControlChanged);
+	}
+}
+
 void UNPCItemTransportComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (StatusComponent)
+	{
+		StatusComponent->OnCrowdControlChanged.RemoveDynamic(
+			this,
+			&UNPCItemTransportComponent::HandleCrowdControlChanged);
+	}
+
 	if (GetOwner() && GetOwner()->HasAuthority())
 	{
 		ReleaseReservation();
@@ -216,6 +239,32 @@ void UNPCItemTransportComponent::AttachCarriedItem()
 			CarriedItem->SetActorRelativeLocation(Offset);
 		}
 	}
+}
+
+// [NPCWORK-001] 이동 불가 CC가 적용되면 운반물을 현재 위치에 놓고 NPC를 제거한다.
+void UNPCItemTransportComponent::HandleCrowdControlChanged(bool bIsCrowdControlled)
+{
+	AActor* Owner = GetOwner();
+	if (!bIsCrowdControlled || bHandledCrowdControlDeath || !Owner || !Owner->HasAuthority())
+	{
+		return;
+	}
+
+	bHandledCrowdControlDeath = true;
+	ReleaseReservation();
+
+	if (IsValid(CarriedItem))
+	{
+		AItemBase* ItemToDrop = CarriedItem;
+		CarriedItem = nullptr;
+		ItemToDrop->Drop(Owner->GetActorLocation(), Owner);
+		ItemToDrop->ForceNetUpdate();
+	}
+
+	DestinationLocation = FVector::ZeroVector;
+	bHasDestination = false;
+	Owner->ForceNetUpdate();
+	Owner->Destroy();
 }
 
 void UNPCItemTransportComponent::OnRep_CarriedItem()

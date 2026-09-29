@@ -34,4 +34,11 @@ public:
 		const UNPCData* NPCData,
 		AActor* ControlledPawn,
 		AActor* TargetActor);
+
+	// [NPCMOVE-000] NPCData의 정찰 또는 추적 속도를 캐릭터 이동 컴포넌트에 적용한다.
+	UFUNCTION(BlueprintCallable, Category = "NPC|Movement")
+	static bool ApplyMovementSpeed(
+		const UNPCData* NPCData,
+		AActor* ControlledPawn,
+		bool bIsChasing);
 };
