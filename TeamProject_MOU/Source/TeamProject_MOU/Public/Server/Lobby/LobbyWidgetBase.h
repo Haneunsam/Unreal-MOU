@@ -95,6 +95,7 @@ public:
 
 	virtual void NativeOnInitialized() override;
 	virtual void NativeConstruct() override;
+	// [LPUI-003] NativeDestruct에서 비밀번호 팝업과 메신저 표시 수명을 연결한다.
 	virtual void NativeDestruct() override;
 
 	// --- 설정 -------------------------------------------------------------
@@ -212,6 +213,7 @@ public:
 
 	/** 방 목록 창을 연다. 메인메뉴에서만 의미가 있다. */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
+	// [LPUI-002] OpenRoomList에서 비밀번호 팝업과 메신저 표시 수명을 연결한다.
 	void OpenRoomList();
 
 	/** 환경설정 페이지를 스택에 Push한다. */
@@ -336,6 +338,11 @@ protected:
 	TObjectPtr<UTextBlock> MessageText;
 
 private:
+	// [LPUI-001] 비밀번호 팝업 동안 메신저를 숨기고 기존 표시 상태로 복원한다.
+	void HandlePasswordPromptChanged(bool bOpen);
+	TWeakObjectPtr<UWidget> PasswordPromptHiddenMessenger;
+	ESlateVisibility MessengerVisibilityBeforePrompt = ESlateVisibility::SelfHitTestInvisible;
+
 	// --- 델리게이트 수신부 (AddDynamic 대상이라 전부 UFUNCTION) --------------
 
 	UFUNCTION()
@@ -368,6 +375,7 @@ private:
 	// --- 자식 창에서 올라오는 결과 (네이티브 델리게이트) ---------------------
 
 	void HandleRoomCreateCancelled();
+	// [LPUI-004] HandleRoomListClosed에서 비밀번호 팝업과 메신저 표시 수명을 연결한다.
 	void HandleRoomListClosed();
 	void HandleFlowRoomEntered(int32 RoomId, bool bIsHost, const FString& RoomPassword);
 	void HandleSettingsClosed();

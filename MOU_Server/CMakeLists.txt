@@ -113,3 +113,8 @@ add_executable(SessionAuthTest Tests/SessionAuthTest.cpp Code/Session/Session.cp
 target_include_directories(SessionAuthTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Code)
 target_link_libraries(SessionAuthTest PRIVATE mou_shared)
 add_test(NAME SessionAuthTest COMMAND SessionAuthTest)
+
+add_executable(AccountAvailabilityTest Tests/AccountAvailabilityTest.cpp Code/Accounts/Accounts.cpp Code/Crypto/Crypto.cpp Code/ServerLog/ServerLog.cpp)
+target_include_directories(AccountAvailabilityTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Code)
+target_link_libraries(AccountAvailabilityTest PRIVATE mou_shared sqlite3)
+add_test(NAME AccountAvailabilityTest COMMAND AccountAvailabilityTest)

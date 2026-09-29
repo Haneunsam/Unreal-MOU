@@ -1,4 +1,4 @@
-// MOU 채팅 서버 <-> 클라이언트 공용 프로토콜 정의.
+﻿// MOU 채팅 서버 <-> 클라이언트 공용 프로토콜 정의.
 //
 // 이 파일은 언리얼 클라이언트에서도 그대로 include 하므로
 // STL 이나 플랫폼 헤더에 의존하지 않는다. <cstdint> 만 쓴다.
@@ -52,7 +52,7 @@ namespace MOU
 	// v12: RoomMemberInfo에 고정 좌석 SlotIndex 추가. 서버/클라이언트 함께 갱신.
 	// v13: 이미 접속 중인 계정의 로그인을 거부하는 결과 코드 추가.
 	// v14: member material customization + request/ack. Rebuild both endpoints.
-	constexpr uint16_t kProtocolVersion = 14;
+	constexpr uint16_t kProtocolVersion = 15;
 
 	// BodySize 가 이 값을 넘으면 악성 패킷으로 보고 연결을 끊는다.
 	constexpr uint32_t kMaxBodySize = 4096;
@@ -239,6 +239,8 @@ namespace MOU
 		//   호스트 공인 주소를 accept() 에서 읽는 것과 같은 원칙이다.
 		RoomCustomizationReq = 44, // v14: authenticated member appearance
 		RoomCustomizationAck = 45,
+		CheckLoginIdReq = 46,
+		CheckLoginIdAck = 47,
 		ClientEndpointAck   = 43,  // S->C. "네 공인 엔드포인트를 이렇게 봤다"
 	};
 
@@ -457,6 +459,11 @@ namespace MOU
 	};
 
 	// 계정 생성. 로그인과 같은 이유로 Version 이 첫 필드다.
+	struct CheckLoginIdReqBody { uint16_t Version; uint32_t RequestId; char LoginId[kMaxLoginIdLen]; };
+	struct CheckLoginIdAckBody { uint16_t ServerVersion; uint32_t RequestId; uint8_t Result; };
+	static_assert(sizeof(CheckLoginIdReqBody) == 30, "Check ID request size");
+	static_assert(sizeof(CheckLoginIdAckBody) == 7, "Check ID response size");
+
 	struct RegisterReqBody
 	{
 		uint16_t Version;

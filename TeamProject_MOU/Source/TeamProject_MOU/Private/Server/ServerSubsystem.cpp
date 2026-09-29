@@ -1,4 +1,4 @@
-// MOU 채팅 - 서브시스템 구현.
+﻿// MOU 채팅 - 서브시스템 구현.
 //
 // 이 파일이 하는 일은 결국 4가지다.
 //   1. 백엔드(ILobbyBackend) 수명 관리 (생성 / 안전한 파괴)
@@ -121,8 +121,10 @@ void UServerSubsystem::Deinitialize()
 	Super::Deinitialize();
 }
 
+// [AUTHUI-042] 계정 요청의 검증 또는 수명을 관리한다.
 void UServerSubsystem::ShutdownClient()
 {
+	PendingCheckRequestId = 0;
 	if (Backend.IsValid())
 	{
 		// 백엔드가 워커 스레드를 갖고 있으면 여기서 끝날 때까지 기다린다.
@@ -243,22 +245,12 @@ FString UServerSubsystem::GetLoginResultText(EChatLoginResultBP Result)
 	}
 }
 
+// [AUTHUI-040] 계정 요청의 검증 또는 수명을 관리한다.
 bool UServerSubsystem::ValidateCredentials(const FString& LoginId, const FString& Password, FString& OutReason)
 {
 	// 서버와 같은 규칙을 쓴다. 길이는 UTF-8 바이트 기준이라 한글 아이디면 글자 수보다 커진다.
-	const int32 IdBytes = MOUChat::GetUtf8Length(LoginId);
+	if (!ValidateLoginId(LoginId, OutReason)) return false;
 	const int32 PwBytes = MOUChat::GetUtf8Length(Password);
-
-	if (IdBytes < static_cast<int32>(MOU::kMinLoginIdLen))
-	{
-		OutReason = FString::Printf(TEXT("아이디는 %d자 이상이어야 합니다."), MOU::kMinLoginIdLen);
-		return false;
-	}
-	if (IdBytes >= static_cast<int32>(MOU::kMaxLoginIdLen))
-	{
-		OutReason = FString::Printf(TEXT("아이디가 너무 깁니다. (%d바이트 미만)"), MOU::kMaxLoginIdLen);
-		return false;
-	}
 	if (PwBytes < static_cast<int32>(MOU::kMinPasswordLen))
 	{
 		OutReason = FString::Printf(TEXT("비밀번호는 %d자 이상이어야 합니다."), MOU::kMinPasswordLen);
@@ -272,6 +264,48 @@ bool UServerSubsystem::ValidateCredentials(const FString& LoginId, const FString
 
 	OutReason.Empty();
 	return true;
+}
+
+// [AUTHUI-008] 아이디의 공통 UTF-8 길이 정책을 검사한다.
+bool UServerSubsystem::ValidateLoginId(const FString& LoginId, FString& OutReason)
+{
+	const int32 IdBytes = MOUChat::GetUtf8Length(LoginId);
+
+	if (IdBytes < static_cast<int32>(MOU::kMinLoginIdLen))
+	{
+		OutReason = FString::Printf(TEXT("아이디는 %d자 이상이어야 합니다."), MOU::kMinLoginIdLen);
+		return false;
+	}
+	if (IdBytes >= static_cast<int32>(MOU::kMaxLoginIdLen))
+	{
+		OutReason = FString::Printf(TEXT("아이디가 너무 깁니다. (%d바이트 미만)"), MOU::kMaxLoginIdLen);
+		return false;
+	}
+
+    for (TCHAR Ch : LoginId) if (Ch == 0) { OutReason = TEXT("아이디에 잘못된 문자가 있습니다."); return false; }
+    OutReason.Empty(); return true;
+}
+// [AUTHUI-006] 연결된 서버로 아이디 조회를 보내고 상관관계 번호를 반환한다.
+uint32 UServerSubsystem::CheckLoginId(const FString& LoginId)
+{
+    FString Reason;
+    if (!ValidateLoginId(LoginId, Reason) || !Backend.IsValid() || ConnectionState != EChatConnectionState::Connected) return 0;
+    const uint32 Id = ++NextCheckRequestId ? NextCheckRequestId : ++NextCheckRequestId;
+    if (!Backend->SendCheckLoginId(Id, LoginId)) return 0;
+    PendingCheckRequestId = Id; CheckRequestTime = FPlatformTime::Seconds(); return Id;
+}
+// [AUTHUI-007] 지정된 조회의 늦은 응답을 무효화한다.
+void UServerSubsystem::CancelLoginIdCheck(uint32 RequestId)
+{
+    if (PendingCheckRequestId == RequestId) PendingCheckRequestId = 0;
+}
+// [AUTHUI-009] 미확정 가입 요청을 취소하고 연결을 종료하여 늦은 응답을 격리한다.
+void UServerSubsystem::CancelPendingRegistration()
+{
+    if (!bHasPendingRegister) return;
+    bHasPendingRegister = false; PendingRegisterPassword.Empty();
+    PendingRegisterId.Empty(); PendingRegisterNickname.Empty();
+    ShutdownClient();
 }
 
 void UServerSubsystem::Login(const FString& LoginId, const FString& Password, int32 TeamId)
@@ -296,6 +330,7 @@ void UServerSubsystem::Login(const FString& LoginId, const FString& Password, in
 	}
 }
 
+// [AUTHUI-041] 계정 요청의 검증 또는 수명을 관리한다.
 void UServerSubsystem::RegisterAccount(const FString& LoginId, const FString& Password, const FString& Nickname)
 {
 	// 연결 전에 불릴 수 있으므로 일단 보관한다.
@@ -305,6 +340,7 @@ void UServerSubsystem::RegisterAccount(const FString& LoginId, const FString& Pa
 	PendingRegisterPassword = Password;
 	PendingRegisterNickname = Nickname;
 	bHasPendingRegister     = true;
+	RegisterRequestTime = FPlatformTime::Seconds();
 
 	if (ConnectionState == EChatConnectionState::Connected
 		|| ConnectionState == EChatConnectionState::LoggedIn)
@@ -783,6 +819,15 @@ void UServerSubsystem::Disconnect()
 // [PROFILE-004] 백엔드 이벤트를 처리하고 외형 승인·게임 시작 시 본인 계정값을 보관한다.
 bool UServerSubsystem::Tick(float DeltaTime)
 {
+    if (PendingCheckRequestId && FPlatformTime::Seconds() - CheckRequestTime > 10.0) {
+        const uint32 Id = PendingCheckRequestId; PendingCheckRequestId = 0;
+        OnLoginIdChecked.Broadcast(Id, EChatLoginResultBP::ServerError);
+    }
+    if (bHasPendingRegister && FPlatformTime::Seconds() - RegisterRequestTime > 15.0) {
+        CancelPendingRegistration();
+        OnChatRegisterCompleted.Broadcast(false, EChatLoginResultBP::ServerError);
+    }
+
 	if (bCustomizationPending && FPlatformTime::Seconds() - CustomizationRequestTime > 10.0)
 	{
 		bCustomizationPending = false;
@@ -874,7 +919,14 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			OnChatLoginCompleted.Broadcast(LoginResult);
 			break;
 
+        case EServerClientEventType::CheckLoginIdAck:
+            if (Event.CheckRequestId == PendingCheckRequestId && PendingCheckRequestId) {
+                PendingCheckRequestId = 0;
+                OnLoginIdChecked.Broadcast(Event.CheckRequestId, Event.CheckResult);
+            }
+            break;
 		case EServerClientEventType::RegisterAck:
+            if (!bHasPendingRegister) break;
 			// 응답을 받았으므로 보관본을 지운다.
 			// 안 지우면 재접속할 때마다 가입을 다시 시도해 "이미 있는 아이디" 가 반복된다.
 			bHasPendingRegister = false;
@@ -1086,6 +1138,11 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			break;
 
 		case EServerClientEventType::Disconnected:
+            PendingCheckRequestId = 0;
+            if (bHasPendingRegister) {
+                bHasPendingRegister = false; PendingRegisterPassword.Empty();
+                OnChatRegisterCompleted.Broadcast(false, EChatLoginResultBP::ServerError);
+            }
 			LoginResult = FChatLoginResult();
 			// 연결이 끊기면 서버가 내 방을 지운다. 클라이언트 쪽 기억도 같이 비운다.
 			ClearRoomState();

@@ -12,6 +12,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/Image.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/EditableTextBox.h"
@@ -26,6 +27,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
+#include "InputCoreTypes.h"
 
 // ===========================================================================
 // URoomListEntryWidget - 목록의 한 줄
@@ -104,6 +106,15 @@ void URoomListEntryWidget::SetRoomInfo(const FMOURoomInfo& InRoomInfo)
 	OnRoomInfoSet(RoomInfo);
 }
 
+// [RLUI-001] 목록의 입장 정책을 해당 행에 전달한다.
+void URoomListEntryWidget::SetPasswordJoinAllowed(bool bAllowed)
+{
+	bPasswordJoinAllowed = bAllowed;
+	RefreshTexts();
+}
+
+
+// [RLUI-010] 방 정보와 잠금 아이콘을 표시하고 참여 정책을 버튼에 적용한다.
 void URoomListEntryWidget::RefreshTexts()
 {
 	if (EntryTitleText != nullptr)
@@ -123,10 +134,29 @@ void URoomListEntryWidget::RefreshTexts()
 	{
 		EntryLockText->SetText(FText::FromString(RoomInfo.bHasPassword ? TEXT("[비번]") : TEXT("")));
 	}
+	if (EntryLockImage)
+	{
+		EntryLockImage->SetVisibility(RoomInfo.bHasPassword
+			? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
+	if (EntryLockText)
+	{
+		EntryLockText->SetVisibility(EntryLockImage
+			? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+	}
+	if (EntryJoinButton)
+	{
+		const bool bBlocked = RoomInfo.bHasPassword && !bPasswordJoinAllowed;
+		EntryJoinButton->SetIsEnabled(!bBlocked);
+		EntryJoinButton->SetToolTipText(FText::FromString(bBlocked
+			? TEXT("비밀번호 방 참여는 추후 지원합니다.") : TEXT("방 참여")));
+	}
 }
 
+// [RLUI-011] 보류된 비밀번호방을 차단하고 공개방 선택을 목록에 전달한다.
 void URoomListEntryWidget::RequestJoin()
 {
+	if (RoomInfo.bHasPassword && !bPasswordJoinAllowed) return;
 	OnJoinClicked.ExecuteIfBound(RoomInfo.RoomId);
 }
 
@@ -156,6 +186,7 @@ void URoomListWidgetBase::NativeOnInitialized()
 	}
 }
 
+// [PJOIN-010] 비밀번호 팝업의 NativeConstruct 처리와 표시 상태를 동기화한다.
 void URoomListWidgetBase::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -200,6 +231,15 @@ void URoomListWidgetBase::NativeConstruct()
 		}
 	}
 
+	if (JoinCloseButton)
+		JoinCloseButton->OnClicked.AddUniqueDynamic(this, &URoomListWidgetBase::HandleJoinCancelClicked);
+	if (JoinPasswordVisibilityButton)
+		JoinPasswordVisibilityButton->OnClicked.AddUniqueDynamic(this, &URoomListWidgetBase::HandleJoinPasswordVisibilityClicked);
+	if (JoinPasswordBox)
+	{
+		JoinPasswordBox->OnTextChanged.AddUniqueDynamic(this, &URoomListWidgetBase::HandleJoinPasswordTextChanged);
+		JoinPasswordBox->OnTextCommitted.AddUniqueDynamic(this, &URoomListWidgetBase::HandleJoinPasswordCommitted);
+	}
 	ShowPasswordPrompt(false);
 	RefreshRoomList();
 
@@ -215,8 +255,12 @@ void URoomListWidgetBase::NativeConstruct()
 	}
 }
 
+// [PJOIN-011] 비밀번호 팝업의 NativeDestruct 처리와 표시 상태를 동기화한다.
 void URoomListWidgetBase::NativeDestruct()
 {
+	ShowPasswordPrompt(false);
+	bBusy = false;
+	ActiveJoinRoomId = 0;
 	// 타이머를 먼저 끈다. 위젯이 사라진 뒤에 타이머가 돌면 죽은 객체를 호출한다.
 	if (UWorld* World = GetWorld())
 	{
@@ -255,6 +299,7 @@ void URoomListWidgetBase::NativeDestruct()
 //             └ StatusText
 // ---------------------------------------------------------------------------
 
+// [PJOIN-012] 비밀번호 팝업의 BuildDefaultLayout 처리와 표시 상태를 동기화한다.
 void URoomListWidgetBase::BuildDefaultLayout()
 {
 	UCanvasPanel* RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RoomListRootCanvas"));
@@ -330,6 +375,7 @@ void URoomListWidgetBase::BuildDefaultLayout()
 
 	JoinPasswordBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("JoinPasswordBox"));
 	JoinPasswordBox->SetHintText(FText::FromString(TEXT("방 비밀번호 숫자 4자리")));
+	JoinPasswordBox->SetIsPassword(true);
 	if (UHorizontalBoxSlot* PasswordSlot = PromptRow->AddChildToHorizontalBox(JoinPasswordBox))
 	{
 		PasswordSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -383,8 +429,10 @@ ULobbyFlowCoordinator* URoomListWidgetBase::GetFlowCoordinator() const
 	return nullptr;
 }
 
+// [PJOIN-013] 비밀번호 팝업의 RefreshRoomList 처리와 표시 상태를 동기화한다.
 void URoomListWidgetBase::RefreshRoomList()
 {
+	if (bBusy) return;
 	UServerSubsystem* Chat = GetServerSubsystem();
 	if (Chat == nullptr)
 	{
@@ -406,36 +454,31 @@ void URoomListWidgetBase::RefreshRoomList()
 	}
 }
 
+// [PJOIN-014] 비밀번호 팝업의 HandleRoomListReceived 처리와 표시 상태를 동기화한다.
 void URoomListWidgetBase::HandleRoomListReceived(const TArray<FMOURoomInfo>& Rooms)
 {
 	CachedRooms = Rooms;
 	RebuildEntries(Rooms);
-
-	// 비밀번호를 입력하던 중에 새로고침이 돌아 그 방이 사라졌다면 입력창을 닫는다.
-	// 안 그러면 없는 방에 비밀번호를 넣고 "없는 방" 이라는 답만 받게 된다.
-	if (PendingJoinRoomId != 0)
+	// 입장 요청 이후의 목록은 참고용이다. 입장 응답이 팝업 수명을 결정한다.
+	if (bBusy) return;
+	if (bPasswordPromptOpen)
 	{
-		const bool bStillThere = CachedRooms.ContainsByPredicate(
+		const FMOURoomInfo* Selected = CachedRooms.FindByPredicate(
 			[this](const FMOURoomInfo& Room) { return Room.RoomId == PendingJoinRoomId; });
-		if (!bStillThere)
+		if (!Selected || !Selected->bHasPassword)
 		{
 			ShowPasswordPrompt(false);
-			PendingJoinRoomId = 0;
-			SetStatus(TEXT("고른 방이 사라졌습니다. 목록에서 다시 선택하세요."), true);
+			SetStatus(TEXT("고른 방이 사라졌거나 변경되었습니다. 목록에서 다시 선택하세요."), true);
 			return;
 		}
+		if (PasswordRoomNameText) PasswordRoomNameText->SetText(FText::FromString(Selected->Title));
+		return;
 	}
-
-	if (Rooms.Num() == 0)
-	{
-		SetStatus(TEXT("대기 중인 방이 없습니다. 방을 만들어보세요."), false);
-	}
-	else if (PendingJoinRoomId == 0)
-	{
-		SetStatus(FString::Printf(TEXT("방 %d개"), Rooms.Num()), false);
-	}
+	SetStatus(Rooms.IsEmpty() ? FString(TEXT("대기 중인 방이 없습니다. 방을 만들어보세요."))
+		: FString::Printf(TEXT("방 %d개"), Rooms.Num()), false);
 }
 
+// [RLUI-020] 목록 정책과 요청 대기 상태를 적용하여 방 행들을 다시 만든다.
 void URoomListWidgetBase::RebuildEntries(const TArray<FMOURoomInfo>& Rooms)
 {
 	if (RoomListBox == nullptr)
@@ -461,7 +504,9 @@ void URoomListWidgetBase::RebuildEntries(const TArray<FMOURoomInfo>& Rooms)
 
 		// 줄이 자기 RoomId 를 들고 있으므로, 클릭이 오면 어느 방인지 알 수 있다.
 		Entry->OnJoinClicked.BindUObject(this, &URoomListWidgetBase::HandleEntryJoinClicked);
+		Entry->SetPasswordJoinAllowed(bAllowPasswordRoomJoin);
 		Entry->SetRoomInfo(Room);
+		Entry->SetIsEnabled(!bBusy && !bPasswordPromptOpen);
 
 		if (UVerticalBoxSlot* EntrySlot = RoomListBox->AddChildToVerticalBox(Entry))
 		{
@@ -481,113 +526,154 @@ void URoomListWidgetBase::HandleEntryJoinClicked(int32 RoomId)
 	BeginJoin(RoomId);
 }
 
+// [RLUI-021] 목록의 잠금방 정책을 검사하고 허용된 방의 참여를 시작한다.
 void URoomListWidgetBase::BeginJoin(int32 RoomId)
 {
-	if (bBusy || RoomId == 0)
+	if (bBusy || bPasswordPromptOpen || RoomId <= 0) return;
+	const FMOURoomInfo* Room = CachedRooms.FindByPredicate(
+		[RoomId](const FMOURoomInfo& R) { return R.RoomId == RoomId; });
+	if (!Room)
 	{
+		RefreshRoomList();
+		SetStatus(TEXT("방 목록을 갱신한 뒤 다시 선택하세요."), true);
 		return;
 	}
-
-	const FMOURoomInfo* Room = CachedRooms.FindByPredicate(
-		[RoomId](const FMOURoomInfo& Candidate) { return Candidate.RoomId == RoomId; });
-
-	// 목록에 없는 방이면 그냥 보내본다. 판정은 어차피 서버가 한다.
-	const bool bNeedsPassword = (Room != nullptr) && Room->bHasPassword;
-
-	if (!bNeedsPassword)
+	if (Room->bHasPassword && !bAllowPasswordRoomJoin)
 	{
-		PendingJoinRoomId = 0;
-		ShowPasswordPrompt(false);
+		SetStatus(TEXT("현재 화면에서는 비밀번호 방에 참여할 수 없습니다."), false);
+		return;
+	}
+	if (!Room->bHasPassword)
+	{
 		SendJoinRequest(RoomId, FString());
 		return;
 	}
-
-	// 비밀번호 방이다. 바로 보내지 않고 입력을 먼저 받는다.
+	if (!PasswordPromptPanel || !JoinPasswordBox || !JoinConfirmButton)
+	{
+		SetStatus(TEXT("비밀번호 입력 UI가 연결되지 않았습니다."), true);
+		return;
+	}
 	PendingJoinRoomId = RoomId;
+	if (PasswordRoomNameText) PasswordRoomNameText->SetText(FText::FromString(Room->Title));
 	ShowPasswordPrompt(true);
-	SetStatus(FString::Printf(TEXT("방 #%d 의 비밀번호(숫자 4자리)를 입력하세요."), RoomId), false);
 }
 
+// [RLUI-022] 잠금방 참여가 허용된 경우에만 비밀번호 확인 요청을 진행한다.
 void URoomListWidgetBase::ConfirmJoinWithPassword()
 {
-	if (bBusy || PendingJoinRoomId == 0)
+	if (bBusy || !bPasswordPromptOpen || PendingJoinRoomId == 0) return;
+	if (!bAllowPasswordRoomJoin)
 	{
+		ShowPasswordPrompt(false);
+		SetStatus(TEXT("현재 화면에서는 비밀번호 방에 참여할 수 없습니다."), false);
 		return;
 	}
-
-	FString RoomPassword = JoinPasswordBox ? JoinPasswordBox->GetText().ToString() : FString();
-	RoomPassword.TrimStartAndEndInline();
-
-	// 서버도 검사하지만, 형식이 틀린 것은 왕복 없이 즉시 알려줄 수 있다.
+	const FString RoomPassword = JoinPasswordBox ? JoinPasswordBox->GetText().ToString() : FString();
 	if (!UServerSubsystem::IsValidRoomPassword(RoomPassword))
 	{
-		SetStatus(TEXT("방 비밀번호는 숫자 4자리여야 합니다."), true);
+		SetPasswordPromptStatus(TEXT("비밀번호는 숫자 4자리를 입력하세요."), true);
 		return;
 	}
-
 	SendJoinRequest(PendingJoinRoomId, RoomPassword);
 }
 
+// [PJOIN-016] 비밀번호 팝업의 CancelPasswordPrompt 처리와 표시 상태를 동기화한다.
 void URoomListWidgetBase::CancelPasswordPrompt()
 {
-	PendingJoinRoomId = 0;
+	if (bBusy)
+	{
+		SetPasswordPromptStatus(TEXT("참여 응답을 기다리는 중입니다."), false);
+		return;
+	}
 	ShowPasswordPrompt(false);
 	SetStatus(TEXT("참여를 취소했습니다."), false);
 }
 
+// [RLUI-023] 최종 입장 정책을 검사한 뒤 기존 흐름 관리자에 참여를 요청한다.
 void URoomListWidgetBase::SendJoinRequest(int32 RoomId, const FString& RoomPassword)
 {
-	ULobbyFlowCoordinator* Flow = GetFlowCoordinator();
-	if (Flow == nullptr)
+	if (bBusy) return;
+	const FMOURoomInfo* Room = CachedRooms.FindByPredicate(
+		[RoomId](const FMOURoomInfo& R) { return R.RoomId == RoomId; });
+	if (!Room)
 	{
-		SetStatus(TEXT("로비 흐름 관리자를 찾을 수 없습니다."), true);
+		ShowPasswordPrompt(false);
+		SetStatus(TEXT("고른 방이 사라졌습니다. 목록에서 다시 선택하세요."), true);
 		return;
 	}
-
+	if (Room->bHasPassword)
+	{
+		if (!bAllowPasswordRoomJoin || !bPasswordPromptOpen || PendingJoinRoomId != RoomId ||
+			!UServerSubsystem::IsValidRoomPassword(RoomPassword))
+		{
+			SetPasswordPromptStatus(TEXT("선택한 방의 비밀번호 숫자 4자리를 입력하세요."), true);
+			return;
+		}
+	}
+	else if (!RoomPassword.IsEmpty())
+	{
+		ShowPasswordPrompt(false);
+		SetStatus(TEXT("방 정보가 변경되었습니다. 목록에서 다시 선택하세요."), true);
+		return;
+	}
+	if (bPasswordPromptOpen && PendingJoinRoomId != RoomId) return;
+	ULobbyFlowCoordinator* Flow = GetFlowCoordinator();
+	if (!Flow)
+	{
+		if (bPasswordPromptOpen) SetPasswordPromptStatus(TEXT("로비 흐름 관리자를 찾을 수 없습니다."), true);
+		else SetStatus(TEXT("로비 흐름 관리자를 찾을 수 없습니다."), true);
+		return;
+	}
+	ActiveJoinRoomId = RoomId;
 	SetBusy(true);
-	SetStatus(FString::Printf(TEXT("방 #%d 에 참여하는 중..."), RoomId), false);
+	if (bPasswordPromptOpen) SetPasswordPromptStatus(TEXT("방에 참여하는 중입니다..."), false);
+	else SetStatus(FString::Printf(TEXT("방 #%d 에 참여하는 중..."), RoomId), false);
 	if (!Flow->JoinRoom(RoomId, RoomPassword))
 	{
+		ActiveJoinRoomId = 0;
 		SetBusy(false);
-		SetStatus(TEXT("다른 방 요청이 처리 중입니다."), true);
+		if (bPasswordPromptOpen) SetPasswordPromptStatus(TEXT("다른 방 요청이 처리 중입니다."), true);
+		else SetStatus(TEXT("다른 방 요청이 처리 중입니다."), true);
 	}
 }
 
+// [PJOIN-015] 비밀번호 팝업의 HandleRoomJoinCompleted 처리와 표시 상태를 동기화한다.
 void URoomListWidgetBase::HandleRoomJoinCompleted(const FMOURoomJoinResult& Result, const FString& RoomPassword)
 {
+	if (!bBusy || (Result.RoomId != 0 && Result.RoomId != ActiveJoinRoomId)) return;
+	ActiveJoinRoomId = 0;
 	SetBusy(false);
-
 	if (!Result.bSuccess)
 	{
-		SetStatus(UServerSubsystem::GetRoomResultText(Result.Result), true);
-
-		// 비밀번호가 틀렸을 때만 입력창을 열어둔 채로 다시 시도하게 한다.
-		// 정원 초과나 없는 방이면 비밀번호를 고쳐봐야 소용없으므로 목록으로 돌려보낸다.
-		if (Result.Result != EMOURoomResultBP::WrongPassword)
+		const FMOURoomInfo* Selected = CachedRooms.FindByPredicate(
+			[this](const FMOURoomInfo& Room) { return Room.RoomId == PendingJoinRoomId; });
+		if (Result.Result == EMOURoomResultBP::WrongPassword && bPasswordPromptOpen && Selected && Selected->bHasPassword)
 		{
-			PendingJoinRoomId = 0;
+			LastValidJoinPassword.Empty();
+			bJoinPasswordVisible = false;
+			if (JoinPasswordBox) JoinPasswordBox->SetText(FText::GetEmpty());
+			RefreshPasswordPromptControls();
+			SetPasswordPromptStatus(TEXT("비밀번호가 올바르지 않습니다. 다시 입력하세요."), true);
+			if (JoinPasswordBox) JoinPasswordBox->SetKeyboardFocus();
+		}
+		else
+		{
 			ShowPasswordPrompt(false);
+			SetStatus(UServerSubsystem::GetRoomResultText(Result.Result), true);
 		}
 		return;
 	}
-
-	SetStatus(FString::Printf(TEXT("참여 승인. 호스트 %s"), *Result.ToDisplayString()), false);
-
-	PendingJoinRoomId = 0;
 	ShowPasswordPrompt(false);
-
-	// 여행은 소유자/블루프린트의 몫이다. 언제 떠날지는 게임 흐름이 정한다.
+	SetStatus(TEXT("참여가 승인되었습니다. 대기실로 이동합니다."), false);
 	OnRoomJoinApproved(Result, RoomPassword);
 	OnRoomJoinApprovedNative.ExecuteIfBound(Result, RoomPassword);
-
-	if (bRemoveOnSuccess)
-	{
-		RemoveFromParent();
-	}
+	if (bRemoveOnSuccess) RemoveFromParent();
 }
 
+// [PJOIN-017] 비밀번호 팝업의 CloseList 처리와 표시 상태를 동기화한다.
 void URoomListWidgetBase::CloseList()
 {
+	if (bPasswordPromptOpen) { CancelPasswordPrompt(); return; }
 	if (const ULobbyFlowCoordinator* Flow = GetFlowCoordinator())
 	{
 		if (Flow->GetOperation() == EMOULobbyFlowOperation::JoiningRoom)
@@ -610,49 +696,38 @@ void URoomListWidgetBase::HandleJoinCancelClicked()  { CancelPasswordPrompt(); }
 // 표시
 // ---------------------------------------------------------------------------
 
+// [PJOIN-018] 비밀번호 팝업의 ShowPasswordPrompt 처리와 표시 상태를 동기화한다.
 void URoomListWidgetBase::ShowPasswordPrompt(bool bShow)
 {
-	if (PasswordPromptPanel == nullptr)
+	const bool bChanged = bPasswordPromptOpen != bShow;
+	bPasswordPromptOpen = bShow;
+	bJoinPasswordVisible = false;
+	LastValidJoinPassword.Empty();
+	if (!bShow) PendingJoinRoomId = 0;
+	if (PasswordPromptPanel)
+		PasswordPromptPanel->SetVisibility(bShow ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	if (JoinPasswordBox)
 	{
-		return;
-	}
-
-	// Collapsed 로 접어야 자리까지 사라진다. Hidden 은 빈 공간을 남긴다.
-	PasswordPromptPanel->SetVisibility(bShow ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-
-	if (JoinPasswordBox != nullptr)
-	{
-		// 방을 바꿔 고를 때 이전 방의 비밀번호가 남아있지 않게 항상 비운다.
 		JoinPasswordBox->SetText(FText::GetEmpty());
-		if (bShow)
-		{
-			JoinPasswordBox->SetKeyboardFocus();
-		}
+		JoinPasswordBox->SetIsPassword(true);
 	}
+	SetPasswordPromptStatus(FString(), false);
+	SetBusy(bBusy); // 새 팝업 상태에 맞춰 목록과 팝업 제어를 함께 갱신
+	if (bChanged) OnPasswordPromptChanged.ExecuteIfBound(bShow);
+	if (bShow && JoinPasswordBox) JoinPasswordBox->SetKeyboardFocus();
 }
 
+// [PJOIN-019] 비밀번호 팝업의 SetBusy 처리와 표시 상태를 동기화한다.
 void URoomListWidgetBase::SetBusy(bool bInBusy)
 {
 	bBusy = bInBusy;
-	if (JoinConfirmButton != nullptr)
-	{
-		JoinConfirmButton->SetIsEnabled(!bInBusy);
-	}
-	if (RefreshButton != nullptr)
-	{
-		RefreshButton->SetIsEnabled(!bInBusy);
-	}
-	if (CloseButton != nullptr)
-	{
-		CloseButton->SetIsEnabled(!bInBusy);
-	}
+	const bool bListEnabled = !bBusy && !bPasswordPromptOpen;
+	if (RefreshButton) RefreshButton->SetIsEnabled(bListEnabled);
+	if (CloseButton) CloseButton->SetIsEnabled(bListEnabled);
+	if (RoomListScrollBox) RoomListScrollBox->SetIsEnabled(bListEnabled);
 	for (const TObjectPtr<URoomListEntryWidget>& Entry : EntryWidgets)
-	{
-		if (Entry != nullptr)
-		{
-			Entry->SetIsEnabled(!bInBusy);
-		}
-	}
+		if (Entry) Entry->SetIsEnabled(bListEnabled);
+	RefreshPasswordPromptControls();
 }
 
 void URoomListWidgetBase::SetStatus(const FString& Text, bool bIsError)
@@ -665,4 +740,92 @@ void URoomListWidgetBase::SetStatus(const FString& Text, bool bIsError)
 	StatusText->SetColorAndOpacity(FSlateColor(bIsError
 		? FLinearColor(1.f, 0.45f, 0.45f)
 		: FLinearColor(0.75f, 0.75f, 0.75f)));
+}
+
+
+// [PJOIN-001] 비밀번호를 가리거나 표시하고 눈 아이콘을 갱신한다.
+void URoomListWidgetBase::HandleJoinPasswordVisibilityClicked()
+{
+	if (bBusy || !bPasswordPromptOpen || !JoinPasswordBox) return;
+	bJoinPasswordVisible = !bJoinPasswordVisible;
+	RefreshPasswordPromptControls();
+}
+
+// [PJOIN-002] 숫자 0~4자리만 편집하고 잘못된 편집을 되돌린다.
+void URoomListWidgetBase::HandleJoinPasswordTextChanged(const FText& Text)
+{
+	if (bRestoringJoinPassword || !JoinPasswordBox) return;
+	const FString Value = Text.ToString();
+	bool bValid = Value.Len() <= 4;
+	for (TCHAR Ch : Value) bValid = bValid && Ch >= TEXT('0') && Ch <= TEXT('9');
+	if (bValid)
+	{
+		LastValidJoinPassword = Value;
+		SetPasswordPromptStatus(FString(), false);
+	}
+	else
+	{
+		TGuardValue<bool> Guard(bRestoringJoinPassword, true);
+		JoinPasswordBox->SetText(FText::FromString(LastValidJoinPassword));
+		SetPasswordPromptStatus(TEXT("숫자 4자리까지 입력할 수 있습니다."), true);
+	}
+	RefreshPasswordPromptControls();
+}
+
+// [PJOIN-003] Enter 입력을 기존 비밀번호 참여 확인으로 전달한다.
+void URoomListWidgetBase::HandleJoinPasswordCommitted(const FText& Text, ETextCommit::Type Method)
+{
+	if (Method == ETextCommit::OnEnter) ConfirmJoinWithPassword();
+}
+
+
+// [PJOIN-004] 팝업 입력·버튼·눈 아이콘의 상태를 동기화한다.
+void URoomListWidgetBase::RefreshPasswordPromptControls()
+{
+	const bool bEditable = bPasswordPromptOpen && !bBusy;
+	if (JoinPasswordBox)
+	{
+		JoinPasswordBox->SetIsEnabled(bEditable);
+		JoinPasswordBox->SetIsPassword(!bJoinPasswordVisible);
+	}
+	if (JoinPasswordVisibilityButton)
+	{
+		JoinPasswordVisibilityButton->SetIsEnabled(bEditable);
+		JoinPasswordVisibilityButton->SetToolTipText(FText::FromString(
+			bJoinPasswordVisible ? TEXT("비밀번호 숨기기") : TEXT("비밀번호 보기")));
+	}
+	if (JoinPasswordHiddenMark)
+		JoinPasswordHiddenMark->SetVisibility(bJoinPasswordVisible
+			? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+	if (JoinConfirmButton)
+		JoinConfirmButton->SetIsEnabled(bEditable && JoinPasswordBox &&
+			UServerSubsystem::IsValidRoomPassword(JoinPasswordBox->GetText().ToString()));
+	if (JoinCancelButton) JoinCancelButton->SetIsEnabled(bEditable);
+	if (JoinCloseButton) JoinCloseButton->SetIsEnabled(bEditable);
+}
+
+
+// [PJOIN-005] 팝업 내부에 오류 또는 진행 안내를 표시한다.
+void URoomListWidgetBase::SetPasswordPromptStatus(const FString& Text, bool bIsError)
+{
+	if (!PasswordPromptStatusText)
+	{
+		SetStatus(Text, bIsError); // 기본 레이아웃 호환
+		return;
+	}
+	PasswordPromptStatusText->SetText(FText::FromString(Text));
+	PasswordPromptStatusText->SetColorAndOpacity(FSlateColor(bIsError
+		? FLinearColor(1.f, 0.45f, 0.45f) : FLinearColor(0.75f, 0.85f, 1.f)));
+}
+
+
+// [PJOIN-006] 팝업에서 Escape를 처리하고 다른 키는 기본 입력으로 전달한다.
+FReply URoomListWidgetBase::NativeOnPreviewKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent)
+{
+	if (bPasswordPromptOpen && KeyEvent.GetKey() == EKeys::Escape)
+	{
+		CancelPasswordPrompt(); // 요청 중에는 이 함수의 busy 가드가 닫힘을 막는다.
+		return FReply::Handled();
+	}
+	return Super::NativeOnPreviewKeyDown(Geometry, KeyEvent);
 }

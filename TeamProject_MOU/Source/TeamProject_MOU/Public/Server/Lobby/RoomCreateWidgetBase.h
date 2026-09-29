@@ -36,6 +36,7 @@
 #include "Server/Net/NatPortMappingSubsystem.h"   // EMOUNatResultBP
 #include "RoomCreateWidgetBase.generated.h"
 
+class UCheckBox;
 class UButton;
 class UEditableTextBox;
 class UTextBlock;
@@ -75,7 +76,9 @@ public:
 	URoomCreateWidgetBase(const FObjectInitializer& ObjectInitializer);
 
 	virtual void NativeOnInitialized() override;
+	// [RCUI-010] 페이지가 열릴 때 입력 이벤트를 연결하고 비밀번호를 가린다.
 	virtual void NativeConstruct() override;
+	// [RCUI-011] 페이지 구독을 해제하고 비밀번호를 다시 가린다.
 	virtual void NativeDestruct() override;
 
 	// --- 설정 -------------------------------------------------------------
@@ -124,6 +127,7 @@ public:
 
 	/** 입력값을 검사하고 서버에 방 생성을 요청한다. */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
+	// [RCUI-013] 제목과 공개·비밀번호방 입력을 검증한 뒤 기존 생성 흐름으로 전달한다.
 	void TryCreateRoom();
 
 	/** 취소. 위젯을 닫고 소유자에게 알린다. */
@@ -161,6 +165,16 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
 	TObjectPtr<UEditableTextBox> RoomPasswordBox;
 
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="MOU|Lobby")
+	TObjectPtr<UCheckBox> PasswordRoomCheckBox;
+
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="MOU|Lobby")
+	TObjectPtr<UButton> TogglePasswordVisibilityButton;
+
+	/** 비밀번호를 가릴 때 눈 아이콘 위에 표시하는 사선. */
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
+	TObjectPtr<UWidget> PasswordHiddenMark;
+
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
 	TObjectPtr<UButton> CreateButton;
 
@@ -171,6 +185,26 @@ protected:
 	TObjectPtr<UTextBlock> MessageText;
 
 private:
+	bool bPasswordVisible = false;
+	bool bRestoringPassword = false;
+	FString LastValidPassword;
+
+	// [RCUI-001] 체크 해제 시 비밀번호를 지우고 입력 상태를 갱신한다.
+	UFUNCTION()
+	void HandlePasswordRoomChanged(bool bChecked);
+
+	// [RCUI-002] 비밀번호를 가림 또는 숫자 표시로 전환한다.
+	UFUNCTION()
+	void HandlePasswordVisibilityClicked();
+
+	// [RCUI-003] 숫자 0~4자리 편집만 허용하고 잘못된 편집은 되돌린다.
+	UFUNCTION()
+	void HandlePasswordTextChanged(const FText& Text);
+
+	// [RCUI-004] 체크 상태와 요청 대기에 맞춰 입력·보기 상태 및 눈 아이콘을 적용한다.
+	void RefreshPasswordControls();
+
+	friend class FLobbyUIRegressionTest;
 	// --- 흐름 관리자 / UI 델리게이트 수신부 -------------------------------
 
 	void HandleRoomCreated(bool bSuccess, int32 RoomId, EMOURoomResultBP Result, const FString& RoomPassword);
@@ -191,6 +225,7 @@ private:
 
 	// --- 내부 -------------------------------------------------------------
 
+	// [RCUI-012] WBP가 없을 때 체크·보기 버튼을 포함한 기본 폼을 만든다.
 	void BuildDefaultLayout();
 
 	/**
@@ -207,6 +242,7 @@ private:
 	class UNatPortMappingSubsystem* GetNatSubsystem() const;
 
 	/** 응답을 기다리는 동안 버튼을 잠근다. 중복 요청을 막는다. */
+	// [RCUI-014] 요청 대기에 맞춰 폼 입력과 버튼을 함께 잠그거나 해제한다.
 	void SetBusy(bool bBusy);
 
 	UServerSubsystem* GetServerSubsystem() const;

@@ -1,4 +1,4 @@
-// MOU 로비 - EOS 백엔드 (뼈대) 구현.
+﻿// MOU 로비 - EOS 백엔드 (뼈대) 구현.
 //
 // 지금은 "아직 안 된다" 를 정확히 알리는 것이 이 파일이 하는 일 전부다.
 // 붙이는 순서와 각 함수가 무엇으로 바뀌는지는 EOSLobbyBackend.h 주석에 있다.
@@ -50,6 +50,12 @@ void FEOSLobbyBackend::LogNotImplemented(const TCHAR* What) const
 void FEOSLobbyBackend::SendLogin(const FString&, const FString&, int32)
 {
 	LogNotImplemented(TEXT("로그인 (EOS_Connect_Login)"));
+}
+
+// [AUTHUI-005] 아이디 중복 조회의 송신 가능 여부를 반환한다.
+bool FEOSLobbyBackend::SendCheckLoginId(uint32 RequestId, const FString& LoginId)
+{
+    return false;
 }
 
 void FEOSLobbyBackend::SendRegister(const FString&, const FString&, const FString&)

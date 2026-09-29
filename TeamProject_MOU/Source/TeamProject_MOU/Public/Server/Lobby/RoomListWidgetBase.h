@@ -45,6 +45,7 @@
 #include "Engine/TimerHandle.h"
 #include "RoomListWidgetBase.generated.h"
 
+class UImage;
 class UButton;
 class UEditableTextBox;
 class UPanelWidget;
@@ -68,6 +69,7 @@ DECLARE_DELEGATE_TwoParams(FOnRoomJoinApprovedNative, const FMOURoomJoinResult& 
 
 /** 사용자가 목록을 닫았을 때. */
 DECLARE_DELEGATE(FOnRoomListClosed);
+DECLARE_DELEGATE_OneParam(FOnRoomPasswordPromptChanged, bool);
 
 /**
  * 방 목록의 한 줄.
@@ -89,11 +91,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
 	void SetRoomInfo(const FMOURoomInfo& InRoomInfo);
 
+	// [RLUI-001] 목록의 입장 정책을 해당 행에 전달한다.
+	void SetPasswordJoinAllowed(bool bAllowed);
+
 	UFUNCTION(BlueprintPure, Category = "MOU|Lobby")
 	FMOURoomInfo GetRoomInfo() const { return RoomInfo; }
 
 	/** 이 방에 들어가겠다고 목록 위젯에 알린다. WBP 가 자체 버튼을 쓸 때 호출하면 된다. */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
+	// [RLUI-011] 보류된 비밀번호방을 차단하고 공개방 선택을 목록에 전달한다.
 	void RequestJoin();
 
 	/** WBP 가 값을 직접 그리고 싶을 때의 훅. C++ 기본 레이아웃과 함께 써도 된다. */
@@ -118,18 +124,24 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
 	TObjectPtr<UTextBlock> EntryLockText;
 
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="MOU|Lobby")
+	TObjectPtr<UImage> EntryLockImage;
+
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
 	TObjectPtr<UButton> EntryJoinButton;
 
 private:
+	friend class FLobbyUIRegressionTest;
 	UFUNCTION()
 	void HandleJoinClicked();
 
 	void BuildDefaultLayout();
+	// [RLUI-010] 방 정보와 잠금 아이콘을 표시하고 참여 정책을 버튼에 적용한다.
 	void RefreshTexts();
 
 	UPROPERTY()
 	FMOURoomInfo RoomInfo;
+	bool bPasswordJoinAllowed = true;
 };
 
 /**
@@ -150,7 +162,9 @@ public:
 	URoomListWidgetBase(const FObjectInitializer& ObjectInitializer);
 
 	virtual void NativeOnInitialized() override;
+	// [PJOIN-010] 비밀번호 팝업의 NativeConstruct 처리와 표시 상태를 동기화한다.
 	virtual void NativeConstruct() override;
+	// [PJOIN-011] 비밀번호 팝업의 NativeDestruct 처리와 표시 상태를 동기화한다.
 	virtual void NativeDestruct() override;
 
 	// --- 설정 -------------------------------------------------------------
@@ -158,6 +172,10 @@ public:
 	/** 목록의 한 줄로 쓸 위젯. 비워두면 URoomListEntryWidget 의 C++ 기본 레이아웃을 쓴다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MOU|Lobby")
 	TSubclassOf<URoomListEntryWidget> EntryWidgetClass;
+
+	// false이면 잠금방 참여를 보류한다. 비밀번호 팝업이 연결된 로비는 true를 사용한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MOU|Lobby")
+	bool bAllowPasswordRoomJoin = true;
 
 	/**
 	 * 자동 새로고침 간격(초). 0 이하면 새로고침 버튼으로만 갱신한다.
@@ -183,6 +201,7 @@ public:
 
 	/** 서버에 방 목록을 다시 요청한다. */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
+	// [PJOIN-013] 비밀번호 팝업의 RefreshRoomList 처리와 표시 상태를 동기화한다.
 	void RefreshRoomList();
 
 	/**
@@ -190,18 +209,22 @@ public:
 	 * 비밀번호 방이면 곧바로 보내지 않고 비밀번호 입력창을 먼저 연다.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
+	// [RLUI-021] 목록의 잠금방 정책을 검사하고 허용된 방의 참여를 시작한다.
 	void BeginJoin(int32 RoomId);
 
 	/** 입력창의 비밀번호로 참여를 확정한다. */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
+	// [RLUI-022] 잠금방 참여가 허용된 경우에만 비밀번호 확인 요청을 진행한다.
 	void ConfirmJoinWithPassword();
 
 	/** 비밀번호 입력을 취소하고 목록으로 돌아간다. */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
+	// [PJOIN-016] 비밀번호 팝업의 CancelPasswordPrompt 처리와 표시 상태를 동기화한다.
 	void CancelPasswordPrompt();
 
 	/** 목록을 닫는다. */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
+	// [PJOIN-017] 비밀번호 팝업의 CloseList 처리와 표시 상태를 동기화한다.
 	void CloseList();
 
 	/** 사용자에게 보여줄 안내 문구를 바꾼다. */
@@ -221,12 +244,16 @@ public:
 
 	FOnRoomJoinApprovedNative OnRoomJoinApprovedNative;
 	FOnRoomListClosed         OnRoomListClosed;
+	FOnRoomPasswordPromptChanged OnPasswordPromptChanged;
 
 protected:
 	// --- 위젯 바인딩 (WBP 에 같은 이름이 있으면 자동 연결) -------------------
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
 	TObjectPtr<UTextBlock> TitleText;
+
+	// [PJOIN-006] 팝업에서 Escape를 처리하고 다른 키는 기본 입력으로 전달한다.
+	virtual FReply NativeOnPreviewKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent) override;
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
 	TObjectPtr<UScrollBox> RoomListScrollBox;
@@ -257,11 +284,46 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
 	TObjectPtr<UButton> JoinCancelButton;
 
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="MOU|Lobby")
+	TObjectPtr<UTextBlock> PasswordRoomNameText;
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="MOU|Lobby")
+	TObjectPtr<UTextBlock> PasswordPromptStatusText;
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="MOU|Lobby")
+	TObjectPtr<UButton> JoinCloseButton;
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="MOU|Lobby")
+	TObjectPtr<UButton> JoinPasswordVisibilityButton;
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="MOU|Lobby")
+	TObjectPtr<UWidget> JoinPasswordHiddenMark;
+
 private:
+
+	bool bPasswordPromptOpen = false;
+	bool bJoinPasswordVisible = false;
+	bool bRestoringJoinPassword = false;
+	FString LastValidJoinPassword;
+	int32 ActiveJoinRoomId = 0;
+
+	// [PJOIN-001] 비밀번호를 가리거나 표시하고 눈 아이콘을 갱신한다.
+	UFUNCTION()
+	void HandleJoinPasswordVisibilityClicked();
+	// [PJOIN-002] 숫자 0~4자리만 편집하고 잘못된 편집을 되돌린다.
+	UFUNCTION()
+	void HandleJoinPasswordTextChanged(const FText& Text);
+	// [PJOIN-003] Enter 입력을 기존 비밀번호 참여 확인으로 전달한다.
+	UFUNCTION()
+	void HandleJoinPasswordCommitted(const FText& Text, ETextCommit::Type Method);
+	// [PJOIN-004] 팝업 입력·버튼·눈 아이콘의 상태를 동기화한다.
+	void RefreshPasswordPromptControls();
+	// [PJOIN-005] 팝업 내부에 오류 또는 진행 안내를 표시한다.
+	void SetPasswordPromptStatus(const FString& Text, bool bIsError);
+
+	friend class FLobbyUIRegressionTest;
 	// --- 흐름 관리자 / UI 델리게이트 수신부 -------------------------------
 
+	// [PJOIN-014] 비밀번호 팝업의 HandleRoomListReceived 처리와 표시 상태를 동기화한다.
 	void HandleRoomListReceived(const TArray<FMOURoomInfo>& Rooms);
 
+	// [PJOIN-015] 비밀번호 팝업의 HandleRoomJoinCompleted 처리와 표시 상태를 동기화한다.
 	void HandleRoomJoinCompleted(const FMOURoomJoinResult& Result, const FString& RoomPassword);
 
 	UFUNCTION()
@@ -278,20 +340,25 @@ private:
 
 	// --- 내부 -------------------------------------------------------------
 
+	// [PJOIN-012] 비밀번호 팝업의 BuildDefaultLayout 처리와 표시 상태를 동기화한다.
 	void BuildDefaultLayout();
 
 	/** 받은 목록으로 줄을 다시 만든다. */
+	// [RLUI-020] 목록 정책과 요청 대기 상태를 적용하여 방 행들을 다시 만든다.
 	void RebuildEntries(const TArray<FMOURoomInfo>& Rooms);
 
 	/** 줄에서 참여 버튼을 눌렀을 때. FOnRoomEntryJoinClicked 로 바인딩한다. */
 	void HandleEntryJoinClicked(int32 RoomId);
 
 	/** 비밀번호 없이 곧바로 참여 요청을 보낸다. */
+	// [RLUI-023] 최종 입장 정책을 검사한 뒤 기존 흐름 관리자에 참여를 요청한다.
 	void SendJoinRequest(int32 RoomId, const FString& RoomPassword);
 
+	// [PJOIN-018] 비밀번호 팝업의 ShowPasswordPrompt 처리와 표시 상태를 동기화한다.
 	void ShowPasswordPrompt(bool bShow);
 
 	/** 응답을 기다리는 동안 버튼을 잠근다. */
+	// [PJOIN-019] 비밀번호 팝업의 SetBusy 처리와 표시 상태를 동기화한다.
 	void SetBusy(bool bBusy);
 
 	UServerSubsystem* GetServerSubsystem() const;
