@@ -140,7 +140,7 @@ public:
 	// =========================================================
 	// 실제 발사할 때도 이 값을 그대로 사용할 예정
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cannon|Launch")
-	float LaunchSpeed = 1600.0f;
+	float LaunchSpeed = 2400.0f;
 
 	// 궤적을 몇 초까지 계산할지
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cannon|Trajectory")
@@ -214,6 +214,10 @@ public:
 	// 실제 서버 발사
 	UFUNCTION(Server, Reliable)
 	void ServerFireCannon();
+
+	// 모든 플레이어에게 발사 연출 재생
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPlayFireEffects();
 
 protected:
 	// =========================================================
@@ -310,4 +314,8 @@ public:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Cannon|Event")
 	void OnOperatorChanged(AMainCharacter* NewOperator);
+
+	// BP_Cannon에서 사운드 / Niagara 처리
+	UFUNCTION(BlueprintImplementableEvent, Category = "Cannon|Event")
+	void OnCannonFired();
 };

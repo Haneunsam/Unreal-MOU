@@ -546,6 +546,11 @@ void ACannon::ServerFireCannon_Implementation()
 	FireCannon();
 }
 
+void ACannon::MulticastPlayFireEffects_Implementation()
+{
+	OnCannonFired();
+}
+
 void ACannon::HandleFireInput()
 {
 	if (!Operator)
@@ -657,6 +662,9 @@ void ACannon::FireCannon()
 	// 실제 발사
 	// =========================================================
 	FiredPassenger->LaunchCharacter(LaunchVelocity, true, true);// XYZ 기존 속도 무시
+
+	// 모든 플레이어에게 대포 발사 연출 재생
+	MulticastPlayFireEffects();
 
 	// Passenger 변경 즉시 동기화
 	ForceNetUpdate();

@@ -1,0 +1,74 @@
+{
+  "checks": [
+    {
+      "name": "Guest resolves own slot 1",
+      "pass": true,
+      "detail": "1"
+    },
+    {
+      "name": "Preview image uses isolated render target",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Migrated color picker opens",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Color picker edits only current draft",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "No room snapshot changes before confirmation",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Picker cancel restores original body color",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Picker confirm retains draft only",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Server snapshot updated guest on client 0",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Host appearance preserved on client 0",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Server snapshot updated guest on client 1",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Host appearance preserved on client 1",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Confirmation closes customization page",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Reopen restores approved appearance",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Cancel closes page without server changes",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

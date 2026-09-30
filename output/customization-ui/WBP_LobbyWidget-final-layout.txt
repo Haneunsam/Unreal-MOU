@@ -1,0 +1,3 @@
+[0] Overlay Overlay_0
+  [1] WidgetSwitcher LobbyScreenStack  Slot:/Script/UMG.OverlaySlot'/Game/02_JSY/MainLobby/WBP_LobbyWidget.WBP_LobbyWidget:WidgetTree.Overlay_0.OverlaySlot_0'  slot:(HorizontalAlignment:HAlign_Fill, VerticalAlignment:VAlign_Fill)
+  [2] WBP_LobbyMessenger_C LobbyMessenger  Slot:/Script/UMG.OverlaySlot'/Game/02_JSY/MainLobby/WBP_LobbyWidget.WBP_LobbyWidget:WidgetTree.Overlay_0.OverlaySlot_1'  slot:(HorizontalAlignment:HAlign_Fill, VerticalAlignment:VAlign_Fill)

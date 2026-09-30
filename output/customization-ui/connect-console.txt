@@ -1,0 +1,255 @@
+Using bundled DotNet SDK version: 10.0 win-x64
+Running UnrealBuildTool: dotnet "..\..\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" -Mode=ValidatePlatforms -OutputSDKs  -AllPlatforms  -project="C:/Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/TeamProject_MOU.uproject" -log="C:/Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/Logs/AutoSDKInfo.txt" -verbose -timestamps
+Log file: C:\Users\user1\Documents\GitHub\Unreal-MOU\TeamProject_MOU\Saved\Logs\AutoSDKInfo.txt
+##PlatformValidate: Win64 VALID 10.0.22621.0
+##PlatformValidate: Mac INVALID 26.1.1
+##PlatformValidate: IOS INVALID 26.1.1
+##PlatformValidate: Android INVALID r27c
+##PlatformValidate: Linux INVALID v26_clang-20.1.8-rockylinux8
+##PlatformValidate: LinuxArm64 INVALID <UNKNOWN>
+##PlatformValidate: TVOS INVALID 26.1.1
+##PlatformValidate: VisionOS INVALID <UNKNOWN>
+Unable to find required SDK version 'MainVersion' for platform LinuxArm64. Check your SDK.json files
+Unable to find required SDK version 'MainVersion' for platform VisionOS. Check your SDK.json files
+Trace written to file C:\Users\user1\AppData\Local\UnrealBuildTool\Trace.uba with size 313b
+[2026.09.30-03.30.24:581][  0]LogInit: Display: Running engine for game: TeamProject_MOU
+[2026.09.30-03.30.24:581][  0]LogCore: Display: Requested channels: 'cpu,gpu,frame,log,bookmark,screenshot,region'
+[2026.09.30-03.30.24:581][  0]LogTrace: Display: Control listening on port 35237
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : platform="Windows"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : config="Development"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : buildversion="++UE5+Release-5.8-CL-56057345"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : engineversion="5.8.1-56057345+++UE5+Release-5.8"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : enginereleaseversion="5.8.1"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : os="Windows 11 (25H2) [10.0.26200.9457] "
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : cpu="GenuineIntel|12th Gen Intel(R) Core(TM) i5-12400F"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : pgoenabled="0"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : pgoprofilingenabled="0"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : ltoenabled="0"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : asan="0"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : mergedmodules="0"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : compacttset="0"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : commandline="" C:/Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/TeamProject_MOU.uproject -run=pythonscript -EnablePlugins=PythonScriptPlugin -script=C:/Users/user1/Documents/GitHub/Unreal-MOU/output/customization-ui/connect.py -unattended -nullrhi -nosplash -abslog=C:/Users/user1/Documents/GitHub/Unreal-MOU/output/customization-ui/connect.log""
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : loginid="0fd9ca9b45cc8975de1f5d822f4fcf9a"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : llm="0"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : zenstreaming="0"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : systemresolution.resx="1280"
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : systemresolution.resy="720"
+[2026.09.30-03.30.24:581][  0]LogAudio: Display: Audio Device Manager not initializing due to all audio being disabled. If this is not intentional, please check command line arguments for "-nosound".
+[2026.09.30-03.30.24:581][  0]LogConfig: Display: Loading Mac ini files took 0.06 seconds
+[2026.09.30-03.30.24:581][  0]LogConfig: Display: Loading VulkanPC ini files took 0.06 seconds
+[2026.09.30-03.30.24:581][  0]LogConfig: Display: Loading IOS ini files took 0.06 seconds
+[2026.09.30-03.30.24:581][  0]LogConfig: Display: Loading Android ini files took 0.06 seconds
+[2026.09.30-03.30.24:581][  0]LogConfig: Display: Loading Unix ini files took 0.07 seconds
+[2026.09.30-03.30.24:581][  0]LogConfig: Display: Loading TVOS ini files took 0.07 seconds
+[2026.09.30-03.30.24:581][  0]LogConfig: Display: Loading Windows ini files took 0.07 seconds
+[2026.09.30-03.30.24:581][  0]LogConfig: Display: Loading Linux ini files took 0.07 seconds
+[2026.09.30-03.30.24:581][  0]LogConfig: Display: Loading VisionOS ini files took 0.04 seconds
+[2026.09.30-03.30.24:581][  0]RenderDocPlugin: Display: RenderDoc plugin will not be loaded. Use '-AttachRenderDoc' on the cmd line or enable 'renderdoc.AutoAttach' in the plugin settings.
+[2026.09.30-03.30.24:581][  0]LogAnalytics: Display: Provider StudioTelemetry.Provider.Log is disabled for this application
+[2026.09.30-03.30.24:581][  0]LogAnalytics: Display: Provider StudioTelemetry.Provider.CSV is disabled for this application
+[2026.09.30-03.30.24:581][  0]LogAnalytics: Display: Provider StudioTelemetry.Provider.Horde is disabled for this application
+[2026.09.30-03.30.24:581][  0]LogAnalytics: Display: Provider StudioTelemetry.Provider.Log is disabled for this application
+[2026.09.30-03.30.24:581][  0]LogAnalytics: Display: Provider StudioTelemetry.Provider.CSV is disabled for this application
+[2026.09.30-03.30.24:581][  0]LogAnalytics: Display: Provider StudioTelemetry.Provider.Horde is disabled for this application
+[2026.09.30-03.30.24:581][  0]LogAsyncCompilation: Display: MemorySharingInfo: UsedMemory=312MiB, MaxMemoryAvailable=38795MiB
+[2026.09.30-03.30.24:581][  0]LogStreaming: Display: AsyncLoading2 - Created: Async Loading Thread: false, Async Post Load: false, Multithreaded: false
+[2026.09.30-03.30.24:581][  0]LogHAL: Display: Platform has ~ 32 GB [34183598080 / 34359738368 / 32], which maps to Largest [LargestMinGB=32, LargerMinGB=12, DefaultMinGB=8, SmallerMinGB=6, SmallestMinGB=0)
+[2026.09.30-03.30.24:581][  0]LogCsvProfiler: Display: Metadata set : extradevelopmentmemorymb="0"
+[2026.09.30-03.30.24:581][  0]LogObj: Display: Attempting to load config data for Default__DownlinkBandwidthManagerConfig before the Class has been constructed/registered/linked (likely during module loading or early startup). This will result in the load silently failing and should be fixed.
+[2026.09.30-03.30.25:255][  0]LogObj: Display: Attempting to load config data for Default__SlateThemeManager before the Class has been constructed/registered/linked (likely during module loading or early startup). This will result in the load silently failing and should be fixed.
+[2026.09.30-03.30.25:427][  0]LogCsvProfiler: Display: Metadata set : verbatimrhiname="Null"
+[2026.09.30-03.30.25:427][  0]LogCsvProfiler: Display: Metadata set : rhiname="Null"
+[2026.09.30-03.30.25:427][  0]LogCsvProfiler: Display: Metadata set : rhifeaturelevel="SM6"
+[2026.09.30-03.30.25:427][  0]LogCsvProfiler: Display: Metadata set : shaderplatform="PCD3D_SM6"
+[2026.09.30-03.30.25:427][  0]LogCsvProfiler: Display: Metadata set : gpu=""
+[2026.09.30-03.30.25:427][  0]LogCsvProfiler: Display: Metadata set : gpudriver=""
+[2026.09.30-03.30.25:434][  0]LogTextureFormatASTC: Display: ASTCEnc version 5.0.1 library loaded
+[2026.09.30-03.30.25:434][  0]LogTextureFormatManager: Display: Loaded Base TextureFormat: TextureFormatASTC
+[2026.09.30-03.30.25:434][  0]LogTextureFormatManager: Display: Loaded Base TextureFormat: TextureFormatDXT
+[2026.09.30-03.30.25:434][  0]LogTextureFormatManager: Display: Loaded Base TextureFormat: TextureFormatETC2
+[2026.09.30-03.30.25:434][  0]LogTextureFormatManager: Display: Loaded Base TextureFormat: TextureFormatIntelISPCTexComp
+[2026.09.30-03.30.25:434][  0]LogTextureFormatOodle: Display: Oodle Texture TFO init; latest sdk version = 2.9.16
+[2026.09.30-03.30.25:434][  0]LogTextureFormatOodle: Display: Oodle Texture loading DLL: oo2tex_win64_2.9.16.dll
+[2026.09.30-03.30.25:434][  0]LogTextureFormatManager: Display: Loaded Base TextureFormat: TextureFormatOodle
+[2026.09.30-03.30.25:434][  0]LogTextureFormatManager: Display: Loaded Base TextureFormat: TextureFormatUncompressed
+[2026.09.30-03.30.25:478][  0]LogTargetPlatformManager: Display: Failed to SetupSDK for platform 'Android'
+[2026.09.30-03.30.25:552][  0]LogTargetPlatformManager: Display: Failed to SetupSDK for platform 'IOS'
+[2026.09.30-03.30.25:607][  0]LogTargetPlatformManager: Display: Failed to SetupSDK for platform 'Linux'
+[2026.09.30-03.30.25:657][  0]LogTargetPlatformManager: Display: Failed to SetupSDK for platform 'Mac'
+[2026.09.30-03.30.25:662][  0]LogTargetPlatformManager: Display: Failed to SetupSDK for platform 'TVOS'
+[2026.09.30-03.30.25:713][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Windows'
+[2026.09.30-03.30.25:713][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'WindowsEditor'
+[2026.09.30-03.30.25:713][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'WindowsServer'
+[2026.09.30-03.30.25:713][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'WindowsClient'
+[2026.09.30-03.30.25:713][  0]LogTargetPlatformManager: Display: Building Assets For WindowsEditor
+[2026.09.30-03.30.25:728][  0]LogAudioDebug: Display: Lib vorbis DLL was dynamically loaded.
+[2026.09.30-03.30.26:080][  0]LogDerivedDataCache: Display: ../../../Engine/DerivedDataCache/Compressed.ddp: Opened pak cache for reading. (1670 MiB)
+[2026.09.30-03.30.26:082][  0]LogZenServiceInstance: Display: Launching zen utility 'C:/Program Files/Epic Games/UE_5.8/Engine/Binaries/Win64/zen.exe service status'.
+[2026.09.30-03.30.26:391][  0]LogZenServiceInstance: Display: Writing plugin version info to 'C:/Users/user1/AppData/Local/UnrealEngine/Common/Zen/Install/zen_plugin_versions.json'
+[2026.09.30-03.30.26:396][  0]LogZenServiceInstance: Display: Read zen version cache file from 'C:/Users/user1/AppData/Local/UnrealEngine/5.8/Saved/Zen/zen.version', version: '5.8.13-202605190912-windows-x64-release-094f62c2'
+[2026.09.30-03.30.26:398][  0]LogZenServiceInstance: Display: Read zen version cache file from 'C:/Users/user1/AppData/Local/UnrealEngine/Common/Zen/Install/zen.version', version: '5.8.13-202605190912-windows-x64-release-094f62c2'
+[2026.09.30-03.30.26:398][  0]LogZenServiceInstance: Display: Installed service at 'C:/Users/user1/AppData/Local/UnrealEngine/Common/Zen/Install/zenserver.exe' is up to date
+[2026.09.30-03.30.27:212][  0]LogZenServiceInstance: Display: Unreal Zen Storage Server HTTP service at http://[::1]:8558 status: OK!.
+[2026.09.30-03.30.27:214][  0]LogDerivedDataCache: Display: ZenLocal: Using ZenServer HTTP service at [::1] with namespace ue.ddc. Status: OK!.
+[2026.09.30-03.30.27:226][  0]LogDerivedDataCache: Display: C:/Users/user1/AppData/Local/UnrealEngine/Common/DerivedDataCache: Performance: Latency=0.02ms. RandomReadSpeed=601.31MBs, RandomWriteSpeed=97.97MBs. Assigned SpeedClass 'Local'
+[2026.09.30-03.30.27:230][  0]LogUbaHorde: Display: UBA/Horde Configuration [Uba.Provider.Horde]: Not Enabled
+[2026.09.30-03.30.27:230][  0]LogShaderCompilers: Display: No distributed shader compiler controller found
+[2026.09.30-03.30.27:230][  0]LogShaderCompilers: Display: Using 9 local workers for shader compilation
+[2026.09.30-03.30.27:239][  0]LogShaderCompilers: Display: Compiling shader autogen file: ../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Intermediate/ShaderAutogen/PCD3D_SM6/AutogenShaderHeaders.ush
+[2026.09.30-03.30.27:239][  0]LogShaderCompilers: Display: Autogen file is unchanged, skipping write.
+[2026.09.30-03.30.27:987][  0]LogEditorDomain: Display: EditorDomain is Disabled
+[2026.09.30-03.30.28:345][  0]LogDeviceProfileManager: Display: Deviceprofile LinuxArm64Editor not found.
+[2026.09.30-03.30.28:345][  0]LogDeviceProfileManager: Display: Deviceprofile LinuxArm64 not found.
+[2026.09.30-03.30.28:409][  0]LogCsvProfiler: Display: Metadata set : deviceprofile="WindowsEditor"
+[2026.09.30-03.30.28:413][  0]LogStreaming: Display: FlushAsyncLoading(1): 1 QueuedPackages, 0 AsyncPackages
+[2026.09.30-03.30.28:448][  0]LogTextureEncodingSettings: Display: Texture Encode Speed: Final (cook).
+[2026.09.30-03.30.28:448][  0]LogTextureEncodingSettings: Display: Oodle Texture Encode Speed settings: Fast: RDO Off Lambda=0, Effort=Normal Final: RDO Off Lambda=0, Effort=Normal
+[2026.09.30-03.30.28:448][  0]LogTextureEncodingSettings: Display: Shared linear texture encoding: Disabled
+[2026.09.30-03.30.28:475][  0]LogMeshReduction: Display: Using QuadricMeshReduction for automatic static mesh reduction
+[2026.09.30-03.30.28:475][  0]LogMeshReduction: Display: Using SkeletalMeshReduction for automatic skeletal mesh reduction
+[2026.09.30-03.30.28:475][  0]LogMeshReduction: Display: Using ProxyLODMeshReduction for automatic mesh merging
+[2026.09.30-03.30.28:475][  0]LogMeshReduction: Display: No distributed automatic mesh merging module available
+[2026.09.30-03.30.28:638][  0]LogShaderCompilers: Display: Compiling shader autogen file: ../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Intermediate/ShaderAutogen/PCD3D_SM5/AutogenShaderHeaders.ush
+[2026.09.30-03.30.28:638][  0]LogShaderCompilers: Display: Autogen file is unchanged, skipping write.
+[2026.09.30-03.30.28:638][  0]LogVirtualization: Display: VirtualizationSystem name found in ini file: None
+[2026.09.30-03.30.28:638][  0]LogVirtualization: Display: FNullVirtualizationSystem mounted, virtualization will be disabled
+[2026.09.30-03.30.28:717][  0]LogWorldPartition: Display: FWorldPartitionClassDescRegistry::Initialize started...
+[2026.09.30-03.30.28:720][  0]LogWorldPartition: Display: FWorldPartitionClassDescRegistry::Initialize took 2.653 ms
+[2026.09.30-03.30.29:251][  0]LogMetaSound: Display: MetaSound Page Target Initialized to 'Default'
+[2026.09.30-03.30.29:253][  0]LogAudio: Display: Registering Engine Module Parameter Interfaces...
+[2026.09.30-03.30.30:120][  0]LogAudioCaptureCore: Display: No Audio Capture implementations found. Audio input will be silent.
+[2026.09.30-03.30.30:120][  0]LogAudioCaptureCore: Display: No Audio Capture implementations found. Audio input will be silent.
+[2026.09.30-03.30.30:387][  0]LogToolsetRegistry: Display: Registering Toolset ToolsetRegistry.AgentSkillToolset
+[2026.09.30-03.30.30:473][  0]LogAssetRegistry: Display: CleanupOrphanedCacheFiles (PreLoad): 1 .ref files found, 1 referenced binaries
+[2026.09.30-03.30.30:473][  0]LogAssetRegistry: Display: CleanupOrphanedCacheFiles: 1 total binaries, 1 referenced (kept), 0 old-style pre-migration (kept), 0 orphans deleted, 0 orphans locked (kept)
+[2026.09.30-03.30.30:473][  0]LogAssetRegistry: Display: FindShardedCacheFiles: 1 via .ref, 0 via migration fallback, 1 total
+[2026.09.30-03.30.30:473][  0]LogAssetRegistry: Display: LoadCacheFiles: loading 1 cache files, memory-mapping=enabled
+[2026.09.30-03.30.30:677][  0]LogAssetRegistry: Display: Asset registry cache read as 202.8 MiB from ../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Intermediate/CachedAssetRegistry/CachedAssetRegistry_0_2C62F9E242661586141D6FBA495686A1.bin (memory-mapped=yes)
+[2026.09.30-03.30.30:679][  0]LogAssetRegistry: Display: AssetDataGatherer spent 0.206s loading caches from ../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Intermediate/CachedAssetRegistry.
+[2026.09.30-03.30.30:872][  0]LogGameFeatures: Display: Total built in plugin load time 0.0010s
+[2026.09.30-03.30.30:886][  0]LogCsvProfiler: Display: Metadata set : largeworldcoordinates="1"
+[2026.09.30-03.30.30:951][  0]LogPython: Display: No pip-enabled plugins with python dependencies found, skipping
+[2026.09.30-03.30.31:415][  0]LogCsvProfiler: Display: Metadata set : raytracing="0"
+[2026.09.30-03.30.31:590][  0]LogToolsetRegistry: Display: Registering Toolset AutomationTestToolset.AutomationTestToolset
+[2026.09.30-03.30.31:596][  0]LogToolsetRegistry: Display: Registering Toolset ConfigSettingsToolset.ConfigSettingsToolset
+[2026.09.30-03.30.31:602][  0]LogToolsetRegistry: Display: Registering Toolset DataflowAgent.DataflowAgentToolset
+[2026.09.30-03.30.31:605][  0]LogToolsetRegistry: Display: Registering Toolset DataRegistryToolset.DataRegistryTools
+[2026.09.30-03.30.31:609][  0]LogToolsetRegistry: Display: Registering Toolset EditorToolset.EditorAppToolset
+[2026.09.30-03.30.31:610][  0]LogToolsetRegistry: Display: Registering Toolset EditorToolset.LogsToolset
+[2026.09.30-03.30.31:612][  0]LogToolsetRegistry: Display: Registering Toolset GameFeaturesToolset.GameFeaturesToolset
+[2026.09.30-03.30.31:614][  0]LogToolsetRegistry: Display: Registering Toolset GameplayTagsToolset.GameplayTagsToolset
+[2026.09.30-03.30.31:619][  0]LogToolsetRegistry: Display: Registering Toolset GASToolsets.GameplayCueToolset
+[2026.09.30-03.30.31:619][  0]LogToolsetRegistry: Display: Registering Toolset GASToolsets.AttributeSetToolset
+[2026.09.30-03.30.31:619][  0]LogToolsetRegistry: Display: Registering Toolset GASToolsets.AbilitySystemInspectorToolset
+[2026.09.30-03.30.31:626][  0]LogToolsetRegistry: Display: Registering Toolset NiagaraToolsets.NiagaraToolset_Info
+[2026.09.30-03.30.31:631][  0]LogToolsetRegistry: Display: Registering Toolset NiagaraToolsets.NiagaraToolset_Component
+[2026.09.30-03.30.31:632][  0]LogToolsetRegistry: Display: Registering Toolset NiagaraToolsets.NiagaraToolset_Blueprint
+[2026.09.30-03.30.31:660][  0]LogToolsetRegistry: Display: Registering Toolset NiagaraToolsets.NiagaraToolset_System
+[2026.09.30-03.30.31:660][  0]LogToolsetRegistry: Display: Registering Toolset NiagaraToolsets.NiagaraToolset_Assets
+[2026.09.30-03.30.31:665][  0]LogToolsetRegistry: Display: Registering Toolset PhysicsToolsets.PhysicsAssetToolset
+[2026.09.30-03.30.31:673][  0]LogToolsetRegistry: Display: Registering Toolset PCGToolset.PCGToolset
+[2026.09.30-03.30.31:673][  0]LogToolsetRegistry: Display: Registering Toolset PCGToolset.PCGSpatialToolset
+[2026.09.30-03.30.31:678][  0]LogToolsetRegistry: Display: Registering Toolset PluginToolset.PluginToolset
+[2026.09.30-03.30.31:682][  0]LogToolsetRegistry: Display: Registering Toolset SemanticSearchToolset.SemanticSearchToolset
+[2026.09.30-03.30.31:683][  0]LogToolsetRegistry: Display: Registering Toolset SlateInspectorToolset.SlateInspectorToolset
+[2026.09.30-03.30.31:691][  0]LogToolsetRegistry: Display: Registering Toolset WorldConditionsToolset.WorldConditionTools
+[2026.09.30-03.30.31:699][  0]LogToolsetRegistry: Display: Registering Toolset UMGToolSet.UMGToolSet
+[2026.09.30-03.30.31:730][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/Toolsets/StateTreeToolset/Content/Python/init_unreal.py 실행 중... started...
+[2026.09.30-03.30.31:819][  0]LogToolsetRegistry: Display: Registering Toolset state_tree_toolset.toolsets.state_tree.StateTreeTools
+[2026.09.30-03.30.31:819][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/Toolsets/StateTreeToolset/Content/Python/init_unreal.py 실행 중... took 88.417 ms
+[2026.09.30-03.30.31:819][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/Toolsets/NiagaraToolsets/Content/Python/init_unreal.py 실행 중... started...
+[2026.09.30-03.30.31:825][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/Toolsets/NiagaraToolsets/Content/Python/init_unreal.py 실행 중... took 6.394 ms (total: 94.812 ms)
+[2026.09.30-03.30.31:825][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/Toolsets/EditorToolset/Content/Python/init_unreal.py 실행 중... started...
+[2026.09.30-03.30.31:880][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.actor.ActorTools
+[2026.09.30-03.30.31:881][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.asset.AssetTools
+[2026.09.30-03.30.31:885][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.blueprint.BlueprintTools
+[2026.09.30-03.30.31:885][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.curve_table.CurveTableTools
+[2026.09.30-03.30.31:885][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.data_asset.DataAssetTools
+[2026.09.30-03.30.31:886][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.data_table.DataTableTools
+[2026.09.30-03.30.31:887][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.material.MaterialTools
+[2026.09.30-03.30.31:888][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.material_instance.MaterialInstanceTools
+[2026.09.30-03.30.31:888][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.object.ObjectTools
+[2026.09.30-03.30.31:890][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.primitive.PrimitiveTools
+[2026.09.30-03.30.31:893][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.scene.SceneTools
+[2026.09.30-03.30.31:895][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.skeletal_mesh.SkeletalMeshTools
+[2026.09.30-03.30.31:896][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.static_mesh.StaticMeshTools
+[2026.09.30-03.30.31:897][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.string_table.StringTableTools
+[2026.09.30-03.30.31:897][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.programmatic.ProgrammaticToolset
+[2026.09.30-03.30.31:897][  0]LogToolsetRegistry: Display: Registering Toolset editor_toolset.toolsets.texture.TextureTools
+[2026.09.30-03.30.31:897][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/Toolsets/EditorToolset/Content/Python/init_unreal.py 실행 중... took 71.711 ms (total: 166.523 ms)
+[2026.09.30-03.30.31:898][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/Toolsets/ConversationToolset/Content/Python/init_unreal.py 실행 중... started...
+[2026.09.30-03.30.31:921][  0]LogToolsetRegistry: Display: Registering Toolset conversation_toolset.toolsets.conversation.ConversationTools
+[2026.09.30-03.30.31:921][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/Toolsets/ConversationToolset/Content/Python/init_unreal.py 실행 중... took 23.282 ms (total: 189.806 ms)
+[2026.09.30-03.30.31:922][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/Toolsets/AnimationAssistantToolset/Content/Python/init_unreal.py 실행 중... started...
+[2026.09.30-03.30.32:003][  0]LogToolsetRegistry: Display: Registering Toolset animation_toolset.toolsets.controlrig.ControlRigTools
+[2026.09.30-03.30.32:016][  0]LogToolsetRegistry: Display: Registering Toolset animation_toolset.toolsets.sequencer.SequencerTools
+[2026.09.30-03.30.32:018][  0]LogToolsetRegistry: Display: Registering Toolset animation_toolset.toolsets.keyframing.SequencerKeyframingTools
+[2026.09.30-03.30.32:025][  0]LogToolsetRegistry: Display: Registering Toolset animation_toolset.toolsets.controlrig_sequencer.SequencerControlRigTools
+[2026.09.30-03.30.32:026][  0]LogToolsetRegistry: Display: Registering Toolset animation_toolset.toolsets.outliner.SequencerOutlinerTools
+[2026.09.30-03.30.32:026][  0]LogToolsetRegistry: Display: Registering Toolset animation_toolset.toolsets.conditions.SequencerConditionTools
+[2026.09.30-03.30.32:027][  0]LogToolsetRegistry: Display: Registering Toolset animation_toolset.toolsets.custom_bindings.SequencerCustomBindingTools
+[2026.09.30-03.30.32:028][  0]LogToolsetRegistry: Display: Registering Toolset animation_toolset.toolsets.import_export.SequencerImportExportTools
+[2026.09.30-03.30.32:093][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/Toolsets/AnimationAssistantToolset/Content/Python/init_unreal.py 실행 중... took 170.965 ms (total: 360.772 ms)
+[2026.09.30-03.30.32:093][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/Toolsets/AIModuleToolset/Content/Python/init_unreal.py 실행 중... started...
+[2026.09.30-03.30.32:106][  0]LogToolsetRegistry: Display: Registering Toolset aimodule_toolset.toolsets.behavior_tree.BehaviorTreeTools
+[2026.09.30-03.30.32:106][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/Toolsets/AIModuleToolset/Content/Python/init_unreal.py 실행 중... took 12.859 ms (total: 373.631 ms)
+[2026.09.30-03.30.32:107][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/MovieScene/MovieRenderPipeline/Content/Python/init_unreal.py 실행 중... started...
+[2026.09.30-03.30.32:113][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/MovieScene/MovieRenderPipeline/Content/Python/init_unreal.py 실행 중... took 6.937 ms (total: 380.569 ms)
+[2026.09.30-03.30.32:114][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Animation/IKRig/Content/Python/init_unreal.py 실행 중... started...
+[2026.09.30-03.30.32:130][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Animation/IKRig/Content/Python/init_unreal.py 실행 중... took 15.955 ms (total: 396.524 ms)
+[2026.09.30-03.30.32:130][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Animation/ControlRig/Content/Python/init_unreal.py 실행 중... started...
+[2026.09.30-03.30.32:182][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Animation/ControlRig/Content/Python/init_unreal.py 실행 중... took 51.454 ms (total: 447.978 ms)
+[2026.09.30-03.30.32:182][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/ToolsetRegistry/Content/Python/init_unreal.py 실행 중... started...
+[2026.09.30-03.30.32:183][  0]LogPython: Display: 스타트업 스크립트 C:/Program Files/Epic Games/UE_5.8/Engine/Plugins/Experimental/ToolsetRegistry/Content/Python/init_unreal.py 실행 중... took 832 us (total: 448.810 ms)
+[2026.09.30-03.30.32:183][  0]LogPythonScriptCommandlet: Display: Running Python script: C:/Users/user1/Documents/GitHub/Unreal-MOU/output/customization-ui/connect.py
+[2026.09.30-03.30.32:776][  0]LogAsyncCompilation: Display: 주의: AssetCompile 예상 메모리가 사용 가능한 것보다 크지만 그래도 [SkinnedAsset]|hpp(이,가) 실행되고 있습니다! RequiredMemory = 0.000 MiB + 4608.000 MiB, MemoryLimit = 742.949219 MiB 
+[2026.09.30-03.30.32:776][  0]LogAsyncCompilation: Display: 주의: AssetCompile 예상 메모리가 사용 가능한 것보다 크지만 그래도 [SkinnedAsset]|hpp(이,가) 실행되고 있습니다! RequiredMemory = 0.000 MiB + 4608.000 MiB, MemoryLimit = 742.949219 MiB 
+[2026.09.30-03.30.32:862][  0]LogFileManager: Warning: MoveFile was unable to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp' (Error Code 32), retrying in .5s...
+[2026.09.30-03.30.33:363][  0]LogFileManager: Warning: MoveFile was unable to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp' (Error Code 32), retrying in .5s...
+[2026.09.30-03.30.33:863][  0]LogFileManager: Warning: MoveFile was unable to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp' (Error Code 32), retrying in .5s...
+[2026.09.30-03.30.34:363][  0]LogFileManager: Warning: MoveFile was unable to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp' (Error Code 32), retrying in .5s...
+[2026.09.30-03.30.34:865][  0]LogFileManager: Warning: MoveFile was unable to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp' (Error Code 32), retrying in .5s...
+[2026.09.30-03.30.35:366][  0]LogFileManager: Warning: MoveFile was unable to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp' (Error Code 32), retrying in .5s...
+[2026.09.30-03.30.35:867][  0]LogFileManager: Warning: MoveFile was unable to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp' (Error Code 32), retrying in .5s...
+[2026.09.30-03.30.36:367][  0]LogFileManager: Warning: MoveFile was unable to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp' (Error Code 32), retrying in .5s...
+[2026.09.30-03.30.36:867][  0]LogFileManager: Warning: MoveFile was unable to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp' (Error Code 32), retrying in .5s...
+[2026.09.30-03.30.37:368][  0]LogFileManager: Warning: MoveFile was unable to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp' (Error Code 32), retrying in .5s...
+[2026.09.30-03.30.37:869][  0]LogFileManager: Error: Error moving file '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp'.
+[2026.09.30-03.30.37:869][  0]LogSavePackage: Warning: Failed to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to temp directory
+[2026.09.30-03.30.37:869][  0]LogSavePackage: Error: Error saving '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset'
+[2026.09.30-03.30.37:875][  0]LogSourceControl: Display: Uncontrolled Changelist persistency file loaded ../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/SourceControl/UncontrolledChangelists.json
+[2026.09.30-03.30.37:876][  0]EditorErrors: Warning: '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' 저장 오류입니다.
+[2026.09.30-03.30.37:877][  0]LogPython: Error: Traceback (most recent call last):
+[2026.09.30-03.30.37:877][  0]LogPython: Error:   File "C:/Users/user1/Documents/GitHub/Unreal-MOU/output/customization-ui/connect.py", line 17, in <module>
+[2026.09.30-03.30.37:877][  0]LogPython: Error:     assert unreal.EditorAssetLibrary.save_loaded_asset(legacy)
+[2026.09.30-03.30.37:877][  0]LogPython: Error: AssertionError
+[2026.09.30-03.30.37:877][  0]LogPythonScriptCommandlet: Error: Python script executed with errors
+[2026.09.30-03.30.37:877][  0]LogInit: Display: 
+[2026.09.30-03.30.37:877][  0]LogInit: Display: Warning/Error Summary (Unique only)
+[2026.09.30-03.30.37:877][  0]LogInit: Display: -----------------------------------
+[2026.09.30-03.30.37:877][  0]LogInit: Display: LogFileManager: Error: Error moving file '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp'.
+[2026.09.30-03.30.37:877][  0]LogInit: Display: LogSavePackage: Error: Error saving '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset'
+[2026.09.30-03.30.37:877][  0]LogInit: Display: LogPython: Error: Traceback (most recent call last):
+[2026.09.30-03.30.37:877][  0]LogInit: Display: LogPython: Error:   File "C:/Users/user1/Documents/GitHub/Unreal-MOU/output/customization-ui/connect.py", line 17, in <module>
+[2026.09.30-03.30.37:877][  0]LogInit: Display: LogPython: Error:     assert unreal.EditorAssetLibrary.save_loaded_asset(legacy)
+[2026.09.30-03.30.37:877][  0]LogInit: Display: LogPython: Error: AssertionError
+[2026.09.30-03.30.37:877][  0]LogInit: Display: LogPythonScriptCommandlet: Error: Python script executed with errors
+[2026.09.30-03.30.37:877][  0]LogInit: Display: LogFileManager: Warning: MoveFile was unable to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Saved/WBP_CustomizeWidgetD4A369C24BFDA4DC521BA1BA503F940C.tmp' (Error Code 32), retrying in .5s...
+[2026.09.30-03.30.37:877][  0]LogInit: Display: LogSavePackage: Warning: Failed to move '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' to temp directory
+[2026.09.30-03.30.37:877][  0]LogInit: Display: EditorErrors: Warning: '../../../../../../Users/user1/Documents/GitHub/Unreal-MOU/TeamProject_MOU/Content/02_JSY/MainLobby/WBP_CustomizeWidget.uasset' 저장 오류입니다.
+[2026.09.30-03.30.37:877][  0]LogInit: Display: 
+[2026.09.30-03.30.37:877][  0]LogInit: Display: Commandlet->Main return this error code: -1
+[2026.09.30-03.30.37:877][  0]LogInit: Display: With 7 error(s), 12 warning(s)
+[2026.09.30-03.30.37:877][  0]LogInit: Display: 
+
+Execution of commandlet took:  6.15 seconds, PeakPhysMemoryMB=2018 MB, PeakVirtMemoryMB=1801 MB
+[2026.09.30-03.30.37:891][  0]LogToolsetRegistry: Display: Unregistering Toolset ToolsetRegistry.AgentSkillToolset
+[2026.09.30-03.30.37:892][  0]LogToolsetRegistry: Display: Unregistering Toolset AutomationTestToolset.AutomationTestToolset
+[2026.09.30-03.30.37:892][  0]LogToolsetRegistry: Display: Unregistering Toolset SlateInspectorToolset.SlateInspectorToolset
+[2026.09.30-03.30.38:036][  0]LogPython: Display: Object '/EditorToolset/Python/editor_toolset/toolsets/blueprint_PY.ContainerType' was externally referenced when shutting down Python. Forcibly releasing its Python resources!
+[2026.09.30-03.30.38:036][  0]LogPython: Display: Object '/EditorToolset/Python/editor_toolset/toolsets/material_instance_PY.MaterialParameterType' was externally referenced when shutting down Python. Forcibly releasing its Python resources!
+[2026.09.30-03.30.38:036][  0]LogPython: Display: Object '/AnimationAssistantToolset/Python/animation_toolset/toolsets/controlrig_PY.EventType' was externally referenced when shutting down Python. Forcibly releasing its Python resources!
+[2026.09.30-03.30.38:036][  0]LogPython: Display: Object '/ControlRig/Python/RigHierarchy/add_controls_for_selected_PY.ControlOutputFormat' was externally referenced when shutting down Python. Forcibly releasing its Python resources!
+[2026.09.30-03.30.38:041][  0]LogAssetRegistry: Display: CleanupOrphanedCacheFiles (PostWrite): 1 .ref files found, 1 referenced binaries
+[2026.09.30-03.30.38:041][  0]LogAssetRegistry: Display: CleanupOrphanedCacheFiles: 1 total binaries, 1 referenced (kept), 0 old-style pre-migration (kept), 0 orphans deleted, 0 orphans locked (kept)
+[2026.09.30-03.30.38:201][  0]LogShaderCompilers: Display: Exiting ShaderCompilingThread
