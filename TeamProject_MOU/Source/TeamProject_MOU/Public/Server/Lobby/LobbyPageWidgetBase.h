@@ -1,4 +1,4 @@
-// MOU 로비 스택에서 사용하는 고정 역할 페이지들.
+﻿// MOU 로비 스택에서 사용하는 고정 역할 페이지들.
 
 #pragma once
 
@@ -18,6 +18,9 @@ class UImage;
 class UMaterialInstanceDynamic;
 class UTextureRenderTarget2D;
 class USceneCaptureComponent2D;
+class USceneCaptureComponent;
+class USkeletalMeshComponent;
+class ULobbyCustomizationComponent;
 class AActor;
 
 DECLARE_DELEGATE(FOnLobbyPageAction);
@@ -85,6 +88,7 @@ public:
 	virtual void NativeOnInitialized() override;
 	virtual void NativeConstruct() override;
 
+	// [RTITLE-005] 현재 방 제목과 준비 상태를 대기실 위젯에 반영한다.
 	void Refresh(const UServerSubsystem* Server);
 	void SetMessage(const FString& Text, bool bIsError);
 
@@ -168,14 +172,20 @@ class TEAMPROJECT_MOU_API ULobbyCustomizeWidgetBase : public UCharacterCustomiza
 	GENERATED_BODY()
 
 public:
+	// [LCUI-003] 디자이너 루트가 없으면 기본 편집 화면을 생성한다.
 	virtual void NativeOnInitialized() override;
+	// [LCUI-004] 편집 상태를 초기화하고 본인 미리보기와 버튼 및 서버 이벤트를 연결한다.
 	virtual void NativeConstruct() override;
+	// [LCUI-005] 이벤트 연결과 창 전용 미리보기를 해제한다.
 	virtual void NativeDestruct() override;
+	// [LCUI-006] 확인 버튼에서만 편집값을 서버로 전송하고 응답을 기다린다.
 	virtual void ConfirmAndSave() override;
+	// [LCUI-007] 편집값과 전용 미리보기를 폐기한 뒤 이전 화면으로 돌아간다.
 	virtual void CancelAndExit() override;
+	// [LCUI-008] 대기실 캐릭터와 카메라는 유지하고 편집용 메시만 회전한다.
 	virtual void RotateCharacter(float DeltaX) override;
 
-	/** Register a lobby preview actor's CharacterCustomizationComponent. */
+	// [LCUI-009] 기존 BP 연결을 받되 실제 편집 대상은 본인 슬롯에서 복사한 전용 메시로 제한한다.
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby|Customization")
 	void SetPreviewComponent(UCharacterCustomizationComponent* Component);
 
@@ -194,7 +204,9 @@ public:
 	FOnLobbyPageAction OnBack;
 
 protected:
+	// [LCUI-012] 본인의 확정된 외형으로 편집값과 UI를 초기화한다.
 	virtual void InitializeCustomization() override;
+	// [LCUI-013] 색상과 문양 편집을 창 전용 메시 및 RenderTarget에만 반영한다.
 	virtual void UpdatePreview() override;
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Lobby")
@@ -212,19 +224,36 @@ protected:
 	TObjectPtr<UButton> BackButton;
 
 private:
+	// [LCUI-014] 확인 버튼을 서버 전송 처리에 연결한다.
 	UFUNCTION() void HandleConfirmClicked();
+	// [LCUI-015] 전송 대기 중이 아닐 때 기본 외형을 미리본다.
 	UFUNCTION() void HandleResetClicked();
+	// [LCUI-016] 서버 승인 결과를 반영하고 실패 시 다시 편집할 수 있게 한다.
 	UFUNCTION() void HandleCustomizationResult(bool bSuccess, bool bSavedToDisk);
+	// [LCUI-017] 멤버 목록 갱신 시 본인 슬롯 연결만 확인하고 편집값은 보존한다.
 	UFUNCTION() void HandlePreviewRoomMembersChanged(int32 RoomId, const TArray<FMOURoomMember>& Members, bool bAllReady);
+	// [LCUI-018] 편집 상태 메시지를 텍스트와 BP 이벤트에 전달한다.
 	void ShowStatus(const FText& Message, bool bSuccess);
-	TWeakObjectPtr<UCharacterCustomizationComponent> PreviewComponent;
+	TWeakObjectPtr<ULobbyCustomizationComponent> PreviewComponent;
+	TWeakObjectPtr<AActor> LocalPreviewActor;
+	TWeakObjectPtr<AActor> SourcePreviewActor;
+	TWeakObjectPtr<USkeletalMeshComponent> LocalPreviewMesh;
 	TWeakObjectPtr<USceneCaptureComponent2D> PreviewCapture;
-	bool bPreviewCaptureEveryFrameBeforeEdit = false;
+	// 기존 대기실 캡처에는 편집용 액터를 숨기고, 종료 시 이 제외 항목만 제거한다.
+	TArray<TWeakObjectPtr<USceneCaptureComponent>> OtherPreviewCaptures;
+	int32 PreviewRoomId = 0;
 	UPROPERTY(Transient)
 	TObjectPtr<UTextureRenderTarget2D> PreviewRenderTarget;
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> PreviewUIMaterial;
+	// [LCUI-001] 본인 슬롯을 원본으로 창 전용 미리보기를 생성한다.
+	bool CreateLocalPreview(AActor* SourceActor);
+	// [LCUI-002] 창 전용 미리보기 자원을 해제한다.
+	void ReleaseLocalPreview();
+	// [LCUI-019] 로그인한 본인 슬롯을 찾아 독립 미리보기를 PreviewImage에 연결한다.
 	void ConnectOwnSlotPreview();
+	// [LCUI-020] 뒤로가기 버튼을 편집 취소 처리에 연결한다.
 	UFUNCTION() void HandleBackClicked();
+	// [LCUI-021] BP 레이아웃이 없는 경우의 기본 버튼과 상태 표시를 만든다.
 	void BuildDefaultLayout();
 };

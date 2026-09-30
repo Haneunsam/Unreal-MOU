@@ -2,6 +2,7 @@
 
 
 #include "TeamProject_MOUPlayerController.h"
+#include "TeamProject_MOUGameMode.h"
 #include "Subsystems/WarehouseDataSubsystem.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -41,6 +42,16 @@ ATeamProject_MOUPlayerController::ATeamProject_MOUPlayerController()
 	//   이유는 헤더의 VoiceComponent 주석 참고.
 	VoiceComponent = CreateDefaultSubobject<UVoiceComponent>(TEXT("MOUVoiceComponent"));
 }
+
+// [SETTLEMENT-000] 정산 UI의 확인 상태를 권한을 가진 GameMode에 전달합니다.
+void ATeamProject_MOUPlayerController::ServerSetSettlementConfirmed_Implementation(bool bConfirmed)
+{
+	if (ATeamProject_MOUGameMode* GameMode = GetWorld()->GetAuthGameMode<ATeamProject_MOUGameMode>())
+	{
+		GameMode->SetSettlementConfirmation(this, bConfirmed);
+	}
+}
+
 void ATeamProject_MOUPlayerController::ServerSaveWarehouseDelivery_Implementation(
 	const TArray<FStoredItemData>& RequestedItems)
 {
@@ -1017,6 +1028,16 @@ void ATeamProject_MOUPlayerController::ApplyUserSettingsToPlayer()
 				}
 			}
 		}
+
+		// 프로젝트 표준 기본키 우선 반영 (사용자 지정 기본값)
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_Interact")) = EKeys::F;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_Grab_Drop")) = EKeys::E;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_Throw")) = EKeys::Q;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_Slap")) = EKeys::T;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_Light")) = EKeys::Four;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_LightColor")) = EKeys::Five;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_EmoteToggle")) = EKeys::Tab;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_ViewEcnomoy")) = EKeys::V;
 	}
 
 	const TMap<FName, FKey>& CustomKeys = Settings->GetAllCustomKeyBindings();
@@ -1067,7 +1088,7 @@ void ATeamProject_MOUPlayerController::ApplyUserSettingsToPlayer()
 						}
 					}
 
-					if (TargetKey.IsValid() && Mapping.Key != TargetKey)
+					if (Mapping.Key != TargetKey)
 					{
 						Mapping.Key = TargetKey;
 						bAnyMappingChanged = true;

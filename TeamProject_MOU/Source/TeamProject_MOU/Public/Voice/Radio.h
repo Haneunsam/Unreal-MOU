@@ -114,6 +114,7 @@ public:
 	 *
 	 * 배터리가 없으면 켜지지 않는다. 실제 판정은 전부 서버에서 한다.
 	 */
+	// [RPOWER-001] 손에 든 무전기의 전원 변경을 요청한다.
 	UFUNCTION(BlueprintCallable, Category = "Radio")
 	void SetPowered(bool bOn);
 
@@ -218,6 +219,7 @@ protected:
 
 private:
 	/** 클라의 전원 조작을 서버로 넘긴다. Owner 가 설정돼 있어야 도착한다. */
+	// [RPOWER-002] 서버에서 장착 상태를 재검사한 뒤 전원을 변경한다.
 	UFUNCTION(Server, Reliable)
 	void ServerSetPowered(bool bOn);
 

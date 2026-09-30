@@ -1,4 +1,4 @@
-// MOU 로비 - 계정/세션 탐색 백엔드 인터페이스.
+﻿// MOU 로비 - 계정/세션 탐색 백엔드 인터페이스.
 //
 // [왜 이 인터페이스가 필요한가]
 //   리슨서버에는 두 가지 한계가 있고, 둘 다 게임 로직과는 상관이 없다.
@@ -122,7 +122,8 @@ enum class EServerClientEventType : uint8
 
 	/** 서버가 내 공인 게임 엔드포인트를 관측해 알려줬다. Detail 에 "IP:포트". (v10) */
 	ClientEndpointAck,
-	RoomCustomizationAck
+	RoomCustomizationAck,
+	CheckLoginIdAck
 };
 
 /**
@@ -137,6 +138,8 @@ struct FServerClientEvent
 
 	/** Type == LoginAck / RegisterAck 일 때만 유효 */
 	FChatLoginResult Login;
+	uint32 CheckRequestId = 0;
+	EChatLoginResultBP CheckResult = EChatLoginResultBP::ServerError;
 	FCharacterCustomizationData Customization;
 	uint32 CustomizationRequestId = 0;
 
@@ -252,6 +255,8 @@ public:
 	// --- 계정 ------------------------------------------------------------
 
 	virtual void SendLogin(const FString& LoginId, const FString& Password, int32 TeamId) = 0;
+	// [AUTHUI-003] 아이디 중복 확인 요청을 송신하고 접수 여부를 반환한다.
+	virtual bool SendCheckLoginId(uint32 RequestId, const FString& LoginId) = 0;
 	virtual void SendRegister(const FString& LoginId, const FString& Password, const FString& Nickname) = 0;
 
 	// --- 채팅 ------------------------------------------------------------

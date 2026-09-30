@@ -64,3 +64,35 @@ enum class ENPCLostTargetPolicy : uint8
     /*행동 후 원래 위치로*/
     ReturnHome
 };
+
+/* NPC가 여러 타깃을 감지했을 때 타깃을 선택하는 방식 */
+UENUM(BlueprintType)
+enum class ENPCTargetSelectionPolicy : uint8
+{
+    /* 현재 타깃을 완전히 잃기 전까지 새 타깃으로 변경하지 않음 */
+    LockUntilLost UMETA(DisplayName = "현재 타깃 유지"),
+    /* 감지 중인 타깃 가운데 NPC와 가장 가까운 타깃을 선택 */
+    NearestDynamic UMETA(DisplayName = "가장 가까운 타깃")
+};
+
+/* 추적 상태에서 NPC가 타깃에게 이동하는 방식 */
+UENUM(BlueprintType)
+enum class ENPCTrackingMovementPolicy : uint8
+{
+    /* 타깃이 감지되면 항상 추적 */
+    AlwaysChase UMETA(DisplayName = "항상 추적"),
+    /* 타깃이 NPC를 보고 있지 않을 때만 추적 */
+    ChaseWhenNotObserved UMETA(DisplayName = "보이지 않을 때만 추적"),
+    /* 타깃을 감지하고 행동은 하지만 현재 위치에서 이동하지 않음 */
+    Stationary UMETA(DisplayName = "이동하지 않음")
+};
+
+/* NPC가 우선적으로 수행할 목표 유형 */
+UENUM(BlueprintType)
+enum class ENPCObjectiveType : uint8
+{
+    /* 감지한 플레이어를 추적하고 Primary Ability를 실행 */
+    PlayerAction UMETA(DisplayName = "플레이어 대상 행동"),
+    /* 창고 아이템을 예약해 지정된 목적지로 운반 */
+    WarehouseItemTransport UMETA(DisplayName = "창고 아이템 운반")
+};

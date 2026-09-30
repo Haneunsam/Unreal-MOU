@@ -1,4 +1,4 @@
-// MOU 채팅 서버 - 계정 저장소 (아이디/비밀번호/닉네임).
+﻿// MOU 채팅 서버 - 계정 저장소 (아이디/비밀번호/닉네임).
 //
 // [ChatLog 와 무엇이 다른가 — 중요]
 //   ChatLog 는 비동기 큐다. 채팅 한 줄이 늦게 저장되거나 서버가 죽어 몇 줄 유실돼도
@@ -42,6 +42,9 @@ namespace MOU
 		 * 계정 DB 를 연다. 서버 시작 시 한 번 부른다.
 		 * 채팅 로그와 같은 파일을 써도 되고 달라도 된다(테이블이 다르므로).
 		 */
+		// [AUTHUI-001] 계정을 생성하지 않고 동일한 DB 비교 규칙으로 아이디 중복을 조회한다.
+		EAccountResult CheckLoginId(const std::string& LoginId);
+
 		bool Start(const char* DbPath);
 
 		/** DB 를 닫는다. Start 가 실패했어도 부르는 것이 안전하다. */

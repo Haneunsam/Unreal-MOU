@@ -152,5 +152,15 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Customization|UI")
 	void OnCustomizationDataInitialized(const FCharacterCustomizationData& InitialData);
 
+	UFUNCTION()
+	void OnBodyColorConfirmed(FLinearColor InColor);
 
+	UFUNCTION()
+	void OnBodyColorCancelled(FLinearColor InColor);
+
+	UFUNCTION()
+	void OnDecalColorConfirmed(FLinearColor InColor);
+
+	UFUNCTION()
+	void OnDecalColorCancelled(FLinearColor InColor);
 };

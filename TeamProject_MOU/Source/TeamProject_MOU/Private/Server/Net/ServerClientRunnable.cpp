@@ -1,4 +1,4 @@
-// MOU 채팅 - 워커 스레드 구현.
+﻿// MOU 채팅 - 워커 스레드 구현.
 // 대응하는 서버 코드: MOU_Server/Server/Server.cpp 의 ClientThread()
 
 #include "Server/Net/ServerClientRunnable.h"
@@ -304,6 +304,19 @@ void FServerClientRunnable::HandlePacket(const MOU::PacketHeader& Header, const 
 		break;
 	}
 
+	case MOU::EOpcode::CheckLoginIdAck:
+    {
+        if (Body.Num() != sizeof(MOU::CheckLoginIdAckBody)) break;
+        MOU::CheckLoginIdAckBody Ack{};
+        FMemory::Memcpy(&Ack, Body.GetData(), sizeof(Ack));
+        FServerClientEvent Event;
+        Event.Type = EServerClientEventType::CheckLoginIdAck;
+        Event.CheckRequestId = Ack.RequestId;
+        Event.CheckResult = Ack.ServerVersion != MOU::kProtocolVersion ? EChatLoginResultBP::VersionMismatch
+            : Ack.Result <= static_cast<uint8>(MOU::ELoginResult::AlreadyOnline) ? static_cast<EChatLoginResultBP>(Ack.Result) : EChatLoginResultBP::ServerError;
+        InboundEvents.Enqueue(MoveTemp(Event));
+        break;
+    }
 	case MOU::EOpcode::RegisterAck:
 	{
 		if (Body.Num() < static_cast<int32>(sizeof(MOU::RegisterAckBody)))
