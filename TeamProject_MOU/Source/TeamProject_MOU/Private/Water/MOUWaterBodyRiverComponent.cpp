@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Water/MOUWaterBodyRiverComponent.h"
+#include "Water/MOUWaterHazardComponent.h"
 
 void UMOUWaterBodyRiverComponent::OnRegister()
 {
@@ -26,6 +27,11 @@ void UMOUWaterBodyRiverComponent::SetRiverWaterLevelZ(float NewWorldZ, bool bUse
 		FVector Location = Owner->GetActorLocation();
 		Location.Z = NewWorldZ;
 		Owner->SetActorLocation(Location);
+
+		if (UMOUWaterHazardComponent* HazardComp = Owner->FindComponentByClass<UMOUWaterHazardComponent>())
+		{
+			HazardComp->CheckWaterLevel(NewWorldZ);
+		}
 	}
 
 	// 화면에 보이는 물 표면은 SplineMeshComponent가 아니라 WaterZone이 각 워터바디를 캡처해서

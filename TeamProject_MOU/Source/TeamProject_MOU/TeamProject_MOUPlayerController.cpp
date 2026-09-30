@@ -1017,6 +1017,16 @@ void ATeamProject_MOUPlayerController::ApplyUserSettingsToPlayer()
 				}
 			}
 		}
+
+		// 프로젝트 표준 기본키 우선 반영 (사용자 지정 기본값)
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_Interact")) = EKeys::F;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_Grab_Drop")) = EKeys::E;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_Throw")) = EKeys::Q;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_Slap")) = EKeys::T;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_Light")) = EKeys::Four;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_LightColor")) = EKeys::Five;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_EmoteToggle")) = EKeys::Tab;
+		DefaultKeyBindingsCache.FindOrAdd(FName("IA_ViewEcnomoy")) = EKeys::V;
 	}
 
 	const TMap<FName, FKey>& CustomKeys = Settings->GetAllCustomKeyBindings();
@@ -1067,7 +1077,7 @@ void ATeamProject_MOUPlayerController::ApplyUserSettingsToPlayer()
 						}
 					}
 
-					if (TargetKey.IsValid() && Mapping.Key != TargetKey)
+					if (Mapping.Key != TargetKey)
 					{
 						Mapping.Key = TargetKey;
 						bAnyMappingChanged = true;

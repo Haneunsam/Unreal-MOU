@@ -456,11 +456,11 @@ void USettingsMenuWidget::RefreshUIFromSettings()
 	}
 	if (KeySelector_Interact)
 	{
-		KeySelector_Interact->SetSelectedKey(FInputChord(UserSettings->GetCustomKeyBinding(FName("IA_Interact"), EKeys::E)));
+		KeySelector_Interact->SetSelectedKey(FInputChord(UserSettings->GetCustomKeyBinding(FName("IA_Interact"), EKeys::F)));
 	}
 	if (KeySelector_GrabDrop)
 	{
-		KeySelector_GrabDrop->SetSelectedKey(FInputChord(UserSettings->GetCustomKeyBinding(FName("IA_Grab_Drop"), EKeys::F)));
+		KeySelector_GrabDrop->SetSelectedKey(FInputChord(UserSettings->GetCustomKeyBinding(FName("IA_Grab_Drop"), EKeys::E)));
 	}
 	if (KeySelector_Use)
 	{
@@ -468,7 +468,7 @@ void USettingsMenuWidget::RefreshUIFromSettings()
 	}
 	if (KeySelector_Throw)
 	{
-		KeySelector_Throw->SetSelectedKey(FInputChord(UserSettings->GetCustomKeyBinding(FName("IA_Throw"), EKeys::RightMouseButton)));
+		KeySelector_Throw->SetSelectedKey(FInputChord(UserSettings->GetCustomKeyBinding(FName("IA_Throw"), EKeys::Q)));
 	}
 	if (KeySelector_Slot1)
 	{
