@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "UI/CharacterCustomizationWidget.h"
+#include "UI/SettingsMenuWidget.h"
 #include "Server/Lobby/LobbyTypes.h"
 #include "LobbyPageWidgetBase.generated.h"
 
@@ -146,13 +147,16 @@ private:
 
 /** 실제 환경설정 UI가 들어오기 전에도 Push/Pop 흐름을 검증할 수 있는 페이지. */
 UCLASS()
-class TEAMPROJECT_MOU_API ULobbySettingsWidgetBase : public UUserWidget
+class TEAMPROJECT_MOU_API ULobbySettingsWidgetBase : public USettingsMenuWidget
 {
 	GENERATED_BODY()
 
 public:
 	virtual void NativeOnInitialized() override;
+	// [LSET-001] 팀원 설정 기능을 초기화하고 닫기를 로비 복귀에 연결한다.
 	virtual void NativeConstruct() override;
+	// [LSET-002] 닫기 연결과 키 설정 팝업을 정리한다.
+	virtual void NativeDestruct() override;
 
 	FOnLobbyPageAction OnBack;
 

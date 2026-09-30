@@ -1,0 +1,4 @@
+test-user/
+*.log
+*-console.txt
+*.copy

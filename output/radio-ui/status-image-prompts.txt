@@ -1,0 +1,8 @@
+Generated with built-in image_gen.
+
+RadioTransmit:
+Create a single isolated game HUD transmission status icon: exactly ONE solid round RED dot. Glossy vivid scarlet red with a small soft upper-left highlight, subtle dark red lower edge and thin pale pink luminous rim matching the provided orange walkie-talkie HUD icon's beveled glossy style. The reference is STYLE ONLY, do not draw a radio. Perfect simple circular silhouette, centered on a square canvas, diameter about 65 percent canvas width. Actual transparent alpha background. No text, no ring outside the dot, no antenna, no additional dots, no scenery, no checkerboard. Readable at small 100x100 UI texture size.
+
+RadioReceive:
+Create one isolated game HUD RECEIVING status icon: exactly THREE nested curved orange sound-wave strokes, oriented like (((, each opening toward the RIGHT, largest on left, medium in middle, shortest on right, concentrically aligned around a common center to the right. They evoke a sideways Wi-Fi/sound transmission symbol. No bottom dot, no speaker, no radio. Match reference orange radio icon's vivid tangerine orange, glossy beveled surface, pale peach thin luminous rim and bright highlights with darker orange underside. Reference is STYLE ONLY. Three clearly separated thick rounded arcs, clean readable silhouette at 100x100, centered on square canvas with 12 percent clear margins. Genuine transparent alpha background, including gaps between arcs. No text, scenery, checkerboard or extra elements.
+

@@ -117,8 +117,6 @@ void ATeamProject_MOUPlayerController::BeginPlay()
 
 	}
 
-	ShowVoiceWidgetsIfNeeded();
-
 	if (IsLocalPlayerController())
 	{
 		ApplyUserSettingsToPlayer();
@@ -302,74 +300,6 @@ bool ATeamProject_MOUPlayerController::ShouldUseTouchControls() const
 {
 	// are we on a mobile platform? Should we force touch?
 	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
-}
-
-// ---------------------------------------------------------------------------
-// 마이크 / 무전기 상태 표시
-//
-// ★ ZOrder 를 로그인 위젯보다 낮게 둔다(기본 0). 로그인 화면이 떠 있는 동안
-//   마이크 아이콘이 그 위를 덮으면 안 되기 때문이다.
-//
-// ★ 두 위젯 모두 "지금 상태" 를 스스로 폴링한다. 마이크가 없든 무전기가 없든
-//   위젯 쪽에서 알아서 처리하므로(무전기는 스스로 접힌다), 여기서 조건을
-//   따져 띄울지 말지 고르지 않는다 - 그 판단이 두 군데로 갈라지면 어긋난다.
-// ---------------------------------------------------------------------------
-
-void ATeamProject_MOUPlayerController::ShowVoiceWidgetsIfNeeded()
-{
-	// ★ 로컬 컨트롤러가 아니면 만들지 않는다. 서버가 남의 컨트롤러에도 만들면
-	//   화면에는 안 보이는데 NativeTick 만 도는 위젯이 사람 수만큼 생긴다.
-	if (!bAutoShowVoiceWidgets || !IsLocalPlayerController())
-	{
-		return;
-	}
-
-	// --- 마이크 -------------------------------------------------------------
-	//
-	// 이건 끌 수 있는 장식이 아니라 프라이버시 표시다(15절). 클래스를 안 넣어도
-	// C++ 기본 레이아웃으로라도 반드시 뜬다.
-	if (VoiceStatusWidget == nullptr)
-	{
-		UClass* WidgetClass = VoiceStatusWidgetClass
-			? VoiceStatusWidgetClass.Get()
-			: UVoiceStatusWidget::StaticClass();
-
-		VoiceStatusWidget = CreateWidget<UVoiceStatusWidget>(this, WidgetClass);
-
-		if (VoiceStatusWidget != nullptr)
-		{
-			VoiceStatusWidget->AddToViewport();
-		}
-		else
-		{
-			UE_LOG(LogTeamProject_MOU, Error,
-				TEXT("마이크 상태 위젯을 만들지 못했다. VoiceStatusWidgetClass 가 UVoiceStatusWidget 을 상속하는지 확인할 것."));
-		}
-	}
-
-	// --- 무전기 -------------------------------------------------------------
-	//
-	// 무전기가 없어도 띄운다. 위젯이 bHideWhenNoRadio 로 스스로 접히고,
-	// 무전기를 줍는 순간 알아서 다시 나타난다 - 아이템을 줍고 버리는 시점마다
-	// 여기서 만들고 부수면 그 타이밍을 놓치는 경로가 반드시 생긴다.
-	if (RadioStatusWidget == nullptr)
-	{
-		UClass* WidgetClass = RadioStatusWidgetClass
-			? RadioStatusWidgetClass.Get()
-			: URadioStatusWidget::StaticClass();
-
-		RadioStatusWidget = CreateWidget<URadioStatusWidget>(this, WidgetClass);
-
-		if (RadioStatusWidget != nullptr)
-		{
-			RadioStatusWidget->AddToViewport();
-		}
-		else
-		{
-			UE_LOG(LogTeamProject_MOU, Error,
-				TEXT("무전기 상태 위젯을 만들지 못했다. RadioStatusWidgetClass 가 URadioStatusWidget 을 상속하는지 확인할 것."));
-		}
-	}
 }
 
 void ATeamProject_MOUPlayerController::PlayerTick(float DeltaTime)
@@ -751,15 +681,26 @@ void ATeamProject_MOUPlayerController::RegisterStatusHUDWidget(UMOU_CharacterSta
 	}
 }
 
+// [PCUI-002] HUD 내부의 상태·마이크·무전기 위젯을 찾아 컨트롤러 참조에 연결한다.
 void ATeamProject_MOUPlayerController::RegisterPlayerHUDWidget(UUserWidget* InPlayerHUD)
 {
 	PlayerHUDWidget = InPlayerHUD;
+	VoiceStatusWidget = nullptr;
+	RadioStatusWidget = nullptr;
 	if (InPlayerHUD)
 	{
 		if (InPlayerHUD->WidgetTree)
 		{
 			InPlayerHUD->WidgetTree->ForEachWidget([this](UWidget* Widget)
 			{
+				if (UVoiceStatusWidget* FoundVoice = Cast<UVoiceStatusWidget>(Widget))
+				{
+					VoiceStatusWidget = FoundVoice;
+				}
+				if (URadioStatusWidget* FoundRadio = Cast<URadioStatusWidget>(Widget))
+				{
+					RadioStatusWidget = FoundRadio;
+				}
 				if (UMOU_CharacterStatusHUD* FoundStatusHUD = Cast<UMOU_CharacterStatusHUD>(Widget))
 				{
 					RegisterStatusHUDWidget(FoundStatusHUD);

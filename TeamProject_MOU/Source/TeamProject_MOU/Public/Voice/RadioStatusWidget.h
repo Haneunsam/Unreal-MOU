@@ -14,6 +14,7 @@ class APawn;
 class ARadio;
 class UImage;
 class UProgressBar;
+class UTextBlock;
 class URadioComponent;
 class UVoiceSubsystem;
 
@@ -118,6 +119,10 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Radio")
 	TObjectPtr<UProgressBar> BatteryBar;
 
+	/** WBP에 배치한 배터리 잔량 퍼센트 텍스트. */
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Radio")
+	TObjectPtr<UTextBlock> BatteryPercentText;
+
 	/** WBP에 배치한 평시/송신/수신 상태 이미지. */
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Radio")
 	TObjectPtr<UImage> StatusIcon;
@@ -134,8 +139,11 @@ private:
 	// [RUI-004] 본체 전원 색과 상태 이미지, 위젯 가시성을 적용한다.
 	void ApplyRadioState(ERadioIconState NewState);
 
+	// [RUI-011] UI 브러시의 전용 머티리얼 인스턴스로 전원 OFF 시 채도를 제거한다.
+	void ApplyPowerToBrush(FSlateBrush& Brush, bool bOff);
+
 	/** 배터리 바를 갱신한다. 보간하지 않는다 - 배터리는 튀는 값이 아니다. */
-	// [RUI-009] 실제 배터리 잔량과 부족 경고 색을 표시한다.
+	// [RUI-009] 실제 배터리 잔량과 퍼센트 텍스트를 갱신한다.
 	void UpdateBatteryBar();
 
 	/**
