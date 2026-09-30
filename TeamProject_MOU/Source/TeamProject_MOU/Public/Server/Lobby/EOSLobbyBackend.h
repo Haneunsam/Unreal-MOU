@@ -1,4 +1,4 @@
-// MOU 로비 - Epic Online Services 백엔드 (뼈대).
+﻿// MOU 로비 - Epic Online Services 백엔드 (뼈대).
 //
 // [지금 상태: 아직 붙지 않았다]
 //   이 파일은 동작하는 EOS 연동이 아니다. Start() 를 부르면 "미구현" 사유와 함께
@@ -68,6 +68,8 @@ public:
 	// 아이디/비밀번호를 우리가 받지 않게 되는 것이 가장 큰 변화다 —
 	// 인증은 Epic 계정이나 디바이스 ID 가 대신하고, 우리는 ProductUserId 만 받는다.
 	virtual void SendLogin(const FString& LoginId, const FString& Password, int32 TeamId) override;
+	// [AUTHUI-005] 아이디 중복 조회의 송신 가능 여부를 반환한다.
+	virtual bool SendCheckLoginId(uint32 RequestId, const FString& LoginId) override;
 	virtual void SendRegister(const FString& LoginId, const FString& Password, const FString& Nickname) override;
 
 	// --- 채팅 ---

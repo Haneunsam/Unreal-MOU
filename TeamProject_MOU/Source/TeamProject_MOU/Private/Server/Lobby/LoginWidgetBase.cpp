@@ -1,4 +1,4 @@
-#include "Server/Lobby/LoginWidgetBase.h"
+﻿#include "Server/Lobby/LoginWidgetBase.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Server/ServerSettings.h"
@@ -38,82 +38,39 @@ void ULoginWidgetBase::NativeOnInitialized()
 	}
 }
 
+// [AUTHUI-030] WBP가 없는 경우에도 로그인과 가입을 분리한 기본 화면을 구성한다.
 void ULoginWidgetBase::BuildDefaultLayout()
 {
-	UCanvasPanel* RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("LoginRootCanvas"));
-	WidgetTree->RootWidget = RootCanvas;
-
-	UBorder* Panel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("LoginPanel"));
-	Panel->SetBrushColor(FLinearColor(0.02f, 0.02f, 0.04f, 0.92f));
-	Panel->SetPadding(FMargin(20.f));
-
-	UCanvasPanelSlot* PanelSlot = RootCanvas->AddChildToCanvas(Panel);
-	// 화면 정중앙에 고정한다. 해상도가 바뀌어도 가운데를 유지한다.
-	PanelSlot->SetAnchors(FAnchors(0.5f, 0.5f, 0.5f, 0.5f));
-	PanelSlot->SetAlignment(FVector2D(0.5f, 0.5f));
-	PanelSlot->SetAutoSize(false);
-	PanelSlot->SetPosition(FVector2D::ZeroVector);
-	PanelSlot->SetSize(FVector2D(420.f, 320.f));
-
-	UVerticalBox* MainBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LoginMainBox"));
-	Panel->AddChild(MainBox);
-
-	auto AddRow = [&](UWidget* Widget, float BottomPadding)
-	{
-		if (UVerticalBoxSlot* Slot = MainBox->AddChildToVerticalBox(Widget))
-		{
-			Slot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-			Slot->SetPadding(FMargin(0.f, 0.f, 0.f, BottomPadding));
-		}
-	};
-
-	TitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TitleText"));
-	TitleText->SetText(FText::FromString(TEXT("MOU 채팅 로그인")));
-	TitleText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-	AddRow(TitleText, 12.f);
-
-	LoginIdBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("LoginIdBox"));
-	LoginIdBox->SetHintText(FText::FromString(TEXT("아이디")));
-	AddRow(LoginIdBox, 6.f);
-
-	PasswordBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("PasswordBox"));
-	PasswordBox->SetHintText(FText::FromString(TEXT("비밀번호")));
-	// 어깨너머로 보이지 않게 가린다. 로그인 화면의 기본 예의다.
-	PasswordBox->SetIsPassword(true);
-	AddRow(PasswordBox, 6.f);
-
-	NicknameBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("NicknameBox"));
-	NicknameBox->SetHintText(FText::FromString(TEXT("닉네임 (가입할 때만, 비우면 아이디 사용)")));
-	AddRow(NicknameBox, 12.f);
-
-	// --- 버튼 두 개를 가로로 ---
-	UHorizontalBox* ButtonRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("LoginButtonRow"));
-	AddRow(ButtonRow, 10.f);
-
-	auto MakeButton = [&](const TCHAR* Name, const FString& Label) -> UButton*
-	{
-		UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
-		UTextBlock* Label2 = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), *(FString(Name) + TEXT("Label")));
-		Label2->SetText(FText::FromString(Label));
-		Button->AddChild(Label2);
-
-		if (UHorizontalBoxSlot* Slot = ButtonRow->AddChildToHorizontalBox(Button))
-		{
-			Slot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-			Slot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
-		}
-		return Button;
-	};
-
-	LoginButton    = MakeButton(TEXT("LoginButton"),    TEXT("로그인"));
-	RegisterButton = MakeButton(TEXT("RegisterButton"), TEXT("계정 만들기"));
-
-	MessageText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("MessageText"));
-	MessageText->SetAutoWrapText(true);
-	MessageText->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.75f, 0.75f)));
-	AddRow(MessageText, 0.f);
+    UVerticalBox* Root = WidgetTree->ConstructWidget<UVerticalBox>();
+    WidgetTree->RootWidget = Root;
+    auto* Login = WidgetTree->ConstructWidget<UVerticalBox>(); Root->AddChild(Login); LoginPanel = Login;
+    auto* Register = WidgetTree->ConstructWidget<UVerticalBox>(); Root->AddChild(Register); RegisterPanel = Register;
+    auto Edit = [&](UVerticalBox* Parent, const TCHAR* Name, const TCHAR* Hint, bool Secret) {
+        auto* W = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), Name);
+        W->SetHintText(FText::FromString(Hint)); W->SetIsPassword(Secret); Parent->AddChild(W); return W;
+    };
+    auto Button = [&](UVerticalBox* Parent, const TCHAR* Name, const TCHAR* Label) {
+        auto* W = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+        auto* T = WidgetTree->ConstructWidget<UTextBlock>(); T->SetText(FText::FromString(Label)); W->AddChild(T); Parent->AddChild(W); return W;
+    };
+    LoginIdBox = Edit(Login, TEXT("LoginIdBox"), TEXT("아이디"), false);
+    PasswordBox = Edit(Login, TEXT("PasswordBox"), TEXT("비밀번호"), true);
+    LoginPasswordEyeButton = Button(Login, TEXT("LoginPasswordEyeButton"), TEXT("비밀번호 표시/숨김"));
+    LoginButton = Button(Login, TEXT("LoginButton"), TEXT("로그인"));
+    RegisterButton = Button(Login, TEXT("RegisterButton"), TEXT("회원가입"));
+    MessageText = WidgetTree->ConstructWidget<UTextBlock>(); Login->AddChild(MessageText);
+    RegisterIdBox = Edit(Register, TEXT("RegisterIdBox"), TEXT("아이디"), false);
+    CheckIdButton = Button(Register, TEXT("CheckIdButton"), TEXT("중복 확인"));
+    RegisterPasswordBox = Edit(Register, TEXT("RegisterPasswordBox"), TEXT("비밀번호"), true);
+    RegisterPasswordEyeButton = Button(Register, TEXT("RegisterPasswordEyeButton"), TEXT("비밀번호 표시/숨김"));
+    ConfirmPasswordBox = Edit(Register, TEXT("ConfirmPasswordBox"), TEXT("비밀번호 확인"), true);
+    SubmitRegisterButton = Button(Register, TEXT("SubmitRegisterButton"), TEXT("회원가입 완료"));
+    CloseRegisterButton = Button(Register, TEXT("CloseRegisterButton"), TEXT("닫기"));
+    RegisterMessageText = WidgetTree->ConstructWidget<UTextBlock>(); Register->AddChild(RegisterMessageText);
+    Register->SetVisibility(ESlateVisibility::Collapsed);
 }
 
+// [AUTHUI-031] 입력과 서버 이벤트를 연결하고 로그인 화면을 초기화한다.
 void ULoginWidgetBase::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -127,12 +84,23 @@ void ULoginWidgetBase::NativeConstruct()
 		RegisterButton->OnClicked.AddUniqueDynamic(this, &ULoginWidgetBase::HandleRegisterClicked);
 	}
 
+    if (CheckIdButton) CheckIdButton->OnClicked.AddUniqueDynamic(this, &ULoginWidgetBase::HandleCheckIdClicked);
+    if (SubmitRegisterButton) SubmitRegisterButton->OnClicked.AddUniqueDynamic(this, &ULoginWidgetBase::TryRegister);
+    if (CloseRegisterButton) CloseRegisterButton->OnClicked.AddUniqueDynamic(this, &ULoginWidgetBase::CloseRegisterPanel);
+    if (LoginPasswordEyeButton) LoginPasswordEyeButton->OnClicked.AddUniqueDynamic(this, &ULoginWidgetBase::ToggleLoginPassword);
+    if (RegisterPasswordEyeButton) RegisterPasswordEyeButton->OnClicked.AddUniqueDynamic(this, &ULoginWidgetBase::ToggleRegisterPassword);
+    if (RegisterIdBox) RegisterIdBox->OnTextChanged.AddUniqueDynamic(this, &ULoginWidgetBase::HandleRegisterIdChanged);
+    if (PasswordBox) PasswordBox->OnTextCommitted.AddUniqueDynamic(this, &ULoginWidgetBase::HandlePasswordCommitted);
+    if (ConfirmPasswordBox) ConfirmPasswordBox->OnTextCommitted.AddUniqueDynamic(this, &ULoginWidgetBase::HandlePasswordCommitted);
+    ClearAllPasswordFields();
+    CloseRegisterPanel();
 	// NativeConstruct 는 뷰포트에 다시 붙을 때마다 불릴 수 있어 중복 구독을 막는다.
 	if (!bSubscribed)
 	{
 		if (UServerSubsystem* Chat = GetServerSubsystem())
 		{
 			Chat->OnChatLoginCompleted.AddDynamic(this, &ULoginWidgetBase::HandleLoginCompleted);
+			Chat->OnLoginIdChecked.AddDynamic(this, &ULoginWidgetBase::HandleIdChecked);
 			Chat->OnChatRegisterCompleted.AddDynamic(this, &ULoginWidgetBase::HandleRegisterCompleted);
 			Chat->OnChatStateChanged.AddDynamic(this, &ULoginWidgetBase::HandleStateChanged);
 			bSubscribed = true;
@@ -144,6 +112,7 @@ void ULoginWidgetBase::NativeConstruct()
 	SetMessage(TEXT("아이디와 비밀번호를 입력하세요."), false);
 }
 
+// [AUTHUI-032] 서버 이벤트와 미확정 요청을 정리하고 비밀번호를 지운다.
 void ULoginWidgetBase::NativeDestruct()
 {
 	// 구독 해제를 여기서 반드시 해야 파괴된 위젯으로 델리게이트가 날아오지 않는다.
@@ -152,12 +121,16 @@ void ULoginWidgetBase::NativeDestruct()
 		if (UServerSubsystem* Chat = GetServerSubsystem())
 		{
 			Chat->OnChatLoginCompleted.RemoveDynamic(this, &ULoginWidgetBase::HandleLoginCompleted);
+			Chat->CancelLoginIdCheck(ActiveCheckRequestId);
+            if (bRegisterRequestPending) Chat->CancelPendingRegistration();
+            Chat->OnLoginIdChecked.RemoveDynamic(this, &ULoginWidgetBase::HandleIdChecked);
 			Chat->OnChatRegisterCompleted.RemoveDynamic(this, &ULoginWidgetBase::HandleRegisterCompleted);
 			Chat->OnChatStateChanged.RemoveDynamic(this, &ULoginWidgetBase::HandleStateChanged);
 		}
 		bSubscribed = false;
 	}
 
+	ClearAllPasswordFields();
 	Super::NativeDestruct();
 }
 
@@ -216,9 +189,10 @@ bool ULoginWidgetBase::ReadAndValidateInput(FString& OutId, FString& OutPassword
 	return true;
 }
 
+// [AUTHUI-033] 로그인 패널의 검증된 자격증명으로 수동 로그인을 요청한다.
 void ULoginWidgetBase::TryLogin()
 {
-	if (bBusy)
+	if (bBusy || bRegisterPanelOpen)
 	{
 		return;
 	}
@@ -244,69 +218,42 @@ void ULoginWidgetBase::TryLogin()
 	Chat->Login(Id, Password, TeamId);
 }
 
+// [AUTHUI-034] 가입 검증이 완료된 입력을 서버에 제출한다.
 void ULoginWidgetBase::TryRegister()
 {
-	if (bBusy)
-	{
-		return;
-	}
-
-	FString Id, Password;
-	if (!ReadAndValidateInput(Id, Password))
-	{
-		return;
-	}
-
-	UServerSubsystem* Chat = GetServerSubsystem();
-	if (Chat == nullptr)
-	{
-		SetMessage(TEXT("채팅 시스템을 찾을 수 없습니다."), true);
-		return;
-	}
-
-	const FString Nickname = NicknameBox ? NicknameBox->GetText().ToString().TrimStartAndEnd() : FString();
-
-	SetBusy(true);
-	SetMessage(TEXT("계정을 만드는 중..."), false);
-
-	// 가입에 성공하면 사용자가 버튼을 한 번 더 누르지 않아도 되도록 이어서 로그인한다.
-	bAutoLoginAfterRegister = true;
-
-	EnsureConnected();
-	Chat->RegisterAccount(Id, Password, Nickname);
+    if (bBusy || !bRegisterPanelOpen) return;
+    FString Id, Password;
+    if (!ReadAndValidateRegisterInput(Id, Password)) return;
+    auto* Chat = GetServerSubsystem();
+    if (!Chat || Chat->GetConnectionState() != EChatConnectionState::Connected) {
+        EnsureConnected(); SetMessage(TEXT("서버 연결 후 다시 시도해 주세요."), true); return;
+    }
+    SubmittedRegisterId = Id; bRegisterRequestPending = true;
+    SetBusy(true); SetMessage(TEXT("계정을 만드는 중..."), false);
+    Chat->RegisterAccount(Id, Password, FString());
 }
 
 void ULoginWidgetBase::HandleLoginClicked()    { TryLogin(); }
-void ULoginWidgetBase::HandleRegisterClicked() { TryRegister(); }
+// [AUTHUI-035] 가입 실행 대신 가입 화면을 연다.
+void ULoginWidgetBase::HandleRegisterClicked() {
+    OpenRegisterPanel();
+}
 
+// [AUTHUI-036] 가입 성공 시 자동 로그인 없이 로그인 화면으로 복귀한다.
 void ULoginWidgetBase::HandleRegisterCompleted(bool bSuccess, EChatLoginResultBP Result)
 {
-	if (!bSuccess)
-	{
-		bAutoLoginAfterRegister = false;
-		SetBusy(false);
-		SetMessage(UServerSubsystem::GetLoginResultText(Result), true);
-		return;
-	}
-
-	if (bAutoLoginAfterRegister)
-	{
-		bAutoLoginAfterRegister = false;
-		SetMessage(TEXT("계정을 만들었습니다. 로그인 중..."), false);
-
-		FString Id, Password;
-		if (ReadAndValidateInput(Id, Password))
-		{
-			if (UServerSubsystem* Chat = GetServerSubsystem())
-			{
-				Chat->Login(Id, Password, TeamId);
-				return;   // bBusy 는 로그인 응답까지 유지한다
-			}
-		}
-	}
-
-	SetBusy(false);
-	SetMessage(TEXT("계정을 만들었습니다. 로그인해 주세요."), false);
+    if (!bRegisterPanelOpen || !bRegisterRequestPending) return;
+    bRegisterRequestPending = false; SetBusy(false);
+    if (!bSuccess) {
+        if (Result == EChatLoginResultBP::DuplicateId) { bIdAvailable = false; CheckedLoginId.Empty(); SetCheckStatus(2); }
+        SetMessage(Result == EChatLoginResultBP::ServerError
+            ? TEXT("가입 결과를 확인하지 못했습니다. 로그인하거나 중복 확인을 다시 해주세요.")
+            : UServerSubsystem::GetLoginResultText(Result), true);
+        return;
+    }
+    if (LoginIdBox) LoginIdBox->SetText(FText::FromString(SubmittedRegisterId));
+    CloseRegisterPanel();
+    SetMessage(TEXT("가입이 완료되었습니다. 로그인해 주세요."), false);
 }
 
 void ULoginWidgetBase::HandleLoginCompleted(const FChatLoginResult& Result)
@@ -319,7 +266,7 @@ void ULoginWidgetBase::HandleLoginCompleted(const FChatLoginResult& Result)
 		// 비밀번호는 화면에 남겨두지 않는다. 아이디는 고칠 일이 적으니 남긴다.
 		if (PasswordBox != nullptr)
 		{
-			PasswordBox->SetText(FText::GetEmpty());
+			ClearAllPasswordFields();
 		}
 		return;
 	}
@@ -329,7 +276,7 @@ void ULoginWidgetBase::HandleLoginCompleted(const FChatLoginResult& Result)
 	// 성공한 뒤에는 입력칸에 자격증명을 남기지 않는다.
 	if (PasswordBox != nullptr)
 	{
-		PasswordBox->SetText(FText::GetEmpty());
+		ClearAllPasswordFields();
 	}
 
 	OnLoginSucceeded(Result);
@@ -350,19 +297,16 @@ void ULoginWidgetBase::HandleLoginCompleted(const FChatLoginResult& Result)
 	}
 }
 
+// [AUTHUI-037] 연결 종료 시 가입 검증과 대기를 해제한다.
 void ULoginWidgetBase::HandleStateChanged(EChatConnectionState NewState, const FString& Detail)
 {
-	// 연결이 끊긴 상태만 알려준다. 나머지는 로그인 결과 메시지가 덮어쓰므로 조용히 둔다.
-	if (NewState == EChatConnectionState::Disconnected)
-	{
-		SetBusy(false);
-		// 어느 서버에 실패했는지까지 같이 보여준다. 팀 작업에서는 "서버가 꺼져 있다" 보다
-		// "엉뚱한 주소를 보고 있다" 가 훨씬 흔한 원인이라 주소가 화면에 있어야 한다.
-		const FString Target = UMOUServerSettings::GetResolvedEndpointText();
-		SetMessage(Detail.IsEmpty()
-			? FString::Printf(TEXT("서버(%s)에 연결할 수 없습니다. 서버가 켜져 있는지 확인하세요."), *Target)
-			: FString::Printf(TEXT("연결 끊김: %s (대상 %s)"), *Detail, *Target), true);
-	}
+    if (NewState == EChatConnectionState::Disconnected) {
+        const bool Pending = bRegisterRequestPending;
+        bRegisterRequestPending = false;
+        HandleRegisterIdChanged(FText::GetEmpty()); SetBusy(false);
+        SetMessage(Pending ? TEXT("가입 결과를 확인하지 못했습니다. 로그인하거나 중복 확인을 다시 해주세요.")
+            : TEXT("서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요."), true);
+    }
 }
 
 void ULoginWidgetBase::ShowChatWidget()
@@ -396,29 +340,24 @@ void ULoginWidgetBase::ShowLobbyWidget()
 	}
 }
 
+// [AUTHUI-038] 요청 중 입력과 버튼을 함께 잠가 중복 제출을 방지한다.
 void ULoginWidgetBase::SetBusy(bool bInBusy)
 {
-	bBusy = bInBusy;
-	if (LoginButton != nullptr)
-	{
-		LoginButton->SetIsEnabled(!bInBusy);
-	}
-	if (RegisterButton != nullptr)
-	{
-		RegisterButton->SetIsEnabled(!bInBusy);
-	}
+    bBusy = bInBusy;
+    UWidget* Controls[] = {LoginIdBox, PasswordBox, LoginButton, RegisterButton,
+        RegisterIdBox, RegisterPasswordBox, ConfirmPasswordBox, CheckIdButton,
+        SubmitRegisterButton, CloseRegisterButton, LoginPasswordEyeButton, RegisterPasswordEyeButton};
+    for (UWidget* Control : Controls) if (Control) Control->SetIsEnabled(!bBusy);
+    if (CheckIdButton) CheckIdButton->SetIsEnabled(!bBusy && !ActiveCheckRequestId);
 }
 
+// [AUTHUI-039] 활성 패널에 진행 또는 오류 안내를 표시한다.
 void ULoginWidgetBase::SetMessage(const FString& Text, bool bIsError)
 {
-	if (MessageText == nullptr)
-	{
-		return;
-	}
-	MessageText->SetText(FText::FromString(Text));
-	MessageText->SetColorAndOpacity(FSlateColor(bIsError
-		? FLinearColor(1.f, 0.45f, 0.45f)
-		: FLinearColor(0.75f, 0.75f, 0.75f)));
+    UTextBlock* Target = bRegisterPanelOpen ? RegisterMessageText.Get() : MessageText.Get();
+    if (!Target) return;
+    Target->SetText(FText::FromString(Text));
+    Target->SetColorAndOpacity(FSlateColor(bIsError ? FLinearColor(1.f,.35f,.3f) : FLinearColor(.75f,.9f,1.f)));
 }
 
 // ---------------------------------------------------------------------------
@@ -459,3 +398,111 @@ static FAutoConsoleCommandWithWorldAndArgs GShowLoginCommand(
 			PC->SetShowMouseCursor(true);
 		}));
 #endif
+
+// [AUTHUI-010] 로그인 입력을 지우고 별도 회원가입 패널을 연다.
+void ULoginWidgetBase::OpenRegisterPanel()
+{
+    if (bBusy) return;
+    ClearAllPasswordFields(); bRegisterPanelOpen = true;
+    if (LoginPanel) LoginPanel->SetVisibility(ESlateVisibility::Collapsed);
+    if (RegisterPanel) RegisterPanel->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+    if (RegisterIdBox) RegisterIdBox->SetText(FText::GetEmpty());
+    HandleRegisterIdChanged(FText::GetEmpty());
+    SetMessage(TEXT("아이디 중복 확인 후 비밀번호를 입력하세요."), false);
+}
+
+// [AUTHUI-011] 가입 조회와 비밀번호를 지우고 로그인 화면으로 돌아간다.
+void ULoginWidgetBase::CloseRegisterPanel()
+{
+    if (bBusy) return;
+    HandleRegisterIdChanged(FText::GetEmpty()); ClearAllPasswordFields(); bRegisterPanelOpen = false;
+    if (RegisterPanel) RegisterPanel->SetVisibility(ESlateVisibility::Collapsed);
+    if (LoginPanel) LoginPanel->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+}
+
+// [AUTHUI-012] 아이디 편집 시 이전 중복 확인과 진행 중 조회를 무효화한다.
+void ULoginWidgetBase::HandleRegisterIdChanged(const FText& Text)
+{
+    if (auto* Chat = GetServerSubsystem()) Chat->CancelLoginIdCheck(ActiveCheckRequestId);
+    ActiveCheckRequestId = 0; bIdAvailable = false; CheckedLoginId.Empty(); SetCheckStatus(0);
+    if (CheckIdButton) CheckIdButton->SetIsEnabled(!bBusy);
+}
+
+// [AUTHUI-013] 아이디 형식을 검사하고 서버에 중복 확인을 요청한다.
+void ULoginWidgetBase::HandleCheckIdClicked()
+{
+    if (bBusy || ActiveCheckRequestId || !bRegisterPanelOpen || !RegisterIdBox) return;
+    const FString Id = RegisterIdBox->GetText().ToString().TrimStartAndEnd();
+    FString Reason;
+    if (!UServerSubsystem::ValidateLoginId(Id, Reason)) { SetMessage(Reason, true); return; }
+    HandleRegisterIdChanged(FText::GetEmpty()); CheckingLoginId = Id;
+    EnsureConnected();
+    if (auto* Chat = GetServerSubsystem()) ActiveCheckRequestId = Chat->CheckLoginId(Id);
+    if (CheckIdButton) CheckIdButton->SetIsEnabled(!ActiveCheckRequestId);
+    SetMessage(ActiveCheckRequestId ? TEXT("중복 확인 중...") : TEXT("서버 연결 후 다시 시도해 주세요."), !ActiveCheckRequestId);
+}
+
+// [AUTHUI-014] 요청 번호와 현재 아이디가 일치하는 조회 결과만 반영한다.
+void ULoginWidgetBase::HandleIdChecked(int64 RequestId, EChatLoginResultBP Result)
+{
+    if (!bRegisterPanelOpen || !ActiveCheckRequestId || RequestId != ActiveCheckRequestId) return;
+    ActiveCheckRequestId = 0;
+    if (CheckIdButton) CheckIdButton->SetIsEnabled(!bBusy);
+    if (!RegisterIdBox || RegisterIdBox->GetText().ToString().TrimStartAndEnd() != CheckingLoginId) return;
+    bIdAvailable = Result == EChatLoginResultBP::Success;
+    CheckedLoginId = bIdAvailable ? CheckingLoginId : FString();
+    SetCheckStatus(bIdAvailable ? 1 : Result == EChatLoginResultBP::DuplicateId ? 2 : 0);
+    SetMessage(bIdAvailable ? TEXT("비밀번호를 입력하고 회원가입을 완료하세요.") : Result == EChatLoginResultBP::DuplicateId ? TEXT("다른 아이디로 중복 확인해 주세요.") : UServerSubsystem::GetLoginResultText(Result), !bIdAvailable);
+}
+
+// [AUTHUI-015] 로그인 비밀번호의 마스킹과 눈 아이콘을 함께 전환한다.
+void ULoginWidgetBase::ToggleLoginPassword()
+{
+    bLoginPasswordVisible = !bLoginPasswordVisible;
+    if (PasswordBox) PasswordBox->SetIsPassword(!bLoginPasswordVisible);
+    if (LoginEyeSlash) LoginEyeSlash->SetVisibility(bLoginPasswordVisible ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+}
+
+// [AUTHUI-016] 가입 비밀번호의 마스킹과 눈 아이콘을 함께 전환한다.
+void ULoginWidgetBase::ToggleRegisterPassword()
+{
+    bRegisterPasswordVisible = !bRegisterPasswordVisible;
+    if (RegisterPasswordBox) RegisterPasswordBox->SetIsPassword(!bRegisterPasswordVisible);
+    if (RegisterEyeSlash) RegisterEyeSlash->SetVisibility(bRegisterPasswordVisible ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+}
+
+// [AUTHUI-017] 계정 길이 정책·비밀번호 일치·아이디 중복 확인을 검증한다.
+bool ULoginWidgetBase::ReadAndValidateRegisterInput(FString& Id, FString& Password)
+{
+    Id = RegisterIdBox ? RegisterIdBox->GetText().ToString().TrimStartAndEnd() : FString();
+    Password = RegisterPasswordBox ? RegisterPasswordBox->GetText().ToString() : FString();
+    FString Reason;
+    if (!UServerSubsystem::ValidateCredentials(Id, Password, Reason)) { SetMessage(Reason, true); return false; }
+    if (!ConfirmPasswordBox || Password != ConfirmPasswordBox->GetText().ToString()) { SetMessage(TEXT("비밀번호가 일치하지 않습니다."), true); return false; }
+    if (!bIdAvailable || CheckedLoginId != Id) { SetMessage(TEXT("아이디 중복 확인을 완료해 주세요."), true); return false; }
+    return true;
+}
+
+// [AUTHUI-018] 모든 비밀번호를 지우고 숨김 상태로 되돌린다.
+void ULoginWidgetBase::ClearAllPasswordFields()
+{
+    UEditableTextBox* Boxes[] = {PasswordBox, RegisterPasswordBox, ConfirmPasswordBox};
+    for (auto* Box : Boxes) if (Box) { Box->SetText(FText::GetEmpty()); Box->SetIsPassword(true); }
+    bLoginPasswordVisible = bRegisterPasswordVisible = false;
+    if (LoginEyeSlash) LoginEyeSlash->SetVisibility(ESlateVisibility::HitTestInvisible);
+    if (RegisterEyeSlash) RegisterEyeSlash->SetVisibility(ESlateVisibility::HitTestInvisible);
+}
+
+// [AUTHUI-019] 중복 확인 안내·사용 가능·중복 이미지를 배타적으로 표시한다.
+void ULoginWidgetBase::SetCheckStatus(int32 Status)
+{
+    UWidget* Images[] = {CheckIdHint, CheckIdAvailable, CheckIdDuplicate};
+    for (int32 I=0; I<3; ++I) if (Images[I]) Images[I]->SetVisibility(I == Status ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+}
+
+// [AUTHUI-020] Enter 입력을 현재 패널의 로그인 또는 가입 제출에 연결한다.
+void ULoginWidgetBase::HandlePasswordCommitted(const FText& Text, ETextCommit::Type Method)
+{
+    if (Method != ETextCommit::OnEnter) return;
+    if (bRegisterPanelOpen) TryRegister(); else TryLogin();
+}

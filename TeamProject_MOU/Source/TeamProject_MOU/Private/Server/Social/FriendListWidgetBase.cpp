@@ -1,9 +1,12 @@
-﻿// MOU 친구 시스템 - 친구 목록 패널 구현 (v7 M8).
+// MOU 친구 시스템 - 친구 목록 패널 구현 (v7 M8).
 // 대응하는 설계 문서: CHAT_DESIGN.md 4절, 10절
 
 #include "Server/Social/FriendListWidgetBase.h"
 
 #include "Server/ServerSubsystem.h"
+#include "Server/Chat/MessengerPartsWidget.h"
+#include "Components/Image.h"
+#include "Engine/Texture2D.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
@@ -85,11 +88,13 @@ namespace
 // UFriendEntryWidget - 한 줄
 // ===========================================================================
 
+// [FRUI-001] UFriendEntryWidget 동작을 처리하고 관련 위젯 상태를 갱신한다.
 UFriendEntryWidget::UFriendEntryWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
 }
 
+// [FRUI-002] 초기 바인딩이 없는 경우 기본 위젯 트리를 구성한다.
 void UFriendEntryWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
@@ -101,9 +106,15 @@ void UFriendEntryWidget::NativeOnInitialized()
 	}
 }
 
+// [FRUI-003] 위젯 이벤트를 연결하고 저장된 데이터를 표시한다.
 void UFriendEntryWidget::NativeConstruct()
 {
-	Super::NativeConstruct();
+    Super::NativeConstruct();
+    // WBP의 버튼 라벨은 기본 C++ 트리에서 생성하지 않으므로 이름으로 연결한다.
+    PrimaryLabel = Cast<UTextBlock>(WidgetTree->FindWidget(TEXT("PrimaryLabel")));
+    SecondaryLabel = Cast<UTextBlock>(WidgetTree->FindWidget(TEXT("SecondaryLabel")));
+    if (EntryMoreButton) EntryMoreButton->OnClicked.AddUniqueDynamic(this, &UFriendEntryWidget::HandleMoreClicked);
+    RefreshVisuals();
 
 	if (EntryPrimaryButton != nullptr)
 	{
@@ -122,6 +133,7 @@ void UFriendEntryWidget::NativeConstruct()
 //     - EntryUnreadText        [3]  안 읽음 배지
 //     - EntryPrimaryButton     [메시지] 또는 [수락]
 //     - EntrySecondaryButton   [삭제] / [거절] / [취소]
+// [FRUI-004] WBP가 없을 때 사용할 기본 레이아웃을 구성한다.
 void UFriendEntryWidget::BuildDefaultLayout()
 {
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FriendEntryRow"));
@@ -167,14 +179,29 @@ void UFriendEntryWidget::BuildDefaultLayout()
 	AddCell(EntrySecondaryButton, ESlateSizeRule::Automatic, 0.f);
 }
 
+// [FRUI-005] SetFriend 동작을 처리하고 관련 위젯 상태를 갱신한다.
 void UFriendEntryWidget::SetFriend(const FMOUFriend& InFriend)
 {
 	Cached = InFriend;
 	RefreshVisuals();
 }
 
+// [FRUI-006] 저장된 데이터로 위젯 표시와 상태를 갱신한다.
 void UFriendEntryWidget::RefreshVisuals()
 {
+    UTexture2D* PresenceTexture = nullptr;
+    if (Cached.State == EMOUFriendStateBP::Friend)
+    {
+        PresenceTexture = Cached.Presence == EMOUPresenceBP::Online ? OnlineTexture.Get()
+            : Cached.Presence == EMOUPresenceBP::InGame ? InGameTexture.Get() : OfflineTexture.Get();
+    }
+    if (EntryPresenceImage)
+    {
+        if (PresenceTexture) EntryPresenceImage->SetBrushFromTexture(PresenceTexture, true);
+        EntryPresenceImage->SetVisibility(PresenceTexture ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+    }
+    if (EntryStatusText) EntryStatusText->SetVisibility(EntryPresenceImage && PresenceTexture ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+    if (EntryMoreButton) EntryMoreButton->SetVisibility(Cached.State == EMOUFriendStateBP::Friend ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	if (EntryNameText != nullptr)
 	{
 		EntryNameText->SetText(FText::FromString(Cached.Nickname));
@@ -202,6 +229,7 @@ void UFriendEntryWidget::RefreshVisuals()
 			: FText::GetEmpty());
 	}
 
+	if (EntryUnreadText) EntryUnreadText->SetVisibility(Cached.UnreadCount > 0 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	// --- 상태별 버튼 구성 ---
 	//
 	// ★ 버튼을 새로 만들지 않고 라벨과 표시 여부만 바꾼다. 매번 다시 만들면
@@ -226,6 +254,7 @@ void UFriendEntryWidget::RefreshVisuals()
 	}
 }
 
+// [FRUI-007] HandlePrimaryClicked 동작을 처리하고 관련 위젯 상태를 갱신한다.
 void UFriendEntryWidget::HandlePrimaryClicked()
 {
 	OnAction.ExecuteIfBound(Cached.UserId,
@@ -234,6 +263,7 @@ void UFriendEntryWidget::HandlePrimaryClicked()
 			: EFriendEntryAction::Message);
 }
 
+// [FRUI-008] HandleSecondaryClicked 동작을 처리하고 관련 위젯 상태를 갱신한다.
 void UFriendEntryWidget::HandleSecondaryClicked()
 {
 	// ★ 거절과 삭제는 서버에서 다른 요청이다(FriendRespondReq vs FriendRemoveReq).
@@ -248,12 +278,14 @@ void UFriendEntryWidget::HandleSecondaryClicked()
 // UFriendListWidgetBase - 패널
 // ===========================================================================
 
+// [FRUI-009] UFriendListWidgetBase 동작을 처리하고 관련 위젯 상태를 갱신한다.
 UFriendListWidgetBase::UFriendListWidgetBase(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
 	EntryWidgetClass = UFriendEntryWidget::StaticClass();
 }
 
+// [FRUI-010] 초기 바인딩이 없는 경우 기본 위젯 트리를 구성한다.
 void UFriendListWidgetBase::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
@@ -264,6 +296,7 @@ void UFriendListWidgetBase::NativeOnInitialized()
 	}
 }
 
+// [FRUI-011] WBP가 없을 때 사용할 기본 레이아웃을 구성한다.
 void UFriendListWidgetBase::BuildDefaultLayout()
 {
 	// ★★ 폭을 못 박는다. 이게 없으면 패널이 내용물을 따라 커졌다 작아져서,
@@ -324,15 +357,20 @@ void UFriendListWidgetBase::BuildDefaultLayout()
 	AddRow(FriendScrollBox, ESlateSizeRule::Fill, 0.f);
 }
 
+// [FRUI-012] GetServerSubsystem 동작을 처리하고 관련 위젯 상태를 갱신한다.
 UServerSubsystem* UFriendListWidgetBase::GetServerSubsystem() const
 {
 	const UGameInstance* GI = GetGameInstance();
 	return GI ? GI->GetSubsystem<UServerSubsystem>() : nullptr;
 }
 
+// [FRUI-013] 위젯 이벤트를 연결하고 저장된 데이터를 표시한다.
 void UFriendListWidgetBase::NativeConstruct()
 {
-	Super::NativeConstruct();
+    Super::NativeConstruct();
+    if (OpenAddFriendButton) OpenAddFriendButton->OnClicked.AddUniqueDynamic(this, &UFriendListWidgetBase::HandleOpenAdd);
+    if (OpenRequestsButton) OpenRequestsButton->OnClicked.AddUniqueDynamic(this, &UFriendListWidgetBase::HandleOpenRequests);
+    if (FriendCloseButton) FriendCloseButton->OnClicked.AddUniqueDynamic(this, &UFriendListWidgetBase::HandlePanelClose);
 
 	if (AddFriendButton != nullptr)
 	{
@@ -358,6 +396,7 @@ void UFriendListWidgetBase::NativeConstruct()
 	RebuildList();
 }
 
+// [FRUI-014] 서버 구독과 타이머를 정리한다.
 void UFriendListWidgetBase::NativeDestruct()
 {
 	// ★ 타이머도 델리게이트와 같은 이유로 반드시 끈다. 남아 있으면 파괴된
@@ -381,11 +420,13 @@ void UFriendListWidgetBase::NativeDestruct()
 	Super::NativeDestruct();
 }
 
+// [FRUI-015] GetEntryCount 동작을 처리하고 관련 위젯 상태를 갱신한다.
 int32 UFriendListWidgetBase::GetEntryCount() const
 {
 	return EntryWidgets.Num();
 }
 
+// [FRUI-016] SetStatus 동작을 처리하고 관련 위젯 상태를 갱신한다.
 void UFriendListWidgetBase::SetStatus(const FString& Text, bool bIsError)
 {
 	if (StatusText == nullptr)
@@ -418,6 +459,7 @@ void UFriendListWidgetBase::SetStatus(const FString& Text, bool bIsError)
 		StatusClearSeconds, /*bLoop=*/false);
 }
 
+// [FRUI-017] ClearStatus 동작을 처리하고 관련 위젯 상태를 갱신한다.
 void UFriendListWidgetBase::ClearStatus()
 {
 	if (StatusText != nullptr)
@@ -426,6 +468,7 @@ void UFriendListWidgetBase::ClearStatus()
 	}
 }
 
+// [FRUI-018] 친구 목록을 정렬·필터링하고 신청 개수를 갱신한다.
 void UFriendListWidgetBase::RebuildList()
 {
 	if (FriendListBox == nullptr)
@@ -442,6 +485,16 @@ void UFriendListWidgetBase::RebuildList()
 	// ★ 캐시를 복사해서 정렬한다. 서브시스템의 배열을 직접 정렬하면 그쪽이
 	//   특정 순서를 전제로 하는 코드를 갖게 될 때 조용히 깨진다.
 	TArray<FMOUFriend> Sorted = Chat->GetFriendsRef();
+    int32 RequestCount = 0;
+    for (const FMOUFriend& Friend : Sorted) if (Friend.State == EMOUFriendStateBP::PendingIncoming) ++RequestCount;
+    if (RequestCountText)
+    {
+        RequestCountText->SetText(FText::AsNumber(RequestCount));
+        RequestCountText->SetVisibility(RequestCount > 0 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+    }
+    if (RequestBadgeImage) RequestBadgeImage->SetVisibility(RequestCount > 0 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+    if (bSeparateRequestPanels) Sorted.RemoveAll([](const FMOUFriend& Friend) { return Friend.State != EMOUFriendStateBP::Friend; });
+    if (EmptyFriendsText) EmptyFriendsText->SetVisibility(Sorted.IsEmpty() ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 
 	Sorted.Sort([](const FMOUFriend& A, const FMOUFriend& B)
 	{
@@ -480,6 +533,7 @@ void UFriendListWidgetBase::RebuildList()
 		}
 
 		Row->SetFriend(Entry);
+        Row->OnContextMenuRequested.BindUObject(this, &UFriendListWidgetBase::HandleContextMenu);
 		Row->OnAction.BindUObject(this, &UFriendListWidgetBase::HandleEntryAction);
 
 		FriendListBox->AddChildToVerticalBox(Row);
@@ -496,11 +550,11 @@ void UFriendListWidgetBase::RebuildList()
 				++OnlineCount;
 			}
 		}
-		TitleText->SetText(FText::FromString(
-			FString::Printf(TEXT("커뮤니티 (%d/%d)"), OnlineCount, Sorted.Num())));
+		TitleText->SetText(FText::FromString(bSeparateRequestPanels ? TEXT("친구") : FString::Printf(TEXT("커뮤니티 (%d/%d)"), OnlineCount, Sorted.Num())));
 	}
 }
 
+// [FRUI-019] HandleFriendListReceived 동작을 처리하고 관련 위젯 상태를 갱신한다.
 void UFriendListWidgetBase::HandleFriendListReceived(const TArray<FMOUFriend>&)
 {
 	// 인자를 쓰지 않는 이유: 서브시스템이 이미 캐시에 넣어두었고 RebuildList 가
@@ -508,11 +562,13 @@ void UFriendListWidgetBase::HandleFriendListReceived(const TArray<FMOUFriend>&)
 	RebuildList();
 }
 
+// [FRUI-020] HandleFriendUpdated 동작을 처리하고 관련 위젯 상태를 갱신한다.
 void UFriendListWidgetBase::HandleFriendUpdated(const FMOUFriend&, bool)
 {
 	RebuildList();
 }
 
+// [FRUI-021] HandleFriendPresenceChanged 동작을 처리하고 관련 위젯 상태를 갱신한다.
 void UFriendListWidgetBase::HandleFriendPresenceChanged(int64, EMOUPresenceBP)
 {
 	// ★ 상태가 바뀌면 정렬 순서도 바뀐다(온라인이 위로 올라온다).
@@ -520,6 +576,7 @@ void UFriendListWidgetBase::HandleFriendPresenceChanged(int64, EMOUPresenceBP)
 	RebuildList();
 }
 
+// [FRUI-022] 수신 메시지를 표시하고 현재 보고 있는 대화만 읽음 처리한다.
 void UFriendListWidgetBase::HandleDirectMessageReceived(const FMOUDirectMessage& Message)
 {
 	// 안 읽음 배지가 바뀌었을 수 있다. 내가 보낸 것은 배지와 무관하다.
@@ -529,6 +586,7 @@ void UFriendListWidgetBase::HandleDirectMessageReceived(const FMOUDirectMessage&
 	}
 }
 
+// [FRUI-023] HandleFriendAddCompleted 동작을 처리하고 관련 위젯 상태를 갱신한다.
 void UFriendListWidgetBase::HandleFriendAddCompleted(bool bSuccess, EMOUFriendResultBP Result)
 {
 	if (bSuccess)
@@ -545,6 +603,7 @@ void UFriendListWidgetBase::HandleFriendAddCompleted(bool bSuccess, EMOUFriendRe
 	}
 }
 
+// [FRUI-024] HandleAddFriendClicked 동작을 처리하고 관련 위젯 상태를 갱신한다.
 void UFriendListWidgetBase::HandleAddFriendClicked()
 {
 	if (AddFriendBox == nullptr)
@@ -566,6 +625,7 @@ void UFriendListWidgetBase::HandleAddFriendClicked()
 	}
 }
 
+// [FRUI-025] HandleEntryAction 동작을 처리하고 관련 위젯 상태를 갱신한다.
 void UFriendListWidgetBase::HandleEntryAction(int64 UserId, EFriendEntryAction Action)
 {
 	UServerSubsystem* Chat = GetServerSubsystem();
@@ -594,3 +654,16 @@ void UFriendListWidgetBase::HandleEntryAction(int64 UserId, EFriendEntryAction A
 		break;
 	}
 }
+
+// [FRUI-026] HandleMoreClicked 동작을 처리하고 관련 위젯 상태를 갱신한다.
+void UFriendEntryWidget::HandleMoreClicked() { OnContextMenuRequested.ExecuteIfBound(Cached.UserId); }
+// [FRUI-027] RefreshFromCache 동작을 처리하고 관련 위젯 상태를 갱신한다.
+void UFriendListWidgetBase::RefreshFromCache() { RebuildList(); }
+// [FRUI-028] HandleOpenAdd 동작을 처리하고 관련 위젯 상태를 갱신한다.
+void UFriendListWidgetBase::HandleOpenAdd() { OnAddFriendPopupRequested.ExecuteIfBound(); }
+// [FRUI-029] HandleOpenRequests 동작을 처리하고 관련 위젯 상태를 갱신한다.
+void UFriendListWidgetBase::HandleOpenRequests() { OnRequestsPopupRequested.ExecuteIfBound(); }
+// [FRUI-030] HandlePanelClose 동작을 처리하고 관련 위젯 상태를 갱신한다.
+void UFriendListWidgetBase::HandlePanelClose() { OnPanelCloseRequested.ExecuteIfBound(); }
+// [FRUI-031] HandleContextMenu 동작을 처리하고 관련 위젯 상태를 갱신한다.
+void UFriendListWidgetBase::HandleContextMenu(int64 UserId) { OnContextMenuRequested.ExecuteIfBound(UserId); }
