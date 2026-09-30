@@ -1,0 +1,28 @@
+WBP_RadioUI HUD 연결 안내
+
+에셋: /Game/02_JSY/AI_VoicePerception/Radio/WBP_RadioUI
+부모 클래스: URadioStatusWidget
+
+HUD에 WBP_RadioUI를 한 번 배치하고 로컬 플레이어 컨트롤러를 Owning Player로 전달합니다.
+HUD의 CanvasPanel 안에 넣는 경우 WBP_RadioUI 슬롯의 앵커를 전체 화면 Stretch로 설정하고 오프셋을 0으로 둡니다.
+내부 RadioRow가 오른쪽 아래 앵커(1,1), 정렬(1,1), 오프셋(-48,-48)로 배치되어 있습니다.
+전체 행: 417x50. 게이지: WBP_StatusUI와 같은 275x50.
+순서: StatusIcon → RadioIcon → BatteryBar → BatteryPercentText.
+
+기존 조작: Z 전원 전환(손에 들었을 때만), X 홀드 송신(전원이 켜지고 손에 들었을 때).
+미소유: 전체 숨김. 소유/OFF: 회색. 소유/ON: 주황색.
+송신: 빨간 점. 수신: 주황색 전파. 평시: 상태 아이콘 공간을 유지하며 숨김.
+송신과 수신 상태가 겹치면 기존 규칙대로 송신 표시가 우선합니다.
+전원이 켜진 상태에서 수납하면 배터리는 계속 줄고 수신은 유지됩니다. 수납 중 송신은 기존 서버 라우터가 거부합니다.
+퍼센트는 복제된 잔량을 정수로 반올림해 표시합니다.
+
+M_RadioPowerUI: IconTexture의 투명도를 유지하면서 Desaturation(0=원래 색, 1=회색)을 적용합니다.
+아이콘과 게이지 채움에는 위젯별 동적 머티리얼 인스턴스를 사용합니다.
+MI_RadioGaugeBackgroundUI는 비어 있는 게이지를 회색으로 표시합니다.
+잔량 부족 조회값은 유지하지만 ON=주황색을 유지하기 위해 잔량 부족 시 붉은 틴트는 적용하지 않습니다.
+
+HUD/PlayerController/인벤토리/음성 라우터는 이번 UI 작업에서 수정하지 않았습니다.
+기존 빈 WBP_RadioStatusWidget도 그대로 남아 있습니다.
+
+검증: C++ 에디터 빌드, WBP 컴파일, 일반 PIE 19개 항목 통과.
+실제 2인 음성 송수신은 이번 단일 플레이어 검증에 포함되지 않습니다.

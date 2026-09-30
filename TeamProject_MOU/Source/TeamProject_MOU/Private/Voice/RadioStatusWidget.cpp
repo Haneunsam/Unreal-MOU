@@ -13,6 +13,8 @@
 #include "Components/Image.h"
 #include "Components/InputComponent.h"
 #include "Components/ProgressBar.h"
+#include "Components/TextBlock.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -344,7 +346,24 @@ void URadioStatusWidget::ApplyRadioState(ERadioIconState NewState)
 
 	if (RadioIcon != nullptr)
 	{
+		FSlateBrush Brush = RadioIcon->GetBrush();
+		ApplyPowerToBrush(Brush, bOff);
+		RadioIcon->SetBrush(Brush);
 		RadioIcon->SetColorAndOpacity(PowerTint);
+	}
+
+	if (BatteryBar != nullptr)
+	{
+		FProgressBarStyle Style = BatteryBar->GetWidgetStyle();
+		ApplyPowerToBrush(Style.FillImage, bOff);
+		BatteryBar->SetWidgetStyle(Style);
+		BatteryBar->SetFillColorAndOpacity(PowerTint);
+	}
+
+	if (BatteryPercentText != nullptr)
+	{
+		BatteryPercentText->SetColorAndOpacity(FSlateColor(bOff
+			? PowerTint : FLinearColor(1.f, 0.35f, 0.02f)));
 	}
 
 	if (StatusIcon != nullptr)
@@ -352,6 +371,8 @@ void URadioStatusWidget::ApplyRadioState(ERadioIconState NewState)
 		const ERadioIconState IconState = bOff ? ERadioIconState::On : NewState;
 		const FSlateBrush* Brush = IconBrushes.Find(IconState);
 		StatusIcon->SetBrush(Brush ? *Brush : FSlateBrush());
+		StatusIcon->SetVisibility(Brush && Brush->GetResourceObject()
+			? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
 		const FLinearColor* Tint = IconTints.Find(NewState);
 		StatusIcon->SetColorAndOpacity(!bOff && Tint ? *Tint : PowerTint);
 	}
@@ -359,42 +380,55 @@ void URadioStatusWidget::ApplyRadioState(ERadioIconState NewState)
 	OnRadioStateChanged(NewState, OldState);
 }
 
+// [RUI-011] UI 브러시의 전용 머티리얼 인스턴스로 전원 OFF 시 채도를 제거한다.
+void URadioStatusWidget::ApplyPowerToBrush(FSlateBrush& Brush, bool bOff)
+{
+	UMaterialInterface* Material = Cast<UMaterialInterface>(Brush.GetResourceObject());
+	if (Material == nullptr)
+	{
+		return;
+	}
+
+	UMaterialInstanceDynamic* DynamicMaterial = Cast<UMaterialInstanceDynamic>(Material);
+	if (DynamicMaterial == nullptr)
+	{
+		DynamicMaterial = UMaterialInstanceDynamic::Create(Material, this);
+		Brush.SetResourceObject(DynamicMaterial);
+	}
+
+	if (DynamicMaterial != nullptr)
+	{
+		DynamicMaterial->SetScalarParameterValue(TEXT("Desaturation"), bOff ? 1.f : 0.f);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 배터리 바
 // ---------------------------------------------------------------------------
 
-// [RUI-009] 실제 배터리 잔량과 부족 경고 색을 표시한다.
+// [RUI-009] 실제 배터리 잔량과 퍼센트 텍스트를 갱신한다.
 void URadioStatusWidget::UpdateBatteryBar()
 {
-	// ★ 배터리는 ARadio 에만 있다. CurrentDurability 가 AItemBase 의 것이라
-	//   테스트 무전기(AVoiceDebugRadio)에는 아예 없다.
 	const ARadio* Item = FindLocalRadioItem();
-
 	bBatteryLow = (Item != nullptr) && (Item->GetBatteryPercent() <= GBatteryLowThreshold);
 
-	if (BatteryBar == nullptr)
+	const ESlateVisibility BatteryVisibility = Item
+		? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed;
+	const float BatteryPercent = Item ? Item->GetBatteryPercent() : 0.f;
+
+	if (BatteryBar != nullptr)
 	{
-		return; // BatteryBar가 없는 WBP에서는 게이지를 표시하지 않는다.
+		BatteryBar->SetVisibility(BatteryVisibility);
+		BatteryBar->SetPercent(BatteryPercent);
 	}
 
-	if (Item == nullptr)
+	if (BatteryPercentText != nullptr)
 	{
-		// 테스트 무전기는 배터리 개념 자체가 없다. 0% 로 그리면 "방전됨" 으로
-		// 잘못 읽히므로 바를 아예 접는다.
-		BatteryBar->SetVisibility(ESlateVisibility::Collapsed);
-		return;
+		BatteryPercentText->SetVisibility(BatteryVisibility);
+		FNumberFormattingOptions PercentFormat;
+		PercentFormat.SetMinimumFractionalDigits(0).SetMaximumFractionalDigits(0);
+		BatteryPercentText->SetText(FText::AsPercent(BatteryPercent, &PercentFormat));
 	}
-
-	// 보간하지 않는다. 배터리는 초당 몇 퍼센트씩 천천히 줄어드는 값이라
-	// 0.1초 간격으로 그대로 넣어도 이미 부드럽다 - 보간을 걸면 오히려 실제
-	// 잔량보다 늦게 따라와서 "곧 꺼진다" 를 늦게 알리게 된다.
-	BatteryBar->SetVisibility(ESlateVisibility::HitTestInvisible);
-	BatteryBar->SetPercent(Item->GetBatteryPercent());
-
-	// 색만 여기서 바꾼다. 깜빡임 같은 연출은 WBP 가 IsBatteryLow 로 건다.
-	BatteryBar->SetFillColorAndOpacity(bBatteryLow
-		? FLinearColor(0.95f, 0.3f, 0.3f)
-		: FLinearColor(0.3f, 1.f, 0.3f));
 }
 
 // ---------------------------------------------------------------------------
