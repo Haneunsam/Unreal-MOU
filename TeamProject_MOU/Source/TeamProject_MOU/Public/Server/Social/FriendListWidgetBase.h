@@ -1,4 +1,4 @@
-﻿// MOU 친구 시스템 - 친구 목록 패널 (v7 M8).
+// MOU 친구 시스템 - 친구 목록 패널 (v7 M8).
 //
 // [이 위젯이 하는 일]
 //   롤 클라이언트의 "커뮤니티" 패널에 해당한다. 로비 화면 오른쪽에 상주하며
@@ -57,6 +57,9 @@ class UFriendEntryWidget;
 class UScrollBox;
 class UTextBlock;
 class UVerticalBox;
+class UImage;
+class UTexture2D;
+DECLARE_DELEGATE(FOnFriendPanelRequest);
 
 /** 줄 하나에서 어떤 버튼을 눌렀는지. 부모가 이걸 보고 무엇을 할지 정한다. */
 UENUM()
@@ -96,12 +99,16 @@ class TEAMPROJECT_MOU_API UFriendEntryWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+    // [FRUI-001] UFriendEntryWidget 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	UFriendEntryWidget(const FObjectInitializer& ObjectInitializer);
 
+    // [FRUI-002] 초기 바인딩이 없는 경우 기본 위젯 트리를 구성한다.
 	virtual void NativeOnInitialized() override;
+    // [FRUI-003] 위젯 이벤트를 연결하고 저장된 데이터를 표시한다.
 	virtual void NativeConstruct() override;
 
 	/** 이 줄이 표시할 내용을 채운다. 상태에 따라 버튼 구성이 바뀐다. */
+    // [FRUI-005] SetFriend 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	void SetFriend(const FMOUFriend& InFriend);
 
 	/** 지금 표시 중인 상대의 UserId. */
@@ -109,8 +116,14 @@ public:
 
 	/** 버튼을 눌렀을 때 부모가 받는다. */
 	FOnFriendEntryAction OnAction;
+    FOnConversationRequested OnContextMenuRequested;
 
 protected:
+    UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UImage> EntryPresenceImage;
+    UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UButton> EntryMoreButton;
+    UPROPERTY(EditAnywhere, Category="MOU|Friend") TObjectPtr<UTexture2D> OnlineTexture;
+    UPROPERTY(EditAnywhere, Category="MOU|Friend") TObjectPtr<UTexture2D> InGameTexture;
+    UPROPERTY(EditAnywhere, Category="MOU|Friend") TObjectPtr<UTexture2D> OfflineTexture;
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Friend")
 	TObjectPtr<UTextBlock> EntryNameText;
 
@@ -130,14 +143,20 @@ protected:
 	TObjectPtr<UButton> EntrySecondaryButton;
 
 private:
+    // [FRUI-004] WBP가 없을 때 사용할 기본 레이아웃을 구성한다.
 	void BuildDefaultLayout();
+    // [FRUI-006] 저장된 데이터로 위젯 표시와 상태를 갱신한다.
 	void RefreshVisuals();
 
 	UFUNCTION()
+    // [FRUI-007] HandlePrimaryClicked 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	void HandlePrimaryClicked();
 
 	UFUNCTION()
+    // [FRUI-008] HandleSecondaryClicked 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	void HandleSecondaryClicked();
+    // [FRUI-026] HandleMoreClicked 동작을 처리하고 관련 위젯 상태를 갱신한다.
+    UFUNCTION() void HandleMoreClicked();
 
 	/** 버튼 안의 라벨. 텍스트를 바꾸려면 이걸 들고 있어야 한다 */
 	UPROPERTY()
@@ -161,10 +180,14 @@ class TEAMPROJECT_MOU_API UFriendListWidgetBase : public UUserWidget
 	GENERATED_BODY()
 
 public:
+    // [FRUI-009] UFriendListWidgetBase 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	UFriendListWidgetBase(const FObjectInitializer& ObjectInitializer);
 
+    // [FRUI-010] 초기 바인딩이 없는 경우 기본 위젯 트리를 구성한다.
 	virtual void NativeOnInitialized() override;
+    // [FRUI-013] 위젯 이벤트를 연결하고 저장된 데이터를 표시한다.
 	virtual void NativeConstruct() override;
+    // [FRUI-014] 서버 구독과 타이머를 정리한다.
 	virtual void NativeDestruct() override;
 
 	/**
@@ -174,12 +197,26 @@ public:
 	 *   있고 그 배치는 메신저 전체가 관리한다. 목록은 "누굴 눌렀는지" 만 알린다.
 	 */
 	FOnConversationRequested OnConversationRequested;
+    FOnConversationRequested OnContextMenuRequested;
+    FOnFriendPanelRequest OnAddFriendPopupRequested;
+    FOnFriendPanelRequest OnRequestsPopupRequested;
+    FOnFriendPanelRequest OnPanelCloseRequested;
+    // [FRUI-027] RefreshFromCache 동작을 처리하고 관련 위젯 상태를 갱신한다.
+    void RefreshFromCache();
 
 	/** 지금 표시 중인 줄 수. 테스트/디버그용. */
 	UFUNCTION(BlueprintPure, Category = "MOU|Friend")
+    // [FRUI-015] GetEntryCount 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	int32 GetEntryCount() const;
 
 protected:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MOU|Friend") bool bSeparateRequestPanels = false;
+    UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UButton> OpenAddFriendButton;
+    UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UButton> OpenRequestsButton;
+    UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UButton> FriendCloseButton;
+    UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UTextBlock> RequestCountText;
+    UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UImage> RequestBadgeImage;
+    UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UTextBlock> EmptyFriendsText;
 	/** 줄들이 쌓이는 곳 */
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Friend")
 	TObjectPtr<UVerticalBox> FriendListBox;
@@ -229,12 +266,23 @@ protected:
 	float StatusClearSeconds = 3.0f;
 
 private:
+    // [FRUI-011] WBP가 없을 때 사용할 기본 레이아웃을 구성한다.
 	void BuildDefaultLayout();
+    // [FRUI-028] HandleOpenAdd 동작을 처리하고 관련 위젯 상태를 갱신한다.
+    UFUNCTION() void HandleOpenAdd();
+    // [FRUI-029] HandleOpenRequests 동작을 처리하고 관련 위젯 상태를 갱신한다.
+    UFUNCTION() void HandleOpenRequests();
+    // [FRUI-030] HandlePanelClose 동작을 처리하고 관련 위젯 상태를 갱신한다.
+    UFUNCTION() void HandlePanelClose();
+    // [FRUI-031] HandleContextMenu 동작을 처리하고 관련 위젯 상태를 갱신한다.
+    void HandleContextMenu(int64 UserId);
 
 	/** 캐시를 정렬해 줄을 다시 만든다. */
+    // [FRUI-018] 친구 목록을 정렬·필터링하고 신청 개수를 갱신한다.
 	void RebuildList();
 
 	/** 이 위젯이 쓰는 서브시스템. 없으면 nullptr(단독 실행/테스트). */
+    // [FRUI-012] GetServerSubsystem 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	UServerSubsystem* GetServerSubsystem() const;
 
 	/**
@@ -243,31 +291,40 @@ private:
 	 * ★ 새 문구가 오면 이전 타이머를 **반드시 취소하고** 다시 건다.
 	 *   안 그러면 먼저 걸린 타이머가 나중 문구를 지워버린다.
 	 */
+    // [FRUI-016] SetStatus 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	void SetStatus(const FString& Text, bool bIsError);
 
 	/** 타이머가 부른다. 문구를 비운다. */
+    // [FRUI-017] ClearStatus 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	void ClearStatus();
 
 	// --- 서브시스템 델리게이트 ---
 	UFUNCTION()
+    // [FRUI-019] HandleFriendListReceived 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	void HandleFriendListReceived(const TArray<FMOUFriend>& InFriends);
 
 	UFUNCTION()
+    // [FRUI-020] HandleFriendUpdated 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	void HandleFriendUpdated(const FMOUFriend& InFriend, bool bRemoved);
 
 	UFUNCTION()
+    // [FRUI-021] HandleFriendPresenceChanged 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	void HandleFriendPresenceChanged(int64 UserId, EMOUPresenceBP Presence);
 
 	UFUNCTION()
+    // [FRUI-023] HandleFriendAddCompleted 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	void HandleFriendAddCompleted(bool bSuccess, EMOUFriendResultBP Result);
 
 	UFUNCTION()
+    // [FRUI-022] 수신 메시지를 표시하고 현재 보고 있는 대화만 읽음 처리한다.
 	void HandleDirectMessageReceived(const FMOUDirectMessage& Message);
 
 	UFUNCTION()
+    // [FRUI-024] HandleAddFriendClicked 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	void HandleAddFriendClicked();
 
 	/** 줄에서 버튼을 눌렀을 때. 여기서만 서브시스템을 부른다. */
+    // [FRUI-025] HandleEntryAction 동작을 처리하고 관련 위젯 상태를 갱신한다.
 	void HandleEntryAction(int64 UserId, EFriendEntryAction Action);
 
 	/** 화면에 그려진 줄들. 캐시(서브시스템)와 별개로 위젯 수명만 관리한다 */

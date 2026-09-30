@@ -1,4 +1,4 @@
-// MOU 채팅 - 채팅 시스템의 진입점.
+﻿// MOU 채팅 - 채팅 시스템의 진입점.
 //
 // [팀원이 알아야 할 것 - 요약]
 //   채팅을 쓰려면 이 서브시스템만 알면 된다. 소켓이나 스레드는 볼 필요 없다.
@@ -45,6 +45,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChatStateChanged, EChatConnectio
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnChatLoginCompleted, const FChatLoginResult&, Result);
 
 /** 계정 생성 시도가 끝났을 때. bSuccess 가 false 면 Result 에 사유가 들어있다. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnLoginIdChecked, int64, RequestId, EChatLoginResultBP, Result);
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnChatRegisterCompleted, bool, bSuccess, EChatLoginResultBP, Result);
 
 /** 방 생성 결과. 성공하면 RoomId 가 내 방 번호다. */
@@ -135,7 +137,7 @@ class TEAMPROJECT_MOU_API UServerSubsystem : public UGameInstanceSubsystem
 	GENERATED_BODY()
 
 public:
-	/** Accepted local appearance survives map travel in this GameInstance subsystem. */
+	// [PROFILE-003] 계정이 바뀌면 해당 계정 파일을 읽고 맵 이동 중에는 본인 외형을 유지한다.
 	UFUNCTION(BlueprintPure, Category = "MOU|Lobby|Customization")
 	FCharacterCustomizationData GetLocalCustomization();
 
@@ -145,7 +147,8 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MOU|Lobby|Customization")
 	FOnLobbyCustomizationResult OnLobbyCustomizationResult;
 
-	void CacheLocalCustomization(const FCharacterCustomizationData& Data) { LocalCustomization = Data; bLocalCustomizationLoaded = true; }
+	// [PROFILE-002] 본인 외형을 메모리에 보관하고 계정별 파일에 저장한다.
+	bool CacheLocalCustomization(const FCharacterCustomizationData& Data);
 
 	bool IsCustomizationPending() const { return bCustomizationPending; }
 	// --- UGameInstanceSubsystem ------------------------------------------
@@ -197,6 +200,7 @@ public:
 	 * 결과는 OnChatRegisterCompleted 로 온다.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Chat")
+	// [AUTHUI-041] 계정 요청의 검증 또는 수명을 관리한다.
 	void RegisterAccount(const FString& LoginId, const FString& Password, const FString& Nickname);
 
 	/**
@@ -206,6 +210,7 @@ public:
 	 * @param OutReason 실패 시 사용자에게 보여줄 안내 문구
 	 */
 	UFUNCTION(BlueprintPure, Category = "MOU|Chat")
+	// [AUTHUI-040] 계정 요청의 검증 또는 수명을 관리한다.
 	static bool ValidateCredentials(const FString& LoginId, const FString& Password, FString& OutReason);
 
 	/**
@@ -246,6 +251,7 @@ public:
 	 * @param RoomPassword 숫자 4자리. 비우면 공개방이 된다.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
+	// [RTITLE-002] 생성 요청 제목을 보관한 뒤 방 생성을 요청한다.
 	void CreateRoom(const FString& Title, const FString& RoomPassword, int32 HostPort = 7777);
 
 	/** 대기 중인 방 목록을 요청한다. 결과는 OnRoomListReceived 로 온다. */
@@ -259,6 +265,7 @@ public:
 	 * 여기서 바로 여행하지 않는다. 게임이 시작될 때(OnRoomGameStarted) 떠난다.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Lobby")
+	// [RTITLE-003] 목록에서 선택한 방 제목을 보관한 뒤 참여를 요청한다.
 	void JoinRoom(int32 RoomId, const FString& RoomPassword);
 
 	/**
@@ -529,6 +536,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MOU|Lobby")
 	int32 GetCurrentRoomId() const { return CurrentRoomId; }
 
+	// [RTITLE-001] 성공한 생성 또는 참여 요청에서 확정한 현재 방 제목을 반환한다.
+	const FString& GetCurrentRoomTitle() const { return CurrentRoomTitle; }
+
 	/** 내가 지금 방의 방장인지. */
 	UFUNCTION(BlueprintPure, Category = "MOU|Lobby")
 	bool IsRoomHost() const { return CurrentRoomId != 0 && CurrentRoomId == MyRoomId; }
@@ -569,6 +579,16 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "MOU|Chat")
 	FOnChatRegisterCompleted OnChatRegisterCompleted;
+    UPROPERTY(BlueprintAssignable, Category="MOU|Login")
+    FOnLoginIdChecked OnLoginIdChecked;
+    // [AUTHUI-006] 연결된 서버로 아이디 조회를 보내고 상관관계 번호를 반환한다.
+    uint32 CheckLoginId(const FString& LoginId);
+    // [AUTHUI-007] 지정된 조회의 늦은 응답을 무효화한다.
+    void CancelLoginIdCheck(uint32 RequestId);
+    // [AUTHUI-008] 아이디의 공통 UTF-8 길이 정책을 검사한다.
+    static bool ValidateLoginId(const FString& LoginId, FString& OutReason);
+    // [AUTHUI-009] 미확정 가입 요청을 취소하고 연결을 종료하여 늦은 응답을 격리한다.
+    void CancelPendingRegistration();
 
 	UPROPERTY(BlueprintAssignable, Category = "MOU|Lobby")
 	FOnRoomCreated OnRoomCreated;
@@ -704,10 +724,11 @@ public:
 	int32 GetTotalUnreadCount() const;
 
 private:
-	/** 게임 스레드 틱. 백엔드 큐를 비우고 델리게이트를 브로드캐스트한다. */
+	// [PROFILE-004] 백엔드 이벤트를 처리하고 외형 승인·게임 시작 시 본인 계정값을 보관한다.
 	bool Tick(float DeltaTime);
 
 	/** 백엔드를 정리하고 버린다. 워커 스레드가 있으면 끝날 때까지 기다린다. */
+	// [AUTHUI-042] 계정 요청의 검증 또는 수명을 관리한다.
 	void ShutdownClient();
 
 	/**
@@ -989,14 +1010,24 @@ private:
 
 	// 계정 생성 요청. 로그인과 달리 한 번만 보낸다(RegisterAck 를 받으면 지운다).
 	// 재접속할 때마다 가입을 다시 시도하면 "이미 있는 아이디" 오류가 반복된다.
+    friend class FLoginUIRegressionTest;
+    uint32 NextCheckRequestId = 0;
+    uint32 PendingCheckRequestId = 0;
+    double CheckRequestTime = 0;
+    double RegisterRequestTime = 0;
 	bool    bHasPendingRegister = false;
 	FString PendingRegisterId;
 	FString PendingRegisterPassword;
 	FString PendingRegisterNickname;
 
 	/** 방을 떠났을 때 대기실 관련 상태를 한 번에 비운다. */
+	// [RTITLE-004] 방을 떠날 때 제목과 대기 중 요청을 포함한 방 상태를 비운다.
 	void ClearRoomState();
+	// [PROFILE-001] 로그인 계정의 저장 경로를 반환하며 접속이 끊겨도 마지막 계정 연결을 유지한다.
+	FString GetCustomizationSaveSlotName() const;
 	FCharacterCustomizationData LocalCustomization;
+	// 캐시와 저장 파일을 소유하는 계정. 로그인 전의 오프라인 저장은 0을 사용한다.
+	int64 LocalCustomizationUserId = 0;
 	bool bLocalCustomizationLoaded = false;
 	bool bCustomizationPending = false;
 	double CustomizationRequestTime = 0;
@@ -1024,6 +1055,11 @@ private:
 	 * 하나로 합치면 "방장인가" 와 "방에 있는가" 를 구분할 수 없다.
 	 */
 	int32 CurrentRoomId = 0;
+	FString CurrentRoomTitle;
+	FString PendingCreatedRoomTitle;
+	FString PendingJoinedRoomTitle;
+	TMap<int32, FString> RoomTitlesById;
+	friend class FRoomLobbyTitleRegressionTest;
 
 	UPROPERTY()
 	TArray<FMOURoomMember> RoomMembers;

@@ -1,4 +1,4 @@
-// MOU 로비 - 자체 서버(MOU_Server/Server.exe) 백엔드.
+﻿// MOU 로비 - 자체 서버(MOU_Server/Server.exe) 백엔드.
 //
 // [이 파일이 담당하는 층]
 //     UServerSubsystem          블루프린트 API, 상태 보관, 델리게이트   (백엔드를 모른다)
@@ -45,6 +45,8 @@ public:
 	virtual bool IsRunning() const override { return ServerClient != nullptr; }
 
 	virtual void SendLogin(const FString& LoginId, const FString& Password, int32 TeamId) override;
+	// [AUTHUI-004] 아이디 중복 조회의 송신 가능 여부를 반환한다.
+	virtual bool SendCheckLoginId(uint32 RequestId, const FString& LoginId) override;
 	virtual void SendRegister(const FString& LoginId, const FString& Password, const FString& Nickname) override;
 
 	virtual void SendChat(EChatChannelBP Channel, const FString& Text) override;

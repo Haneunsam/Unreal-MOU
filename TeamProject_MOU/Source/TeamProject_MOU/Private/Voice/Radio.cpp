@@ -148,9 +148,10 @@ void ARadio::DrainBattery()
 // 전원
 // ---------------------------------------------------------------------------
 
+// [RPOWER-001] 손에 든 무전기의 전원 변경을 요청한다.
 void ARadio::SetPowered(bool bOn)
 {
-	if (!RadioComponent)
+	if (!RadioComponent || !RadioComponent->IsInHand())
 	{
 		return;
 	}
@@ -167,8 +168,14 @@ void ARadio::SetPowered(bool bOn)
 	}
 }
 
+// [RPOWER-002] 서버에서 장착 상태를 재검사한 뒤 전원을 변경한다.
 void ARadio::ServerSetPowered_Implementation(bool bOn)
 {
+	if (!RadioComponent || !RadioComponent->IsInHand())
+	{
+		return;
+	}
+
 	ApplyPoweredOnServer(bOn);
 }
 

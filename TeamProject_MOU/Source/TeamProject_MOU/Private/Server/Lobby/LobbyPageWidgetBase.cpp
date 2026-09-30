@@ -1,5 +1,6 @@
-#include "Server/Lobby/LobbyPageWidgetBase.h"
+﻿#include "Server/Lobby/LobbyPageWidgetBase.h"
 #include "Server/Lobby/RoomPlayerSlotWidgetBase.h"
+#include "Server/Lobby/LobbyCustomizationComponent.h"
 #include "Components/UniformGridPanel.h"
 #include "Components/UniformGridSlot.h"
 
@@ -11,6 +12,7 @@
 #include "Components/Image.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -18,8 +20,10 @@
 #include "Components/CharacterCustomizationComponent.h"
 #include "GameFramework/Actor.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Engine/World.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "UObject/UObjectIterator.h"
 
 namespace
 {
@@ -182,8 +186,14 @@ void URoomLobbyWidgetBase::BuildDefaultLayout()
 	MessageText = AddText(WidgetTree, Box, TEXT("MessageText"), TEXT(""));
 }
 
+// [RTITLE-005] 현재 방 제목과 준비 상태를 대기실 위젯에 반영한다.
 void URoomLobbyWidgetBase::Refresh(const UServerSubsystem* Server)
 {
+	if (TitleText)
+	{
+		const FString RoomTitle = Server ? Server->GetCurrentRoomTitle() : FString();
+		TitleText->SetText(FText::FromString(RoomTitle.IsEmpty() ? TEXT("방 대기실") : RoomTitle));
+	}
 	if (Server == nullptr)
 	{
 		return;
@@ -291,6 +301,7 @@ void ULobbySettingsWidgetBase::BuildDefaultLayout()
 
 void ULobbySettingsWidgetBase::HandleBackClicked() { OnBack.ExecuteIfBound(); }
 
+// [LCUI-003] 디자이너 루트가 없으면 기본 편집 화면을 생성한다.
 void ULobbyCustomizeWidgetBase::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
@@ -300,8 +311,12 @@ void ULobbyCustomizeWidgetBase::NativeOnInitialized()
 	}
 }
 
+// [LCUI-004] 편집 상태를 초기화하고 본인 미리보기와 버튼 및 서버 이벤트를 연결한다.
 void ULobbyCustomizeWidgetBase::NativeConstruct()
 {
+	ReleaseLocalPreview();
+	bWaitingForConfirmation = false;
+	SetIsEnabled(true);
 	Super::NativeConstruct();
 	ConnectOwnSlotPreview();
 	if (BackButton) { BackButton->OnClicked.AddUniqueDynamic(this, &ULobbyCustomizeWidgetBase::HandleBackClicked); }
@@ -314,18 +329,185 @@ void ULobbyCustomizeWidgetBase::NativeConstruct()
 	}
 }
 
+// [LCUI-001] 본인 슬롯을 원본으로 창 전용 미리보기를 생성한다.
+bool ULobbyCustomizeWidgetBase::CreateLocalPreview(AActor* SourceActor)
+{
+	USkeletalMeshComponent* SourceMesh = SourceActor ? SourceActor->FindComponentByClass<USkeletalMeshComponent>() : nullptr;
+	USceneCaptureComponent2D* SourceCapture = SourceActor ? SourceActor->FindComponentByClass<USceneCaptureComponent2D>() : nullptr;
+	UTextureRenderTarget2D* SourceTarget = SourceCapture ? SourceCapture->TextureTarget.Get() : nullptr;
+	if (!GetWorld() || !SourceMesh || !SourceMesh->GetSkeletalMeshAsset() || !SourceTarget) return false;
+
+	ReleaseLocalPreview();
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.ObjectFlags |= RF_Transient;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	// BP 액터를 복제하지 않아 슬롯 갱신 Tick과 기존 커스터마이징 컴포넌트가 유입되지 않는다.
+	AActor* Actor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), SourceActor->GetActorTransform(), SpawnParameters);
+	if (!Actor) return false;
+	LocalPreviewActor = Actor;
+	Actor->SetReplicates(false);
+	Actor->SetActorEnableCollision(false);
+	Actor->SetActorTickEnabled(false);
+
+	USceneComponent* Root = NewObject<USceneComponent>(Actor);
+	Actor->AddInstanceComponent(Root);
+	Actor->SetRootComponent(Root);
+	Root->SetWorldTransform(SourceActor->GetActorTransform());
+	Root->RegisterComponent();
+
+	USkeletalMeshComponent* Mesh = NewObject<USkeletalMeshComponent>(Actor);
+	Actor->AddInstanceComponent(Mesh);
+	Mesh->SetupAttachment(Root);
+	Mesh->SetRelativeTransform(SourceMesh->GetComponentTransform().GetRelativeTransform(SourceActor->GetActorTransform()));
+	Mesh->SetSkeletalMeshAsset(SourceMesh->GetSkeletalMeshAsset());
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh->SetCastShadow(false);
+	Mesh->SetVisibleInSceneCaptureOnly(true);
+	for (int32 Index = 0; Index < SourceMesh->GetNumMaterials(); ++Index)
+		Mesh->SetMaterial(Index, SourceMesh->GetMaterial(Index));
+	// 포즈만 원본을 따라가며 메시, 회전, 머티리얼은 편집창이 별도로 소유한다.
+	Mesh->SetLeaderPoseComponent(SourceMesh);
+	Mesh->RegisterComponent();
+	LocalPreviewMesh = Mesh;
+
+	ULobbyCustomizationComponent* Component = NewObject<ULobbyCustomizationComponent>(Actor);
+	Actor->AddInstanceComponent(Component);
+	Component->RegisterComponent();
+	if (!Component->InitializeLobbyPreview(Mesh, EditingDataAsset, CurrentData))
+	{
+		ReleaseLocalPreview();
+		return false;
+	}
+	PreviewComponent = Component;
+
+	// 로봇의 눈/입/유리처럼 별도 StaticMesh인 부속물도 보존한다.
+	TInlineComponentArray<UStaticMeshComponent*> SourceParts(SourceActor);
+	TMap<USceneComponent*, USceneComponent*> CopiedParts;
+	CopiedParts.Add(SourceMesh, Mesh);
+	for (UStaticMeshComponent* SourcePart : SourceParts)
+	{
+		if (!SourcePart->GetStaticMesh() || !SourcePart->IsVisible() || SourcePart->bHiddenInGame) continue;
+		UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(Actor);
+		Actor->AddInstanceComponent(Part);
+		Part->SetupAttachment(Mesh);
+		Part->SetRelativeTransform(SourcePart->GetComponentTransform().GetRelativeTransform(SourceMesh->GetComponentTransform()));
+		Part->SetStaticMesh(SourcePart->GetStaticMesh());
+		Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Part->SetCastShadow(false);
+		Part->SetVisibleInSceneCaptureOnly(true);
+		for (int32 Index = 0; Index < SourcePart->GetNumMaterials(); ++Index)
+		{
+			UMaterialInterface* Material = SourcePart->GetMaterial(Index);
+			UMaterialInstanceDynamic* SourceDMI = Cast<UMaterialInstanceDynamic>(Material);
+			if (SourceDMI) Material = SourceDMI->Parent;
+			if (!Material) continue;
+			UMaterialInstanceDynamic* PartDMI = UMaterialInstanceDynamic::Create(Material, this);
+			if (SourceDMI) PartDMI->CopyInterpParameters(SourceDMI);
+			Part->SetMaterial(Index, PartDMI);
+		}
+		Part->RegisterComponent();
+		CopiedParts.Add(SourcePart, Part);
+	}
+	for (UStaticMeshComponent* SourcePart : SourceParts)
+	{
+		USceneComponent** Part = CopiedParts.Find(SourcePart);
+		USceneComponent** Parent = CopiedParts.Find(SourcePart->GetAttachParent());
+		if (Part && Parent)
+		{
+			(*Part)->AttachToComponent(*Parent, FAttachmentTransformRules::KeepRelativeTransform, SourcePart->GetAttachSocketName());
+			(*Part)->SetRelativeTransform(SourcePart->GetRelativeTransform());
+		}
+	}
+
+	PreviewRenderTarget = NewObject<UTextureRenderTarget2D>(this, NAME_None, RF_Transient);
+	PreviewRenderTarget->RenderTargetFormat = SourceTarget->RenderTargetFormat;
+	PreviewRenderTarget->ClearColor = SourceTarget->ClearColor;
+	PreviewRenderTarget->TargetGamma = SourceTarget->TargetGamma;
+	PreviewRenderTarget->InitCustomFormat(FMath::Max(1, SourceTarget->SizeX), FMath::Max(1, SourceTarget->SizeY),
+		SourceTarget->GetFormat(), SourceTarget->bForceLinearGamma);
+	PreviewRenderTarget->UpdateResourceImmediate(true);
+
+	USceneCaptureComponent2D* Capture = NewObject<USceneCaptureComponent2D>(Actor);
+	Actor->AddInstanceComponent(Capture);
+	Capture->SetupAttachment(Root);
+	Capture->SetRelativeTransform(SourceCapture->GetComponentTransform().GetRelativeTransform(SourceActor->GetActorTransform()));
+	Capture->ProjectionType = SourceCapture->ProjectionType;
+	Capture->FOVAngle = SourceCapture->FOVAngle;
+	Capture->OrthoWidth = SourceCapture->OrthoWidth;
+	Capture->CaptureSource = SourceCapture->CaptureSource;
+	Capture->PostProcessSettings = SourceCapture->PostProcessSettings;
+	Capture->PostProcessBlendWeight = SourceCapture->PostProcessBlendWeight;
+	Capture->SetShowFlagSettings(SourceCapture->GetShowFlagSettings());
+	Capture->ShowFlags = SourceCapture->ShowFlags;
+	Capture->TextureTarget = PreviewRenderTarget;
+	Capture->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+	Capture->ShowOnlyActors.Add(Actor);
+	Capture->bCaptureEveryFrame = true;
+	Capture->bCaptureOnMovement = false;
+	Capture->RegisterComponent();
+	PreviewCapture = Capture;
+
+	// 같은 위치의 조명은 유지하되 기존 캡처에는 전용 액터가 겹쳐 보이지 않게 한다.
+	for (TObjectIterator<USceneCaptureComponent> It; It; ++It)
+	{
+		USceneCaptureComponent* OtherCapture = *It;
+		if (OtherCapture == Capture || OtherCapture->GetWorld() != GetWorld() || !OtherCapture->IsRegistered()) continue;
+		OtherCapture->HiddenActors.Add(Actor);
+		OtherPreviewCaptures.Add(OtherCapture);
+	}
+	SourcePreviewActor = SourceActor;
+	return true;
+}
+
+// [LCUI-002] 창 전용 미리보기 자원을 해제한다.
+void ULobbyCustomizeWidgetBase::ReleaseLocalPreview()
+{
+	if (PreviewImage)
+	{
+		PreviewImage->SetVisibility(ESlateVisibility::Collapsed);
+		PreviewImage->SetBrushFromTexture(nullptr);
+	}
+	if (PreviewCapture.IsValid())
+	{
+		PreviewCapture->bCaptureEveryFrame = false;
+		PreviewCapture->Deactivate();
+		PreviewCapture->TextureTarget = nullptr;
+	}
+	if (AActor* Actor = LocalPreviewActor.Get())
+	{
+		for (const TWeakObjectPtr<USceneCaptureComponent>& Capture : OtherPreviewCaptures)
+			if (Capture.IsValid()) Capture->HiddenActors.Remove(Actor);
+		Actor->Destroy();
+	}
+	OtherPreviewCaptures.Reset();
+	PreviewComponent.Reset();
+	LocalPreviewMesh.Reset();
+	LocalPreviewActor.Reset();
+	SourcePreviewActor.Reset();
+	PreviewCapture.Reset();
+	PreviewRenderTarget = nullptr;
+	PreviewUIMaterial = nullptr;
+	LocalSlotIndex = INDEX_NONE;
+	PreviewRoomId = 0;
+}
+
+// [LCUI-019] 로그인한 본인 슬롯을 찾아 독립 미리보기를 PreviewImage에 연결한다.
 void ULobbyCustomizeWidgetBase::ConnectOwnSlotPreview()
 {
-	// The room snapshot is authoritative for the local seat. Never default to slot 0.
+	// 본인 UserId로 슬롯을 찾으며 정보가 없을 때 호스트 슬롯을 대신 사용하지 않는다.
 	const UServerSubsystem* Server = UServerSubsystem::Get(this);
-	if (!GetWorld() || !Server || Server->GetCurrentRoomId() == 0) return;
+	if (!GetWorld() || !Server || Server->GetCurrentRoomId() == 0)
+	{
+		ReleaseLocalPreview();
+		return;
+	}
 	const int64 SelfUserId = Server->GetLoginResult().UserId;
 	const TArray<FMOURoomMember> Members = Server->GetRoomMembers();
 	const FMOURoomMember* Self = Members.FindByPredicate(
 		[SelfUserId](const FMOURoomMember& Member) { return Member.UserId == SelfUserId; });
 	if (!Self || Self->SlotIndex < 0 || Self->SlotIndex > 3)
 	{
-		if (PreviewImage) PreviewImage->SetVisibility(ESlateVisibility::Collapsed);
+		ReleaseLocalPreview();
 		ShowStatus(FText::FromString(TEXT("내 슬롯 정보 수신을 기다리는 중...")), false);
 		return;
 	}
@@ -352,62 +534,40 @@ void ULobbyCustomizeWidgetBase::ConnectOwnSlotPreview()
 	PreviewImage->SetVisibility(ESlateVisibility::Collapsed);
 
 	const int32 SlotIndex = Self->SlotIndex;
-	const FString TargetPath = FString::Printf(
-		TEXT("/Game/02_JSY/MainLobby/LobbyCharacter/RenderTarget/RT_LobbySlot%d.RT_LobbySlot%d"),
-		SlotIndex, SlotIndex);
-	UTextureRenderTarget2D* SlotTarget = LoadObject<UTextureRenderTarget2D>(nullptr, *TargetPath);
+	AActor* SlotActor = URoomPlayerSlotWidgetBase::FindLobbyPreviewActor(this, SlotIndex);
+	if (PreviewComponent.IsValid() && SourcePreviewActor.Get() == SlotActor && PreviewRoomId == Server->GetCurrentRoomId())
+	{
+		PreviewImage->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		return;
+	}
 	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr,
 		TEXT("/Game/02_JSY/MainLobby/LobbyCharacter/M_UI_LobbyCharacter.M_UI_LobbyCharacter"));
-	AActor* SlotActor = URoomPlayerSlotWidgetBase::FindLobbyPreviewActor(this, SlotIndex);
-	USceneCaptureComponent2D* Capture = SlotActor ? SlotActor->FindComponentByClass<USceneCaptureComponent2D>() : nullptr;
-	if (!SlotTarget || !Material || !SlotActor || !Capture)
+	if (!Material || !CreateLocalPreview(SlotActor))
 	{
+		ReleaseLocalPreview();
 		ShowStatus(FText::FromString(FString::Printf(
-			TEXT("슬롯 %d의 RenderTarget 또는 프리뷰 액터를 찾지 못했습니다."), SlotIndex)), false);
+			TEXT("슬롯 %d의 편집용 미리보기를 생성하지 못했습니다. 메시와 SceneCapture/RenderTarget을 확인하세요."), SlotIndex)), false);
 		return;
 	}
-	UCharacterCustomizationComponent* Component =
-		URoomPlayerSlotWidgetBase::GetOrCreatePreviewComponent(SlotActor);
-	if (!Component)
-	{
-		ShowStatus(FText::FromString(TEXT("내 슬롯 프리뷰에 SkeletalMesh가 없습니다.")), false);
-		return;
-	}
-
-	if (PreviewCapture.IsValid() && PreviewCapture.Get() != Capture)
-		PreviewCapture->bCaptureEveryFrame = bPreviewCaptureEveryFrameBeforeEdit;
 	LocalSlotIndex = SlotIndex;
-	PreviewRenderTarget = SlotTarget;
-	if (PreviewCapture.Get() != Capture)
-	{
-		PreviewCapture = Capture;
-		bPreviewCaptureEveryFrameBeforeEdit = Capture->bCaptureEveryFrame;
-	}
-	Capture->TextureTarget = SlotTarget;
-	Capture->bCaptureEveryFrame = true;
-	Capture->Activate(true);
-	SlotActor->SetActorHiddenInGame(false);
-	if (!PreviewUIMaterial) PreviewUIMaterial = UMaterialInstanceDynamic::Create(Material, this);
-	// M_UI_LobbyCharacter's texture parameter is PortraitRT. Its default value happens
-	// to be RT_LobbySlot0, so using the asset name as the parameter silently showed the host.
-	PreviewUIMaterial->SetTextureParameterValue(TEXT("PortraitRT"), SlotTarget);
+	PreviewRoomId = Server->GetCurrentRoomId();
+	PreviewUIMaterial = UMaterialInstanceDynamic::Create(Material, this);
+	PreviewUIMaterial->SetTextureParameterValue(TEXT("PortraitRT"), PreviewRenderTarget);
 	PreviewImage->SetBrushFromMaterial(PreviewUIMaterial);
 	PreviewImage->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-	SetPreviewComponent(Component);
-	Capture->CaptureScene();
+	UpdatePreview();
 	ShowStatus(FText::GetEmpty(), true);
 }
 
+// [LCUI-017] 멤버 목록 갱신 시 본인 슬롯 연결만 확인하고 편집값은 보존한다.
 void ULobbyCustomizeWidgetBase::HandlePreviewRoomMembersChanged(
 	int32 RoomId, const TArray<FMOURoomMember>& /*Members*/, bool /*bAllReady*/)
 {
-	if (!PreviewComponent.IsValid())
-	{
-		if (const UServerSubsystem* Server = UServerSubsystem::Get(this))
-			if (RoomId == Server->GetCurrentRoomId()) ConnectOwnSlotPreview();
-	}
+	if (const UServerSubsystem* Server = UServerSubsystem::Get(this))
+		if (RoomId == Server->GetCurrentRoomId()) ConnectOwnSlotPreview();
 }
 
+// [LCUI-021] BP 레이아웃이 없는 경우의 기본 버튼과 상태 표시를 만든다.
 void ULobbyCustomizeWidgetBase::BuildDefaultLayout()
 {
 	UVerticalBox* Box = BuildPagePanel(WidgetTree, TEXT("LobbyCustomizeRoot"), FVector2D(520.f, 420.f));
@@ -419,57 +579,91 @@ void ULobbyCustomizeWidgetBase::BuildDefaultLayout()
 	BackButton = AddButton(WidgetTree, Box, TEXT("BackButton"), TEXT("뒤로가기"));
 }
 
+// [LCUI-020] 뒤로가기 버튼을 편집 취소 처리에 연결한다.
 void ULobbyCustomizeWidgetBase::HandleBackClicked() { CancelAndExit(); }
+// [LCUI-014] 확인 버튼을 서버 전송 처리에 연결한다.
 void ULobbyCustomizeWidgetBase::HandleConfirmClicked() { ConfirmAndSave(); }
+// [LCUI-015] 전송 대기 중이 아닐 때 기본 외형을 미리본다.
 void ULobbyCustomizeWidgetBase::HandleResetClicked() { if (!bWaitingForConfirmation) ResetToDefault(); }
 
+// [LCUI-012] 본인의 확정된 외형으로 편집값과 UI를 초기화한다.
 void ULobbyCustomizeWidgetBase::InitializeCustomization()
 {
+	CachedCharacter.Reset();
+	CachedCustomizationComp.Reset();
+	if (auto* Server = UServerSubsystem::Get(this))
+	{
+		CurrentData = Server->GetLocalCustomization();
+		const int64 SelfUserId = Server->GetLoginResult().UserId;
+		const TArray<FMOURoomMember> Members = Server->GetRoomMembers();
+		if (const FMOURoomMember* Self = Members.FindByPredicate(
+			[SelfUserId](const FMOURoomMember& Member) { return Member.UserId == SelfUserId; }))
+		{
+			CurrentData = Self->Customization;
+			if (!EditingDataAsset)
+			{
+				if (AActor* Source = URoomPlayerSlotWidgetBase::FindLobbyPreviewActor(this, Self->SlotIndex))
+					if (auto* Component = Source->FindComponentByClass<UCharacterCustomizationComponent>())
+						EditingDataAsset = Component->GetCustomizationDataAsset();
+			}
+		}
+	}
 	if (!EditingDataAsset) EditingDataAsset = NewObject<UCustomizationDataAsset>(this);
-	if (auto* Server = UServerSubsystem::Get(this)) CurrentData = Server->GetLocalCustomization();
 	OriginalData = CurrentData;
 	OnCustomizationDataInitialized(CurrentData);
 	UpdatePreview();
 }
 
+// [LCUI-009] 기존 BP 연결을 받되 실제 편집 대상은 본인 슬롯에서 복사한 전용 메시로 제한한다.
 void ULobbyCustomizeWidgetBase::SetPreviewComponent(UCharacterCustomizationComponent* Component)
 {
-	if (PreviewComponent.IsValid()) PreviewComponent->ApplyPreview(OriginalData);
-	PreviewComponent = Component;
-	UpdatePreview();
+	if (!Component)
+	{
+		ReleaseLocalPreview();
+		return;
+	}
+	// 전달된 슬롯 컴포넌트를 직접 편집하지 않고 본인 UserId를 다시 확인한다.
+	ConnectOwnSlotPreview();
 }
 
+// [LCUI-013] 색상과 문양 편집을 창 전용 메시 및 RenderTarget에만 반영한다.
 void ULobbyCustomizeWidgetBase::UpdatePreview()
 {
 	if (bWaitingForConfirmation) return;
-	if (PreviewComponent.IsValid()) PreviewComponent->ApplyPreview(CurrentData);
-	if (PreviewCapture.IsValid()) PreviewCapture->CaptureScene();
+	if (PreviewComponent.IsValid()) PreviewComponent->ApplyLobbyPreview(CurrentData);
+	if (PreviewCapture.IsValid() && !PreviewCapture->bCaptureEveryFrame) PreviewCapture->CaptureScene();
 	OnCustomizationPreviewChanged(CurrentData);
 }
 
+// [LCUI-008] 대기실 캐릭터와 카메라는 유지하고 편집용 메시만 회전한다.
 void ULobbyCustomizeWidgetBase::RotateCharacter(float DeltaX)
 {
-	if (PreviewComponent.IsValid() && PreviewComponent->GetOwner())
-		PreviewComponent->GetOwner()->AddActorLocalRotation(FRotator(0, DeltaX * DragRotationSpeed, 0));
+	if (bWaitingForConfirmation) return;
+	if (LocalPreviewMesh.IsValid())
+		LocalPreviewMesh->AddLocalRotation(FRotator(0, DeltaX * DragRotationSpeed, 0));
 }
 
+// [LCUI-018] 편집 상태 메시지를 텍스트와 BP 이벤트에 전달한다.
 void ULobbyCustomizeWidgetBase::ShowStatus(const FText& Message, bool bSuccess)
 {
 	if (CustomizationStatusText) CustomizationStatusText->SetText(Message);
 	OnCustomizationStatus(Message, bSuccess);
 }
 
+// [LCUI-006] 확인 버튼에서만 편집값을 서버로 전송하고 응답을 기다린다.
 void ULobbyCustomizeWidgetBase::ConfirmAndSave()
 {
 	if (bWaitingForConfirmation) return;
-	if (LocalSlotIndex == INDEX_NONE || !PreviewComponent.IsValid() || !PreviewRenderTarget)
+	auto* Server = UServerSubsystem::Get(this);
+	if (!Server || PreviewRoomId == 0 || PreviewRoomId != Server->GetCurrentRoomId() ||
+		LocalSlotIndex == INDEX_NONE || !PreviewComponent.IsValid() || !PreviewRenderTarget)
 	{
 		ShowStatus(FText::FromString(TEXT("내 슬롯 미리보기가 준비되지 않았습니다. 슬롯 정보와 RenderTarget을 확인하세요.")), false);
 		return;
 	}
 	CloseColorPickers();
-	auto* Server = UServerSubsystem::Get(this);
-	if (!Server || !Server->SubmitCustomization(CurrentData))
+	CloseColorPicker();
+	if (!Server->SubmitCustomization(CurrentData))
 	{
 		ShowStatus(FText::FromString(TEXT("외형을 전송할 수 없습니다. 연결/입장 상태 또는 진행 중인 요청을 확인하세요.")), false);
 		return;
@@ -479,6 +673,7 @@ void ULobbyCustomizeWidgetBase::ConfirmAndSave()
 	ShowStatus(FText::FromString(TEXT("외형 적용 중...")), false);
 }
 
+// [LCUI-016] 서버 승인 결과를 반영하고 실패 시 다시 편집할 수 있게 한다.
 void ULobbyCustomizeWidgetBase::HandleCustomizationResult(bool bSuccess, bool bSavedToDisk)
 {
 	if (!bWaitingForConfirmation) return;
@@ -500,31 +695,27 @@ void ULobbyCustomizeWidgetBase::HandleCustomizationResult(bool bSuccess, bool bS
 	OnBack.ExecuteIfBound();
 }
 
+// [LCUI-007] 편집값과 전용 미리보기를 폐기한 뒤 이전 화면으로 돌아간다.
 void ULobbyCustomizeWidgetBase::CancelAndExit()
 {
 	if (bWaitingForConfirmation) return;
 	CloseColorPickers();
+	CloseColorPicker();
 	CurrentData = OriginalData;
-	UpdatePreview();
+	ReleaseLocalPreview();
 	OnBack.ExecuteIfBound();
 }
 
+// [LCUI-005] 이벤트 연결과 창 전용 미리보기를 해제한다.
 void ULobbyCustomizeWidgetBase::NativeDestruct()
 {
+	CloseColorPickers();
 	if (auto* Server = UServerSubsystem::Get(this))
 	{
 		Server->OnLobbyCustomizationResult.RemoveDynamic(this, &ULobbyCustomizeWidgetBase::HandleCustomizationResult);
 		Server->OnRoomMembersChanged.RemoveDynamic(this, &ULobbyCustomizeWidgetBase::HandlePreviewRoomMembersChanged);
-		if (PreviewComponent.IsValid()) PreviewComponent->ApplyPreview(Server->GetLocalCustomization());
 	}
-	if (PreviewCapture.IsValid())
-	{
-		PreviewCapture->CaptureScene();
-		PreviewCapture->bCaptureEveryFrame = bPreviewCaptureEveryFrameBeforeEdit;
-	}
-	PreviewCapture.Reset();
-	PreviewComponent.Reset();
-	PreviewRenderTarget = nullptr;
-	PreviewUIMaterial = nullptr;
+	ReleaseLocalPreview();
+	bWaitingForConfirmation = false;
 	Super::NativeDestruct();
 }

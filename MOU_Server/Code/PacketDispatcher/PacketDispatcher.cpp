@@ -1,4 +1,4 @@
-#include "PacketDispatcher/PacketDispatcher.h"
+﻿#include "PacketDispatcher/PacketDispatcher.h"
 #include "ServerLog/ServerLog.h"
 #include "EndpointService/EndpointService.h"
 #include "ChatHandler/ChatHandler.h"
@@ -35,6 +35,7 @@ namespace MOU::ServerRuntime
 		switch (static_cast<EOpcode>(Header.Opcode))
 		{
 		case EOpcode::LoginReq:  return HandleLoginReq(Session, Data, Size);
+		case EOpcode::CheckLoginIdReq: return HandleCheckLoginIdReq(Session, Data, Size);
 		case EOpcode::RegisterReq: return HandleRegisterReq(Session, Data, Size);
 		case EOpcode::RoomCreateReq:   return HandleRoomCreateReq(Session, Data, Size);
 		case EOpcode::RoomListReq:     return HandleRoomListReq(Session, Data, Size);

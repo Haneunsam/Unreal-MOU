@@ -1,4 +1,4 @@
-// MOU 로비 - 메인메뉴 + 대기실 UI 구현.
+﻿// MOU 로비 - 메인메뉴 + 대기실 UI 구현.
 //
 // 이 파일은 소켓/패킷을 전혀 모른다.
 //   상태 조회: UServerSubsystem (연결 상태 / 내 신원 / 방 번호 / 대기실 명단)
@@ -123,8 +123,10 @@ void ULobbyWidgetBase::NativeConstruct()
 	RefreshUI();
 }
 
+// [LPUI-003] NativeDestruct에서 비밀번호 팝업과 메신저 표시 수명을 연결한다.
 void ULobbyWidgetBase::NativeDestruct()
 {
+	HandlePasswordPromptChanged(false);
 	ResetPageStack();
 
 	if (bSubscribed)
@@ -627,6 +629,7 @@ void ULobbyWidgetBase::OpenRoomCreate()
 	PushPage(RoomCreateWidget);
 }
 
+// [LPUI-002] OpenRoomList에서 비밀번호 팝업과 메신저 표시 수명을 연결한다.
 void ULobbyWidgetBase::OpenRoomList()
 {
 	if (UIState != EMOULobbyUIState::MainMenu || !IsTopPage(MainLobbyWidget))
@@ -651,6 +654,7 @@ void ULobbyWidgetBase::OpenRoomList()
 	RoomListWidget->bManageMouseCursor = false;
 	RoomListWidget->bRemoveOnSuccess = false;
 	RoomListWidget->OnRoomListClosed.BindUObject(this, &ULobbyWidgetBase::HandleRoomListClosed);
+	RoomListWidget->OnPasswordPromptChanged.BindUObject(this, &ULobbyWidgetBase::HandlePasswordPromptChanged);
 
 	PushPage(RoomListWidget);
 }
@@ -739,8 +743,10 @@ void ULobbyWidgetBase::HandleRoomCreateCancelled()
 	RoomCreateWidget = nullptr;
 }
 
+// [LPUI-004] HandleRoomListClosed에서 비밀번호 팝업과 메신저 표시 수명을 연결한다.
 void ULobbyWidgetBase::HandleRoomListClosed()
 {
+	HandlePasswordPromptChanged(false);
 	if (IsTopPage(RoomListWidget))
 	{
 		PopPage();
@@ -864,3 +870,26 @@ namespace
 			}));
 }
 #endif
+
+// [LPUI-001] 비밀번호 팝업 동안 메신저를 숨기고 기존 표시 상태로 복원한다.
+void ULobbyWidgetBase::HandlePasswordPromptChanged(bool bOpen)
+{
+	if (bOpen)
+	{
+		if (!PasswordPromptHiddenMessenger.IsValid())
+		{
+			if (UWidget* Messenger = GetWidgetFromName(TEXT("LobbyMessenger")))
+			{
+				MessengerVisibilityBeforePrompt = Messenger->GetVisibility();
+				PasswordPromptHiddenMessenger = Messenger;
+				Messenger->SetVisibility(ESlateVisibility::Collapsed);
+			}
+		}
+	}
+	else
+	{
+		if (UWidget* Messenger = PasswordPromptHiddenMessenger.Get())
+			Messenger->SetVisibility(MessengerVisibilityBeforePrompt);
+		PasswordPromptHiddenMessenger.Reset();
+	}
+}

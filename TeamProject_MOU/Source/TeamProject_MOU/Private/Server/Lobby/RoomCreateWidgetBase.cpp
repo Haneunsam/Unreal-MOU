@@ -16,6 +16,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/CheckBox.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/EditableTextBox.h"
@@ -48,6 +49,7 @@ void URoomCreateWidgetBase::NativeOnInitialized()
 	}
 }
 
+// [RCUI-010] 페이지가 열릴 때 입력 이벤트를 연결하고 비밀번호를 가린다.
 void URoomCreateWidgetBase::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -84,7 +86,31 @@ void URoomCreateWidgetBase::NativeConstruct()
 		}
 	}
 
-	SetMessage(TEXT("방 제목을 입력하세요. 비밀번호는 비워두면 공개방이 됩니다."), false);
+	bPasswordVisible = false;
+	if (PasswordRoomCheckBox)
+	{
+		PasswordRoomCheckBox->OnCheckStateChanged.AddUniqueDynamic(
+			this, &URoomCreateWidgetBase::HandlePasswordRoomChanged);
+	}
+	if (TogglePasswordVisibilityButton)
+	{
+		TogglePasswordVisibilityButton->OnClicked.AddUniqueDynamic(
+			this, &URoomCreateWidgetBase::HandlePasswordVisibilityClicked);
+	}
+	if (RoomPasswordBox)
+	{
+		RoomPasswordBox->OnTextChanged.AddUniqueDynamic(
+			this, &URoomCreateWidgetBase::HandlePasswordTextChanged);
+		// 재구성 시 기존 유효 입력을 기준으로 복원 상태를 초기화한다.
+		LastValidPassword.Empty();
+		HandlePasswordTextChanged(RoomPasswordBox->GetText());
+	}
+	if (PasswordRoomCheckBox && !PasswordRoomCheckBox->IsChecked())
+	{
+		HandlePasswordRoomChanged(false);
+	}
+	RefreshPasswordControls();
+	SetMessage(TEXT("방 제목을 입력하세요. 비밀번호 방은 체크 후 숫자 4자리를 입력하세요."), false);
 
 	if (RoomTitleBox != nullptr)
 	{
@@ -142,8 +168,11 @@ void URoomCreateWidgetBase::NativeConstruct()
 	}
 }
 
+// [RCUI-011] 페이지 구독을 해제하고 비밀번호를 다시 가린다.
 void URoomCreateWidgetBase::NativeDestruct()
 {
+	bPasswordVisible = false;
+	RefreshPasswordControls();
 	// 구독 해제를 여기서 반드시 해야 파괴된 위젯으로 델리게이트가 날아오지 않는다.
 	if (bSubscribed)
 	{
@@ -187,6 +216,7 @@ void URoomCreateWidgetBase::NativeDestruct()
 //             └ MessageText        안내 / 실패 사유
 // ---------------------------------------------------------------------------
 
+// [RCUI-012] WBP가 없을 때 체크·보기 버튼을 포함한 기본 폼을 만든다.
 void URoomCreateWidgetBase::BuildDefaultLayout()
 {
 	UCanvasPanel* RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RoomCreateRootCanvas"));
@@ -202,7 +232,7 @@ void URoomCreateWidgetBase::BuildDefaultLayout()
 	PanelSlot->SetAlignment(FVector2D(0.5f, 0.5f));
 	PanelSlot->SetAutoSize(false);
 	PanelSlot->SetPosition(FVector2D::ZeroVector);
-	PanelSlot->SetSize(FVector2D(420.f, 260.f));
+	PanelSlot->SetSize(FVector2D(420.f, 340.f));
 
 	UVerticalBox* MainBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoomCreateMainBox"));
 	Panel->AddChild(MainBox);
@@ -225,11 +255,22 @@ void URoomCreateWidgetBase::BuildDefaultLayout()
 	RoomTitleBox->SetHintText(FText::FromString(TEXT("방 제목")));
 	AddRow(RoomTitleBox, 6.f);
 
+	PasswordRoomCheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("PasswordRoomCheckBox"));
+	UTextBlock* CheckLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("PasswordRoomLabel"));
+	CheckLabel->SetText(FText::FromString(TEXT("비밀번호 방")));
+	PasswordRoomCheckBox->AddChild(CheckLabel);
+	PasswordRoomCheckBox->SetIsChecked(false);
+	AddRow(PasswordRoomCheckBox, 6.f);
+
 	RoomPasswordBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("RoomPasswordBox"));
-	RoomPasswordBox->SetHintText(FText::FromString(TEXT("비밀번호 숫자 4자리 (비우면 공개방)")));
-	// 방 비밀번호는 계정 비밀번호와 성격이 다르다. 같은 방에 들어갈 사람끼리 말로
-	// 주고받는 값이라 가리지 않는다. 오타를 눈으로 확인하는 편이 더 이롭다.
-	AddRow(RoomPasswordBox, 12.f);
+	RoomPasswordBox->SetHintText(FText::FromString(TEXT("비밀번호 숫자 4자리")));
+	RoomPasswordBox->SetIsPassword(true);
+	AddRow(RoomPasswordBox, 6.f);
+	TogglePasswordVisibilityButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("TogglePasswordVisibilityButton"));
+	UTextBlock* EyeLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("PasswordVisibilityLabel"));
+	EyeLabel->SetText(FText::FromString(TEXT("비밀번호 보기 / 숨기기")));
+	TogglePasswordVisibilityButton->AddChild(EyeLabel);
+	AddRow(TogglePasswordVisibilityButton, 12.f);
 
 	UHorizontalBox* ButtonRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RoomCreateButtonRow"));
 	AddRow(ButtonRow, 10.f);
@@ -280,6 +321,7 @@ ULobbyFlowCoordinator* URoomCreateWidgetBase::GetFlowCoordinator() const
 	return nullptr;
 }
 
+// [RCUI-013] 제목과 공개·비밀번호방 입력을 검증한 뒤 기존 생성 흐름으로 전달한다.
 void URoomCreateWidgetBase::TryCreateRoom()
 {
 	if (bBusy)
@@ -325,17 +367,17 @@ void URoomCreateWidgetBase::TryCreateRoom()
 		return;
 	}
 
-	FString RoomPassword = RoomPasswordBox ? RoomPasswordBox->GetText().ToString() : FString();
-	RoomPassword.TrimStartAndEndInline();
-	// 비워두면 공개방. 뭔가 적었다면 반드시 숫자 4자리여야 한다.
-	// "1234 를 넣었는데 공개방이 되어 있더라" 같은 사고를 막으려고 조용히 무시하지 않는다.
-	if (!RoomPassword.IsEmpty() && !UServerSubsystem::IsValidRoomPassword(RoomPassword))
+	const FString RawPassword = RoomPasswordBox ? RoomPasswordBox->GetText().ToString() : FString();
+	// 체크가 없는 구형 WBP는 기존 '빈 값=공개방' 규칙을 유지한다.
+	const bool bUsePassword = PasswordRoomCheckBox
+		? PasswordRoomCheckBox->IsChecked() : !RawPassword.IsEmpty();
+	const FString RoomPassword = bUsePassword ? RawPassword : FString();
+	if (bUsePassword && !UServerSubsystem::IsValidRoomPassword(RoomPassword))
 	{
-		SetMessage(TEXT("방 비밀번호는 숫자 4자리여야 합니다. (공개방으로 만들려면 비워두세요)"), true);
+		SetMessage(TEXT("비밀번호 방은 숫자 4자리를 입력해야 합니다."), true);
 		return;
 	}
-
-	SubmittedTitle    = Title;
+	SubmittedTitle = Title;
 	SubmittedPassword = RoomPassword;
 
 	SetBusy(true);
@@ -500,6 +542,70 @@ void URoomCreateWidgetBase::CancelCreate()
 	RemoveFromParent();
 }
 
+// [RCUI-001] 체크 해제 시 비밀번호를 지우고 입력 상태를 갱신한다.
+void URoomCreateWidgetBase::HandlePasswordRoomChanged(bool bChecked)
+{
+	bPasswordVisible = false;
+	if (!bChecked)
+	{
+		LastValidPassword.Empty();
+		if (RoomPasswordBox) RoomPasswordBox->SetText(FText::GetEmpty());
+	}
+	RefreshPasswordControls();
+}
+
+// [RCUI-002] 비밀번호를 가림 또는 숫자 표시로 전환한다.
+void URoomCreateWidgetBase::HandlePasswordVisibilityClicked()
+{
+	if (bBusy || !RoomPasswordBox ||
+		(PasswordRoomCheckBox && !PasswordRoomCheckBox->IsChecked())) return;
+	bPasswordVisible = !bPasswordVisible;
+	RefreshPasswordControls();
+}
+
+// [RCUI-003] 숫자 0~4자리 편집만 허용하고 잘못된 편집은 되돌린다.
+void URoomCreateWidgetBase::HandlePasswordTextChanged(const FText& Text)
+{
+	if (bRestoringPassword || !RoomPasswordBox) return;
+	const FString Value = Text.ToString();
+	bool bValid = Value.Len() <= 4;
+	for (TCHAR Ch : Value)
+		bValid = bValid && Ch >= TEXT('0') && Ch <= TEXT('9');
+	if (bValid)
+	{
+		LastValidPassword = Value;
+		return;
+	}
+	bRestoringPassword = true;
+	RoomPasswordBox->SetText(FText::FromString(LastValidPassword));
+	bRestoringPassword = false;
+	SetMessage(TEXT("비밀번호는 숫자 4자리까지 입력할 수 있습니다."), true);
+}
+
+// [RCUI-004] 체크 상태와 요청 대기에 맞춰 입력·보기 상태 및 눈 아이콘을 적용한다.
+void URoomCreateWidgetBase::RefreshPasswordControls()
+{
+	const bool bUsePassword = !PasswordRoomCheckBox || PasswordRoomCheckBox->IsChecked();
+	const bool bEditable = bUsePassword && !bBusy;
+	if (RoomPasswordBox)
+	{
+		RoomPasswordBox->SetIsEnabled(bEditable);
+		RoomPasswordBox->SetIsPassword(!bPasswordVisible);
+	}
+	if (TogglePasswordVisibilityButton)
+	{
+		TogglePasswordVisibilityButton->SetIsEnabled(bEditable);
+		TogglePasswordVisibilityButton->SetToolTipText(FText::FromString(
+			bPasswordVisible ? TEXT("비밀번호 숨기기") : TEXT("비밀번호 보기")));
+	}
+	if (PasswordHiddenMark)
+	{
+		PasswordHiddenMark->SetVisibility(bPasswordVisible
+			? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+	}
+	if (PasswordRoomCheckBox) PasswordRoomCheckBox->SetIsEnabled(!bBusy);
+}
+
 void URoomCreateWidgetBase::HandleCreateClicked() { TryCreateRoom(); }
 void URoomCreateWidgetBase::HandleCancelClicked() { CancelCreate(); }
 
@@ -534,9 +640,12 @@ void URoomCreateWidgetBase::HandleRoomCreated(
 	}
 }
 
+// [RCUI-014] 요청 대기에 맞춰 폼 입력과 버튼을 함께 잠그거나 해제한다.
 void URoomCreateWidgetBase::SetBusy(bool bInBusy)
 {
 	bBusy = bInBusy;
+	if (RoomTitleBox) RoomTitleBox->SetIsEnabled(!bInBusy);
+	RefreshPasswordControls();
 	if (CreateButton != nullptr)
 	{
 		CreateButton->SetIsEnabled(!bInBusy);
@@ -558,3 +667,293 @@ void URoomCreateWidgetBase::SetMessage(const FString& Text, bool bIsError)
 		? FLinearColor(1.f, 0.45f, 0.45f)
 		: FLinearColor(0.75f, 0.75f, 0.75f)));
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+#include "InputCoreTypes.h"
+#include "Misc/AutomationTest.h"
+#include "Server/Lobby/RoomListWidgetBase.h"
+#include "Server/Lobby/LobbyWidgetBase.h"
+#include "Server/Lobby/LobbyPageWidgetBase.h"
+#include "Server/Chat/MessengerWidgetBase.h"
+#include "Components/WidgetSwitcher.h"
+#include "Components/Image.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "Engine/LocalPlayer.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Slate/WidgetRenderer.h"
+#include "ImageUtils.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Misc/CommandLine.h"
+#include "UObject/UnrealType.h"
+#include "UObject/UObjectIterator.h"
+#if WITH_EDITOR
+#include "AssetCompilingManager.h"
+#endif
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLobbyUIRegressionTest, "MOU.LobbyUI.WidgetRegression", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+// [RCUI-090] 외부 접속 없이 실제 로비 페이지 전환·비밀번호 입력·입장 보류 및 WBP 렌더링을 검증한다.
+bool FLobbyUIRegressionTest::RunTest(const FString& Parameters)
+{
+	// 백엔드 없는 fixture의 목록 요청/생성 시 발생하는 예상 경고만 허용한다.
+	AddExpectedError(TEXT("로그인 후에 방 목록을 볼 수 있다."), EAutomationExpectedErrorFlags::Contains, 0);
+	AddExpectedError(TEXT("로그인 후에 방을 만들 수 있다."), EAutomationExpectedErrorFlags::Contains, 0);
+	AddExpectedError(TEXT("잘못된 포트 번호: 0"), EAutomationExpectedErrorFlags::Contains, 0);
+	UGameInstance* GI = NewObject<UGameInstance>(GEngine); GI->InitializeStandalone();
+	UWorld* World = GI->GetWorld();
+	APlayerController* PC = World->SpawnActor<APlayerController>();
+	ULocalPlayer* LP = NewObject<ULocalPlayer>(GEngine); LP->PlayerController = PC; PC->Player = LP;
+	PC->SetAsLocalPlayerController(); World->AddController(PC);
+	UServerSubsystem* Server = GI->GetSubsystem<UServerSubsystem>();
+	ULobbyFlowCoordinator* Flow = GI->GetSubsystem<ULobbyFlowCoordinator>();
+	TestEqual(TEXT("Fixture has no network backend"), Server->GetBackendName(), FString(TEXT("(없음)")));
+	FEnumProperty* State = FindFProperty<FEnumProperty>(Server->GetClass(), TEXT("ConnectionState"));
+	State->GetUnderlyingProperty()->SetIntPropertyValue(State->ContainerPtrToValuePtr<void>(Server), static_cast<int64>(EChatConnectionState::LoggedIn));
+	FStructProperty* LoginProperty = FindFProperty<FStructProperty>(Server->GetClass(), TEXT("LoginResult"));
+	FChatLoginResult& Login = *LoginProperty->ContainerPtrToValuePtr<FChatLoginResult>(Server);
+	Login.bSuccess = true; Login.Name = TEXT("player1");
+
+	UClass* LobbyClass = LoadClass<ULobbyWidgetBase>(nullptr, TEXT("/Game/02_JSY/MainLobby/WBP_LobbyWidget.WBP_LobbyWidget_C"));
+	UClass* CreateClass = LoadClass<URoomCreateWidgetBase>(nullptr, TEXT("/Game/02_JSY/MainLobby/WBP_RoomCreateWidget.WBP_RoomCreateWidget_C"));
+	UClass* ListClass = LoadClass<URoomListWidgetBase>(nullptr, TEXT("/Game/02_JSY/MainLobby/WBP_RoomListWidget.WBP_RoomListWidget_C"));
+	if (!TestNotNull(TEXT("Lobby asset"),LobbyClass) || !TestNotNull(TEXT("Create asset"),CreateClass) || !TestNotNull(TEXT("List asset"),ListClass)) { GI->Shutdown(); return false; }
+	URoomCreateWidgetBase* CreateCDO = CreateClass->GetDefaultObject<URoomCreateWidgetBase>();
+	// 이 메모리 기본값은 테스트 종료 시 복원하며 에셋으로 저장하지 않는다.
+	TGuardValue<bool> DisableUpnp(CreateCDO->bOpenPortOnShow, false);
+	ULobbyWidgetBase* Lobby = CreateWidget<ULobbyWidgetBase>(PC,LobbyClass); Lobby->bManageMouseCursor=false; Lobby->HostPort=0;
+	TSharedRef<SWidget> SlateLobby=Lobby->TakeWidget();
+	UWidgetSwitcher* Stack=Cast<UWidgetSwitcher>(Lobby->GetWidgetFromName(TEXT("LobbyScreenStack")));
+	if (!TestNotNull(TEXT("Actual lobby stack"),Stack)) { GI->Shutdown(); return false; }
+	TestEqual(TEXT("One initial main page"),Stack->GetChildrenCount(),1);
+	ULobbyMainWidgetBase* Main=Cast<ULobbyMainWidgetBase>(Stack->GetActiveWidget());
+	TestTrue(TEXT("Main page uses configured WBP"), Main && Main->GetClass()==Lobby->MainLobbyWidgetClass);
+	TestNotNull(TEXT("Main title PNG"),Main->GetWidgetFromName(TEXT("GameTitleImage")));
+	int32 MessengerCount=0,MainCount=0;
+	for(TObjectIterator<UMessengerWidgetBase> It;It;++It) if(!It->IsTemplate() && It->GetGameInstance()==GI) ++MessengerCount;
+	for(TObjectIterator<ULobbyMainWidgetBase> It;It;++It) if(!It->IsTemplate() && It->GetGameInstance()==GI) ++MainCount;
+	TestEqual(TEXT("One messenger after lobby construct"),MessengerCount,1);
+	TestEqual(TEXT("No duplicate native main page"),MainCount,1);
+
+	FString PreviewDir; FParse::Value(FCommandLine::Get(),TEXT("LobbyUIPreviewDir="),PreviewDir);
+	auto Render=[&](const TCHAR* Filename,int32 Width=1280,int32 Height=800)
+	{
+		if(PreviewDir.IsEmpty()) return;
+#if WITH_EDITOR
+		FAssetCompilingManager::Get().FinishAllCompilation();
+#endif
+		FWidgetRenderer Renderer(false); Lobby->ForceLayoutPrepass();
+		for(int32 I=0;I<3;++I) Renderer.DrawWidget(SlateLobby,FVector2D(Width,Height));
+		UTextureRenderTarget2D* Target=Renderer.DrawWidget(SlateLobby,FVector2D(Width,Height));
+		TArray<FColor> Pixels; FReadSurfaceDataFlags Flags; Flags.SetLinearToGamma(false);
+		if(Target && Target->GameThread_GetRenderTargetResource()->ReadPixels(Pixels,Flags))
+		{
+			for(FColor& Pixel:Pixels) Pixel=Pixel.ReinterpretAsLinear().ToFColorSRGB();
+			TArray64<uint8> Bytes; FImageUtils::PNGCompressImageArray(Width,Height,Pixels,Bytes);
+			TestTrue(TEXT("Preview saved"),FFileHelper::SaveArrayToFile(Bytes,*(PreviewDir/Filename)));
+		}
+		else AddError(TEXT("Lobby render failed"));
+	};
+	Render(TEXT("Lobby_Main.png"));
+	Cast<UButton>(Main->GetWidgetFromName(TEXT("CreateRoomButton")))->OnClicked.Broadcast();
+	URoomCreateWidgetBase* Create=Cast<URoomCreateWidgetBase>(Stack->GetActiveWidget());
+	if(!TestTrue(TEXT("Create button opens configured page"),Create && Create->GetClass()==CreateClass)) {GI->Shutdown();return false;}
+	TestEqual(TEXT("Main and create only in stack"),Stack->GetChildrenCount(),2);
+	TestFalse(TEXT("Default public room"),Create->PasswordRoomCheckBox->IsChecked());
+	TestFalse(TEXT("Public password disabled"),Create->RoomPasswordBox->GetIsEnabled());
+	TestFalse(TEXT("Public eye disabled"),Create->TogglePasswordVisibilityButton->GetIsEnabled());
+	TestTrue(TEXT("Initial masking"),Create->RoomPasswordBox->GetIsPassword());
+	if (!TestNotNull(TEXT("Hidden eye mark binding"),Create->PasswordHiddenMark.Get())) { GI->Shutdown(); return false; }
+	TestTrue(TEXT("Hidden password shows closed eye mark"),Create->PasswordHiddenMark->IsVisible());
+	const UCanvasPanelSlot* CreateSlot=Cast<UCanvasPanelSlot>(Create->CreateButton->Slot);
+	const UCanvasPanelSlot* CancelSlot=Cast<UCanvasPanelSlot>(Create->CancelButton->Slot);
+	TestTrue(TEXT("Create button is left of back button"),CreateSlot && CancelSlot && CreateSlot->GetPosition().X < CancelSlot->GetPosition().X);
+	Create->RoomTitleBox->SetText(FText::FromString(TEXT("함께 탐험할 사람!")));
+	// SetText는 프로그램 변경이며 OnTextChanged를 보장하지 않는다. 실제 편집 이벤트까지 전달한다.
+	auto EditPassword=[&](const TCHAR* Value)
+	{
+		const FText Input=FText::FromString(Value);
+		Create->RoomPasswordBox->SetText(Input);
+		Create->RoomPasswordBox->OnTextChanged.Broadcast(Input);
+	};
+	int32 CreateAttempts=0; FString UsedPassword;
+	FDelegateHandle CreateResult=Flow->OnRoomCreateCompleted.AddLambda([&](bool,int32,EMOURoomResultBP,const FString& Password){++CreateAttempts;UsedPassword=Password;});
+	Create->PasswordRoomCheckBox->SetIsChecked(true);Create->PasswordRoomCheckBox->OnCheckStateChanged.Broadcast(true);
+	for(const TCHAR* Value:{TEXT(""),TEXT("1"),TEXT("12"),TEXT("123")})
+	{
+		EditPassword(Value);Create->TryCreateRoom();
+	}
+	TestEqual(TEXT("Empty/short password never reaches flow"),CreateAttempts,0);
+	EditPassword(TEXT("0007"));
+	for(const TCHAR* Value:{TEXT("12a3"),TEXT(" 123"),TEXT("12345"),TEXT("１２３４"),TEXT("12\n3")})
+	{
+		EditPassword(Value);
+		TestEqual(TEXT("Invalid paste restores last valid input"),Create->RoomPasswordBox->GetText().ToString(),FString(TEXT("0007")));
+	}
+	Create->TogglePasswordVisibilityButton->OnClicked.Broadcast();
+	TestFalse(TEXT("Eye reveals password"),Create->RoomPasswordBox->GetIsPassword());
+	TestFalse(TEXT("Visible password shows open eye"),Create->PasswordHiddenMark->IsVisible());
+	Create->TryCreateRoom();
+	TestEqual(TEXT("Valid creation reaches existing flow once"),CreateAttempts,1);
+	TestEqual(TEXT("Leading zeros reach flow unchanged"),UsedPassword,FString(TEXT("0007")));
+	TestFalse(TEXT("Offline failure unlocks form"),Create->bBusy);
+	TestEqual(TEXT("Failure preserves editable password"),Create->RoomPasswordBox->GetText().ToString(),FString(TEXT("0007")));
+	Create->SetBusy(true);
+	TestFalse(TEXT("Busy title disabled"),Create->RoomTitleBox->GetIsEnabled());
+	TestFalse(TEXT("Busy checkbox disabled"),Create->PasswordRoomCheckBox->GetIsEnabled());
+	TestFalse(TEXT("Busy password disabled"),Create->RoomPasswordBox->GetIsEnabled());
+	TestFalse(TEXT("Busy eye disabled"),Create->TogglePasswordVisibilityButton->GetIsEnabled());
+	Create->TogglePasswordVisibilityButton->OnClicked.Broadcast();TestTrue(TEXT("Busy eye cannot toggle"),Create->bPasswordVisible);
+	Create->SetBusy(false);Create->SetMessage(TEXT("비밀번호 방은 숫자 4자리를 입력하세요."),false);
+	Render(TEXT("Lobby_Create_Revealed.png"));
+	Create->TogglePasswordVisibilityButton->OnClicked.Broadcast();
+	TestTrue(TEXT("Hide restores closed eye mark"),Create->PasswordHiddenMark->IsVisible());
+	Render(TEXT("Lobby_Create.png"));
+	Render(TEXT("Lobby_Create_960x540.png"),960,540);
+	Create->PasswordRoomCheckBox->SetIsChecked(false);Create->PasswordRoomCheckBox->OnCheckStateChanged.Broadcast(false);
+	TestTrue(TEXT("Unchecked clears password"),Create->RoomPasswordBox->GetText().IsEmpty());
+	TestTrue(TEXT("Unchecked restores masking"),Create->RoomPasswordBox->GetIsPassword());
+	Create->TryCreateRoom();TestEqual(TEXT("Public submission is empty"),UsedPassword,FString());
+	TestEqual(TEXT("Two valid submissions only"),CreateAttempts,2);
+	Flow->OnRoomCreateCompleted.Remove(CreateResult);
+	Create->CancelButton->OnClicked.Broadcast();TestEqual(TEXT("Cancel returns to main only"),Stack->GetChildrenCount(),1);
+
+	Cast<UButton>(Main->GetWidgetFromName(TEXT("JoinRoomButton")))->OnClicked.Broadcast();
+	URoomListWidgetBase* List=Cast<URoomListWidgetBase>(Stack->GetActiveWidget());
+	if(!TestTrue(TEXT("Join button opens configured list"),List && List->GetClass()==ListClass)) {GI->Shutdown();return false;}
+	TestTrue(TEXT("WBP private join enabled"),List->bAllowPasswordRoomJoin);
+	TestEqual(TEXT("Existing auto refresh interval"),List->AutoRefreshInterval,3.f);
+	if (!TestNotNull(TEXT("Password popup bound"),List->PasswordPromptPanel.Get())) {GI->Shutdown();return false;}
+	TestFalse(TEXT("Popup initially hidden"),List->bPasswordPromptOpen);
+	TArray<FMOURoomInfo> Rooms;
+	for(int32 I=1;I<=7;++I)
+	{
+		FMOURoomInfo Room;Room.RoomId=I;Room.Title=I==1?TEXT("처음 오신 분도 환영합니다"):I==2?TEXT("친구끼리 비밀번호 방"):I==3?TEXT("아주 긴 방 제목에서도 참여 버튼과 인원은 유지됩니다"):FString::Printf(TEXT("함께 모험할 팀원 모집 %d"),I);
+		Room.CurrentPlayers=I%3+1;Room.MaxPlayers=4;Room.bHasPassword=I==2;Rooms.Add(Room);
+	}
+	List->bAllowPasswordRoomJoin=false;List->HandleRoomListReceived(Rooms);
+	TestEqual(TEXT("All rows created"),List->EntryWidgets.Num(),7);
+	URoomListEntryWidget* Locked=List->EntryWidgets[1];
+	TestFalse(TEXT("Opt-out private button disabled"),Locked->EntryJoinButton->GetIsEnabled());
+	TestTrue(TEXT("Lock PNG shown"),Locked->EntryLockImage->IsVisible());
+	int32 RowRequests=0;Locked->OnJoinClicked.BindLambda([&](int32){++RowRequests;});Locked->RequestJoin();TestEqual(TEXT("Opt-out row blocks delegate"),RowRequests,0);
+	int32 JoinAttempts=0;FString JoinedPassword;
+	FDelegateHandle JoinResult=Flow->OnRoomJoinCompleted.AddLambda([&](const FMOURoomJoinResult&,const FString& Password){++JoinAttempts;JoinedPassword=Password;});
+	List->BeginJoin(2);List->ConfirmJoinWithPassword();List->SendJoinRequest(2,TEXT("1234"));List->SendJoinRequest(1,TEXT("1234"));List->SendJoinRequest(999,FString());
+	TestEqual(TEXT("Opt-out and bypass attempts never reach flow"),JoinAttempts,0);
+	List->BeginJoin(999);TestEqual(TEXT("Unknown room cannot bypass policy"),JoinAttempts,0);
+	List->bAllowPasswordRoomJoin=true;List->HandleRoomListReceived(Rooms);
+	List->BeginJoin(1);TestEqual(TEXT("Public join reaches existing flow"),JoinAttempts,1);
+	TestFalse(TEXT("Offline join failure clears busy"),List->bBusy);
+	List->SetBusy(true);List->HandleRoomListReceived(Rooms);
+	for(const auto& Entry:List->EntryWidgets)TestFalse(TEXT("Refreshed row remains busy"),Entry->GetIsEnabled());
+	List->SetBusy(false);TestTrue(TEXT("Private button enabled after busy"),List->EntryWidgets[1]->EntryJoinButton->GetIsEnabled());
+	List->SetStatus(TEXT("방 7개 · 잠금방은 비밀번호를 입력하여 참여하세요."),false);
+	Render(TEXT("Lobby_RoomList.png"));Render(TEXT("Lobby_RoomList_960x540.png"),960,540);
+
+	UWidget* Messenger=Lobby->GetWidgetFromName(TEXT("LobbyMessenger"));
+	const ESlateVisibility InitialMessengerVisibility=Messenger->GetVisibility();
+	auto EditJoinPassword=[&](const TCHAR* Value)
+	{
+		const FText Input=FText::FromString(Value);
+		List->JoinPasswordBox->SetText(Input);List->JoinPasswordBox->OnTextChanged.Broadcast(Input);
+	};
+	List->EntryWidgets[1]->RequestJoin();
+	TestTrue(TEXT("Private row opens popup"),List->bPasswordPromptOpen);
+	TestEqual(TEXT("Selected room ID"),List->PendingJoinRoomId,2);
+	TestEqual(TEXT("Selected room title"),List->PasswordRoomNameText->GetText().ToString(),Rooms[1].Title);
+	TestEqual(TEXT("Popup shares existing page"),Stack->GetChildrenCount(),2);
+	TestTrue(TEXT("Messenger hidden behind modal"),Messenger->GetVisibility()==ESlateVisibility::Collapsed);
+	TestFalse(TEXT("List controls blocked behind modal"),List->CloseButton->GetIsEnabled());
+	TestTrue(TEXT("Password initially masked"),List->JoinPasswordBox->GetIsPassword());
+	TestTrue(TEXT("Hidden eye mark shown"),List->JoinPasswordHiddenMark->IsVisible());
+	TestFalse(TEXT("Empty password confirm disabled"),List->JoinConfirmButton->GetIsEnabled());
+	List->BeginJoin(3);TestEqual(TEXT("Modal keeps selected room"),List->PendingJoinRoomId,2);
+	Render(TEXT("PasswordJoin_Initial.png"));
+	for(const TCHAR* Value:{TEXT(""),TEXT("1"),TEXT("12"),TEXT("123")})
+	{
+		EditJoinPassword(Value);List->ConfirmJoinWithPassword();
+	}
+	TestEqual(TEXT("Short input cannot submit"),JoinAttempts,1);
+	EditJoinPassword(TEXT("0007"));
+	for(const TCHAR* Value:{TEXT("12a3"),TEXT(" 123"),TEXT("12345"),TEXT("１２３４"),TEXT("12\n3")})
+	{
+		EditJoinPassword(Value);TestEqual(TEXT("Bad paste restores last valid password"),List->JoinPasswordBox->GetText().ToString(),FString(TEXT("0007")));
+	}
+	List->JoinPasswordVisibilityButton->OnClicked.Broadcast();
+	TestFalse(TEXT("Show password unmasks input"),List->JoinPasswordBox->GetIsPassword());
+	TestFalse(TEXT("Show password opens eye"),List->JoinPasswordHiddenMark->IsVisible());
+	List->SetPasswordPromptStatus(FString(),false);Render(TEXT("PasswordJoin_Visible.png"));
+	List->JoinPasswordVisibilityButton->OnClicked.Broadcast();Render(TEXT("PasswordJoin_Masked.png"));Render(TEXT("PasswordJoin_960x540.png"),960,540);
+	List->HandleRoomListReceived(Rooms);
+	TestEqual(TEXT("Refresh preserves password"),List->JoinPasswordBox->GetText().ToString(),FString(TEXT("0007")));
+	for(const auto& Entry:List->EntryWidgets)TestFalse(TEXT("New rows remain blocked behind modal"),Entry->GetIsEnabled());
+	List->ActiveJoinRoomId=2;List->SetBusy(true);
+	List->CancelPasswordPrompt();List->JoinCloseButton->OnClicked.Broadcast();List->CloseList();List->ConfirmJoinWithPassword();
+	const FKeyEvent EscapeKey(EKeys::Escape,FModifierKeysState(),0,false,0,0);
+	TestTrue(TEXT("Busy Escape consumed"),List->NativeOnPreviewKeyDown(FGeometry(),EscapeKey).IsEventHandled());
+	TestTrue(TEXT("Busy cannot close popup"),List->bPasswordPromptOpen);
+	TestFalse(TEXT("Busy input disabled"),List->JoinPasswordBox->GetIsEnabled());
+	TestFalse(TEXT("Busy eye disabled"),List->JoinPasswordVisibilityButton->GetIsEnabled());
+	TestFalse(TEXT("Busy close disabled"),List->JoinCloseButton->GetIsEnabled());
+	List->JoinPasswordVisibilityButton->OnClicked.Broadcast();TestFalse(TEXT("Busy eye does not toggle"),List->bJoinPasswordVisible);
+	List->HandleRoomListReceived({});TestTrue(TEXT("Late empty list does not close in-flight popup"),List->bPasswordPromptOpen);
+	List->HandleRoomListReceived(Rooms);
+	FMOURoomJoinResult Failed;Failed.RoomId=2;Failed.Result=EMOURoomResultBP::WrongPassword;
+	List->HandleRoomJoinCompleted(Failed,TEXT("0007"));
+	TestTrue(TEXT("Wrong password keeps popup"),List->bPasswordPromptOpen);
+	TestFalse(TEXT("Wrong password releases busy"),List->bBusy);
+	TestTrue(TEXT("Wrong password clears input"),List->JoinPasswordBox->GetText().IsEmpty());
+	TestFalse(TEXT("Wrong password displays error"),List->PasswordPromptStatusText->GetText().IsEmpty());
+	Render(TEXT("PasswordJoin_Error.png"));
+	EditJoinPassword(TEXT("0007"));List->HandleJoinPasswordCommitted(List->JoinPasswordBox->GetText(),ETextCommit::OnEnter);
+	TestEqual(TEXT("Enter submits private join once"),JoinAttempts,2);
+	TestEqual(TEXT("Leading zeros reach existing join flow"),JoinedPassword,FString(TEXT("0007")));
+	TestFalse(TEXT("Offline failure closes popup"),List->bPasswordPromptOpen);
+	TestTrue(TEXT("Messenger visibility restored"),Messenger->GetVisibility()==InitialMessengerVisibility);
+	Flow->OnRoomJoinCompleted.Remove(JoinResult);
+
+	List->BeginJoin(2);EditJoinPassword(TEXT("1234"));List->JoinCloseButton->OnClicked.Broadcast();
+	TestFalse(TEXT("X closes popup only"),List->bPasswordPromptOpen);TestEqual(TEXT("List page retained after X"),Stack->GetChildrenCount(),2);
+	List->BeginJoin(2);TestTrue(TEXT("Reopen clears previous password"),List->JoinPasswordBox->GetText().IsEmpty());
+	List->JoinCancelButton->OnClicked.Broadcast();TestFalse(TEXT("Back closes popup only"),List->bPasswordPromptOpen);
+	List->BeginJoin(2);List->NativeOnPreviewKeyDown(FGeometry(),EscapeKey);
+	TestFalse(TEXT("Escape closes idle popup"),List->bPasswordPromptOpen);
+	for (EMOURoomResultBP Result : {EMOURoomResultBP::Full,EMOURoomResultBP::AlreadyStarted})
+	{
+		List->BeginJoin(2);List->ActiveJoinRoomId=2;List->SetBusy(true);Failed.RoomId=2;Failed.Result=Result;
+		List->HandleRoomJoinCompleted(Failed,FString());TestFalse(TEXT("Terminal room failure closes popup"),List->bPasswordPromptOpen);
+	}
+	List->BeginJoin(2);List->HandleRoomListReceived({});TestFalse(TEXT("Removed selected room closes popup"),List->bPasswordPromptOpen);
+	List->HandleRoomListReceived(Rooms);List->BeginJoin(2);List->ActiveJoinRoomId=2;List->SetBusy(true);
+	Failed.RoomId=0;Failed.Result=EMOURoomResultBP::NotAuthed;List->HandleRoomJoinCompleted(Failed,FString());
+	TestFalse(TEXT("Disconnect result without room ID unlocks"),List->bBusy);TestFalse(TEXT("Disconnect closes popup"),List->bPasswordPromptOpen);
+	// 성공 콜백 전달을 확인한다. 실제 네트워크 왕복은 수행하지 않는다.
+	List->BeginJoin(2);List->ActiveJoinRoomId=2;List->SetBusy(true);int32 Approved=0;
+	List->OnRoomJoinApprovedNative.BindLambda([&](const FMOURoomJoinResult&,const FString& Password){++Approved;TestEqual(TEXT("Approved callback preserves password"),Password,FString(TEXT("0007")));});
+	FMOURoomJoinResult Success;Success.RoomId=2;Success.bSuccess=true;List->HandleRoomJoinCompleted(Success,TEXT("0007"));
+	TestEqual(TEXT("Success forwarded once"),Approved,1);TestFalse(TEXT("Success closes modal"),List->bPasswordPromptOpen);List->OnRoomJoinApprovedNative.Unbind();
+	TestTrue(TEXT("Success restores messenger"),Messenger->GetVisibility()==InitialMessengerVisibility);
+	Messenger->SetVisibility(ESlateVisibility::Hidden);List->BeginJoin(2);List->CancelPasswordPrompt();
+	TestTrue(TEXT("Previously hidden messenger remains hidden"),Messenger->GetVisibility()==ESlateVisibility::Hidden);Messenger->SetVisibility(InitialMessengerVisibility);
+	List->HandleRoomListReceived({});Render(TEXT("Lobby_RoomList_Empty.png"));TestEqual(TEXT("Empty list clears old rows"),List->RoomListBox->GetChildrenCount(),0);
+	List->CloseButton->OnClicked.Broadcast();TestEqual(TEXT("List closes to main"),Stack->GetChildrenCount(),1);
+	for(int32 I=0;I<3;++I)
+	{
+		Lobby->OpenRoomCreate();Create=Cast<URoomCreateWidgetBase>(Stack->GetActiveWidget());
+		TestEqual(TEXT("Repeated create stack count"),Stack->GetChildrenCount(),2);Create->CancelCreate();
+		Lobby->OpenRoomList();List=Cast<URoomListWidgetBase>(Stack->GetActiveWidget());
+		TestEqual(TEXT("Repeated list stack count"),Stack->GetChildrenCount(),2);List->CloseList();
+	}
+	TestEqual(TEXT("Repeated navigation leaves one main"),Stack->GetChildrenCount(),1);
+	URoomCreateWidgetBase* Native=CreateWidget<URoomCreateWidgetBase>(PC);Native->bOpenPortOnShow=false;Native->HostPort=0;
+	TSharedRef<SWidget> NativeSlate=Native->TakeWidget();
+	TestNotNull(TEXT("Native fallback checkbox"),Native->PasswordRoomCheckBox.Get());TestNotNull(TEXT("Native fallback eye"),Native->TogglePasswordVisibilityButton.Get());
+	TestTrue(TEXT("Native fallback password masked"),Native->RoomPasswordBox->GetIsPassword());
+	Native->NativeDestruct();Native->ReleaseSlateResources(true);
+	Lobby->NativeDestruct();Lobby->ReleaseSlateResources(true);
+	GI->Shutdown();GEngine->DestroyWorldContext(World);World->DestroyWorld(false);
+	return true;
+}
+#endif
