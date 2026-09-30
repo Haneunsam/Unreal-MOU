@@ -59,6 +59,14 @@ public class TeamProject_MOU : ModuleRules
 
         PrivateDependencyModuleNames.AddRange(new string[] { });
 
+        if (Target.bBuildEditor)
+        {
+            PrivateDependencyModuleNames.AddRange(new string[] {
+                "UnrealEd",
+                "LevelEditor"
+            });
+        }
+
         PublicIncludePaths.AddRange(new string[] {
             "TeamProject_MOU"
         });

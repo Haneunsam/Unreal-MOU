@@ -24,7 +24,8 @@ FGameplayTag UNPCData::HomeTag() const
 }
 
 UNPCData::UNPCData()
-	: StartState(ENPCStartState::Patrol)
+	: ObjectiveType(ENPCObjectiveType::PlayerAction)
+	, StartState(ENPCStartState::Patrol)
 	, UsePatrol(true)
 	, PatrolType(ENPCPatrolType::RandomRadius)
 	, PatrolRadius(1000.0f)
@@ -35,7 +36,22 @@ UNPCData::UNPCData()
 	, ActionInterval(1.0f)
 	, SightRadius(1500.0f)
 	, LoseSightRadius(2000.0f)
+	, TargetSelectionPolicy(ENPCTargetSelectionPolicy::LockUntilLost)
+	, TargetLoseGraceTime(2.0f)
+	, TrackingMovementPolicy(ENPCTrackingMovementPolicy::AlwaysChase)
+	, ObservedViewDotThreshold(0.65f)
+	, RequireLineOfSightForObservation(true)
 {
+}
+
+bool UNPCData::UsesPlayerActionObjective() const
+{
+	return ObjectiveType == ENPCObjectiveType::PlayerAction;
+}
+
+bool UNPCData::UsesWarehouseItemTransportObjective() const
+{
+	return ObjectiveType == ENPCObjectiveType::WarehouseItemTransport;
 }
 
 FGameplayTag UNPCData::GetStartStateTag() const

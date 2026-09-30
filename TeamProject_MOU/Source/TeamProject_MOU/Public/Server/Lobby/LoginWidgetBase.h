@@ -1,16 +1,16 @@
-// MOU 채팅 - 로그인 / 계정 생성 UI.
+﻿// MOU 채팅 - 로그인 / 계정 생성 UI.
 //
 // [이 위젯이 하는 일]
 //   콘솔 명령(MOU.Chat.Connect / MOU.Chat.Login)으로 하던 일을 화면에서 한다.
 //     1. 서버에 접속
 //     2. 아이디/비밀번호로 로그인, 또는 계정 생성
-//     3. 성공하면 스스로 사라지고 채팅 위젯과 로비 메인메뉴(ULobbyWidgetBase)를 띄운다
+//     3. 로그인 성공 시 기존 로비로 이동하고, 가입 성공 시 로그인 화면으로 돌아온다
 //
 // [ChatWidgetBase 와 같은 규약]
 //   WBP 없이 CreateWidget 만 해도 C++ 이 기본 레이아웃을 조립한다.
 //   WBP 를 만들어 이 클래스를 부모로 지정하면, 아래 BindWidgetOptional 과
 //   같은 이름의 위젯을 배치하는 것만으로 디자인을 갈아끼울 수 있다.
-//     필요한 이름: LoginIdBox / PasswordBox / NicknameBox /
+//     필요한 이름: LoginIdBox / PasswordBox / RegisterIdBox / RegisterPasswordBox / ConfirmPasswordBox /
 //                  LoginButton / RegisterButton / MessageText / TitleText
 //
 // [비밀번호 취급 — 지켜야 할 것]
@@ -23,6 +23,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Types/SlateEnums.h"
 #include "Server/Chat/ChatTypes.h"
 #include "LoginWidgetBase.generated.h"
 
@@ -33,7 +34,7 @@ class UVerticalBox;
 class UServerSubsystem;
 
 /**
- * 접속 + 로그인 + 계정 생성을 한 화면에서 처리하는 위젯.
+ * 로그인과 별도 회원가입 패널을 관리하는 위젯.
  *
  * 사용 흐름:
  *   1. 게임 시작 화면에서 CreateWidget<ULoginWidgetBase>() 후 AddToViewport()
@@ -49,7 +50,9 @@ public:
 	ULoginWidgetBase(const FObjectInitializer& ObjectInitializer);
 
 	virtual void NativeOnInitialized() override;
+	// [AUTHUI-031] 입력과 서버 이벤트를 연결하고 로그인 화면을 초기화한다.
 	virtual void NativeConstruct() override;
+	// [AUTHUI-032] 서버 이벤트와 미확정 요청을 정리하고 비밀번호를 지운다.
 	virtual void NativeDestruct() override;
 
 	// --- 설정 -------------------------------------------------------------
@@ -132,14 +135,17 @@ public:
 
 	/** 입력된 아이디/비밀번호로 로그인한다. 서버에 연결되어 있지 않으면 먼저 연결한다. */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Login")
+	// [AUTHUI-033] 로그인 패널의 검증된 자격증명으로 수동 로그인을 요청한다.
 	void TryLogin();
 
-	/** 입력된 값으로 계정을 만든다. 성공하면 이어서 자동으로 로그인한다. */
+	/** 입력된 값으로 계정을 만든다. 중복 확인과 비밀번호 확인을 통과하면 가입하고 로그인 화면으로 돌아간다. */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Login")
+	// [AUTHUI-034] 가입 검증이 완료된 입력을 서버에 제출한다.
 	void TryRegister();
 
 	/** 사용자에게 보여줄 안내 문구를 바꾼다. */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Login")
+	// [AUTHUI-039] 활성 패널에 진행 또는 오류 안내를 표시한다.
 	void SetMessage(const FString& Text, bool bIsError);
 
 	/** 로그인이 성공했을 때 블루프린트가 이어서 할 일을 넣는 훅. */
@@ -158,9 +164,6 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Login")
 	TObjectPtr<UEditableTextBox> PasswordBox;
 
-	/** 계정 생성에만 쓰인다. 비워두면 아이디를 닉네임으로 쓴다. */
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Login")
-	TObjectPtr<UEditableTextBox> NicknameBox;
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Login")
 	TObjectPtr<UButton> LoginButton;
@@ -173,24 +176,90 @@ protected:
 	TObjectPtr<UTextBlock> MessageText;
 
 private:
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UWidget> LoginPanel;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UWidget> RegisterPanel;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UWidget> LoginEyeSlash;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UWidget> RegisterEyeSlash;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UWidget> CheckIdHint;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UWidget> CheckIdAvailable;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UWidget> CheckIdDuplicate;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UEditableTextBox> RegisterIdBox;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UEditableTextBox> RegisterPasswordBox;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UEditableTextBox> ConfirmPasswordBox;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UButton> CheckIdButton;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UButton> SubmitRegisterButton;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UButton> CloseRegisterButton;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UButton> LoginPasswordEyeButton;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UButton> RegisterPasswordEyeButton;
+    UPROPERTY(meta=(BindWidgetOptional))
+    TObjectPtr<UTextBlock> RegisterMessageText;
+    // [AUTHUI-010] 로그인 입력을 지우고 별도 회원가입 패널을 연다.
+    void OpenRegisterPanel();
+    // [AUTHUI-011] 가입 조회와 비밀번호를 지우고 로그인 화면으로 돌아간다.
+    UFUNCTION()
+    void CloseRegisterPanel();
+    // [AUTHUI-012] 아이디 편집 시 이전 중복 확인과 진행 중 조회를 무효화한다.
+    UFUNCTION()
+    void HandleRegisterIdChanged(const FText& Text);
+    // [AUTHUI-013] 아이디 형식을 검사하고 서버에 중복 확인을 요청한다.
+    UFUNCTION()
+    void HandleCheckIdClicked();
+    // [AUTHUI-014] 요청 번호와 현재 아이디가 일치하는 조회 결과만 반영한다.
+    UFUNCTION()
+    void HandleIdChecked(int64 RequestId, EChatLoginResultBP Result);
+    // [AUTHUI-015] 로그인 비밀번호의 마스킹과 눈 아이콘을 함께 전환한다.
+    UFUNCTION()
+    void ToggleLoginPassword();
+    // [AUTHUI-016] 가입 비밀번호의 마스킹과 눈 아이콘을 함께 전환한다.
+    UFUNCTION()
+    void ToggleRegisterPassword();
+    // [AUTHUI-017] 계정 길이 정책·비밀번호 일치·아이디 중복 확인을 검증한다.
+    bool ReadAndValidateRegisterInput(FString& Id, FString& Password);
+    // [AUTHUI-018] 모든 비밀번호를 지우고 숨김 상태로 되돌린다.
+    void ClearAllPasswordFields();
+    // [AUTHUI-019] 중복 확인 안내·사용 가능·중복 이미지를 배타적으로 표시한다.
+    void SetCheckStatus(int32 Status);
+    // [AUTHUI-020] Enter 입력을 현재 패널의 로그인 또는 가입 제출에 연결한다.
+    UFUNCTION()
+    void HandlePasswordCommitted(const FText& Text, ETextCommit::Type Method);
 	// --- 델리게이트 수신부 (AddDynamic 대상이라 전부 UFUNCTION) --------------
 
 	UFUNCTION()
 	void HandleLoginCompleted(const FChatLoginResult& Result);
 
 	UFUNCTION()
+	// [AUTHUI-036] 가입 성공 시 자동 로그인 없이 로그인 화면으로 복귀한다.
 	void HandleRegisterCompleted(bool bSuccess, EChatLoginResultBP Result);
 
 	UFUNCTION()
+	// [AUTHUI-037] 연결 종료 시 가입 검증과 대기를 해제한다.
 	void HandleStateChanged(EChatConnectionState NewState, const FString& Detail);
 
 	UFUNCTION()
 	void HandleLoginClicked();
 
 	UFUNCTION()
+	// [AUTHUI-035] 가입 실행 대신 가입 화면을 연다.
 	void HandleRegisterClicked();
 
 	// --- 내부 -------------------------------------------------------------
+
+	// [AUTHUI-030] WBP가 없는 경우에도 로그인과 가입을 분리한 기본 화면을 구성한다.
 
 	void BuildDefaultLayout();
 
@@ -201,6 +270,7 @@ private:
 	bool ReadAndValidateInput(FString& OutId, FString& OutPassword);
 
 	/** 로그인/가입 버튼을 잠그거나 푼다. 응답을 기다리는 동안 중복 요청을 막는다. */
+	// [AUTHUI-038] 요청 중 입력과 버튼을 함께 잠가 중복 제출을 방지한다.
 	void SetBusy(bool bBusy);
 
 	void ShowChatWidget();
@@ -209,8 +279,15 @@ private:
 
 	UServerSubsystem* GetServerSubsystem() const;
 
-	/** 가입 성공 직후 자동 로그인을 하기 위한 플래그. */
-	bool bAutoLoginAfterRegister = false;
+	/** 가입 화면의 요청과 검증 상태. */
+    bool bRegisterPanelOpen = false;
+    bool bRegisterRequestPending = false;
+    bool bIdAvailable = false;
+    bool bLoginPasswordVisible = false;
+    bool bRegisterPasswordVisible = false;
+    uint32 ActiveCheckRequestId = 0;
+    FString CheckingLoginId, CheckedLoginId, SubmittedRegisterId;
+    friend class FLoginUIRegressionTest;
 
 	/** 응답 대기 중인지. 버튼 중복 클릭을 막는다. */
 	bool bBusy = false;

@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Water/MOUWaterBodyLakeComponent.h"
+#include "Water/MOUWaterHazardComponent.h"
 
 void UMOUWaterBodyLakeComponent::OnRegister()
 {
@@ -21,6 +22,11 @@ void UMOUWaterBodyLakeComponent::SetLakeWaterLevelZ(float NewWorldZ, bool bUserT
 		FVector Location = Owner->GetActorLocation();
 		Location.Z = NewWorldZ;
 		Owner->SetActorLocation(Location);
+
+		if (UMOUWaterHazardComponent* HazardComp = Owner->FindComponentByClass<UMOUWaterHazardComponent>())
+		{
+			HazardComp->CheckWaterLevel(NewWorldZ);
+		}
 	}
 
 	// 화면에 보이는 물 표면은 WaterZone이 캡처하는 "Water Info Texture"를 샘플링해서 그려지므로,

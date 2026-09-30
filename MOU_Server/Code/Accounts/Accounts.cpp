@@ -1,4 +1,4 @@
-#include "ServerLog/ServerLog.h"
+﻿#include "ServerLog/ServerLog.h"
 #include "Accounts/Accounts.h"
 
 #include "ChatProtocol.h"
@@ -46,6 +46,23 @@ namespace
 			Salt, Crypto::kSaltSize,
 			Crypto::kPbkdf2Iterations, OutHash);
 	}
+}
+
+// [AUTHUI-001] 계정을 생성하지 않고 동일한 DB 비교 규칙으로 아이디 중복을 조회한다.
+EAccountResult CheckLoginId(const std::string& LoginId)
+{
+    if (LoginId.size() < kMinLoginIdLen || LoginId.size() >= kMaxLoginIdLen || LoginId.find('\0') != std::string::npos)
+        return EAccountResult::InvalidFormat;
+    std::lock_guard<std::mutex> Lock(GMutex);
+    if (!GDb) return EAccountResult::DbError;
+    sqlite3_stmt* St = nullptr;
+    if (sqlite3_prepare_v2(GDb, "SELECT 1 FROM accounts WHERE login_id = ? LIMIT 1;", -1, &St, nullptr) != SQLITE_OK)
+        return EAccountResult::DbError;
+    const int Bound = sqlite3_bind_text(St, 1, LoginId.c_str(), static_cast<int>(LoginId.size()), SQLITE_TRANSIENT);
+    const int Step = Bound == SQLITE_OK ? sqlite3_step(St) : SQLITE_ERROR;
+    sqlite3_finalize(St);
+    if (Step == SQLITE_ROW) return EAccountResult::DuplicateId;
+    return Step == SQLITE_DONE ? EAccountResult::Success : EAccountResult::DbError;
 }
 
 bool Start(const char* DbPath)

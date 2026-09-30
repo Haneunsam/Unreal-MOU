@@ -1,4 +1,4 @@
-// MOU 채팅 - 서브시스템 구현.
+﻿// MOU 채팅 - 서브시스템 구현.
 //
 // 이 파일이 하는 일은 결국 4가지다.
 //   1. 백엔드(ILobbyBackend) 수명 관리 (생성 / 안전한 파괴)
@@ -16,7 +16,7 @@
 //   여기서 다시 적으면 서버가 상한을 바꿨을 때 조용히 어긋난다.
 
 #include "Server/ServerSubsystem.h"
-#include "Components/CharacterCustomizationComponent.h"
+#include "Data/CustomizationTypes.h"
 #include "Server/Net/CustomizationWire.h"
 
 #include "Server/Net/ChatFraming.h"   // 계정/방 비밀번호 길이 규칙 상수 (패킷 조립에는 쓰지 않는다)
@@ -121,8 +121,10 @@ void UServerSubsystem::Deinitialize()
 	Super::Deinitialize();
 }
 
+// [AUTHUI-042] 계정 요청의 검증 또는 수명을 관리한다.
 void UServerSubsystem::ShutdownClient()
 {
+	PendingCheckRequestId = 0;
 	if (Backend.IsValid())
 	{
 		// 백엔드가 워커 스레드를 갖고 있으면 여기서 끝날 때까지 기다린다.
@@ -243,22 +245,12 @@ FString UServerSubsystem::GetLoginResultText(EChatLoginResultBP Result)
 	}
 }
 
+// [AUTHUI-040] 계정 요청의 검증 또는 수명을 관리한다.
 bool UServerSubsystem::ValidateCredentials(const FString& LoginId, const FString& Password, FString& OutReason)
 {
 	// 서버와 같은 규칙을 쓴다. 길이는 UTF-8 바이트 기준이라 한글 아이디면 글자 수보다 커진다.
-	const int32 IdBytes = MOUChat::GetUtf8Length(LoginId);
+	if (!ValidateLoginId(LoginId, OutReason)) return false;
 	const int32 PwBytes = MOUChat::GetUtf8Length(Password);
-
-	if (IdBytes < static_cast<int32>(MOU::kMinLoginIdLen))
-	{
-		OutReason = FString::Printf(TEXT("아이디는 %d자 이상이어야 합니다."), MOU::kMinLoginIdLen);
-		return false;
-	}
-	if (IdBytes >= static_cast<int32>(MOU::kMaxLoginIdLen))
-	{
-		OutReason = FString::Printf(TEXT("아이디가 너무 깁니다. (%d바이트 미만)"), MOU::kMaxLoginIdLen);
-		return false;
-	}
 	if (PwBytes < static_cast<int32>(MOU::kMinPasswordLen))
 	{
 		OutReason = FString::Printf(TEXT("비밀번호는 %d자 이상이어야 합니다."), MOU::kMinPasswordLen);
@@ -272,6 +264,48 @@ bool UServerSubsystem::ValidateCredentials(const FString& LoginId, const FString
 
 	OutReason.Empty();
 	return true;
+}
+
+// [AUTHUI-008] 아이디의 공통 UTF-8 길이 정책을 검사한다.
+bool UServerSubsystem::ValidateLoginId(const FString& LoginId, FString& OutReason)
+{
+	const int32 IdBytes = MOUChat::GetUtf8Length(LoginId);
+
+	if (IdBytes < static_cast<int32>(MOU::kMinLoginIdLen))
+	{
+		OutReason = FString::Printf(TEXT("아이디는 %d자 이상이어야 합니다."), MOU::kMinLoginIdLen);
+		return false;
+	}
+	if (IdBytes >= static_cast<int32>(MOU::kMaxLoginIdLen))
+	{
+		OutReason = FString::Printf(TEXT("아이디가 너무 깁니다. (%d바이트 미만)"), MOU::kMaxLoginIdLen);
+		return false;
+	}
+
+    for (TCHAR Ch : LoginId) if (Ch == 0) { OutReason = TEXT("아이디에 잘못된 문자가 있습니다."); return false; }
+    OutReason.Empty(); return true;
+}
+// [AUTHUI-006] 연결된 서버로 아이디 조회를 보내고 상관관계 번호를 반환한다.
+uint32 UServerSubsystem::CheckLoginId(const FString& LoginId)
+{
+    FString Reason;
+    if (!ValidateLoginId(LoginId, Reason) || !Backend.IsValid() || ConnectionState != EChatConnectionState::Connected) return 0;
+    const uint32 Id = ++NextCheckRequestId ? NextCheckRequestId : ++NextCheckRequestId;
+    if (!Backend->SendCheckLoginId(Id, LoginId)) return 0;
+    PendingCheckRequestId = Id; CheckRequestTime = FPlatformTime::Seconds(); return Id;
+}
+// [AUTHUI-007] 지정된 조회의 늦은 응답을 무효화한다.
+void UServerSubsystem::CancelLoginIdCheck(uint32 RequestId)
+{
+    if (PendingCheckRequestId == RequestId) PendingCheckRequestId = 0;
+}
+// [AUTHUI-009] 미확정 가입 요청을 취소하고 연결을 종료하여 늦은 응답을 격리한다.
+void UServerSubsystem::CancelPendingRegistration()
+{
+    if (!bHasPendingRegister) return;
+    bHasPendingRegister = false; PendingRegisterPassword.Empty();
+    PendingRegisterId.Empty(); PendingRegisterNickname.Empty();
+    ShutdownClient();
 }
 
 void UServerSubsystem::Login(const FString& LoginId, const FString& Password, int32 TeamId)
@@ -296,6 +330,7 @@ void UServerSubsystem::Login(const FString& LoginId, const FString& Password, in
 	}
 }
 
+// [AUTHUI-041] 계정 요청의 검증 또는 수명을 관리한다.
 void UServerSubsystem::RegisterAccount(const FString& LoginId, const FString& Password, const FString& Nickname)
 {
 	// 연결 전에 불릴 수 있으므로 일단 보관한다.
@@ -305,6 +340,7 @@ void UServerSubsystem::RegisterAccount(const FString& LoginId, const FString& Pa
 	PendingRegisterPassword = Password;
 	PendingRegisterNickname = Nickname;
 	bHasPendingRegister     = true;
+	RegisterRequestTime = FPlatformTime::Seconds();
 
 	if (ConnectionState == EChatConnectionState::Connected
 		|| ConnectionState == EChatConnectionState::LoggedIn)
@@ -425,6 +461,7 @@ FString UServerSubsystem::GetRoomResultText(EMOURoomResultBP Result)
 	}
 }
 
+// [RTITLE-002] 생성 요청 제목을 보관한 뒤 방 생성을 요청한다.
 void UServerSubsystem::CreateRoom(const FString& Title, const FString& RoomPassword, int32 HostPort)
 {
 	if (!Backend.IsValid() || ConnectionState != EChatConnectionState::LoggedIn)
@@ -444,6 +481,7 @@ void UServerSubsystem::CreateRoom(const FString& Title, const FString& RoomPassw
 	// 방 목록만 7777을 계속 가리켜 relay bootstrap과 직접 후보가 서로 어긋날 수 있었다.
 	RegisterGameEndpoint(HostPort);
 	const int32 AdvertisedPort = ReservedGamePort > 0 ? ReservedGamePort : HostPort;
+	PendingCreatedRoomTitle = Title;
 	Backend->CreateRoom(Title, EffectivePassword, AdvertisedPort, GetLocalLanAddress());
 }
 
@@ -459,6 +497,7 @@ void UServerSubsystem::RequestRoomList()
 	Backend->RequestRoomList();
 }
 
+// [RTITLE-003] 목록에서 선택한 방 제목을 보관한 뒤 참여를 요청한다.
 void UServerSubsystem::JoinRoom(int32 RoomId, const FString& RoomPassword)
 {
 	if (!Backend.IsValid() || ConnectionState != EChatConnectionState::LoggedIn)
@@ -472,6 +511,7 @@ void UServerSubsystem::JoinRoom(int32 RoomId, const FString& RoomPassword)
 
 	const FString EffectivePassword = IsValidRoomPassword(RoomPassword) ? RoomPassword : FString();
 
+	PendingJoinedRoomTitle = RoomTitlesById.FindRef(RoomId);
 	Backend->JoinRoom(RoomId, EffectivePassword);
 }
 
@@ -490,15 +530,51 @@ void UServerSubsystem::LeaveRoom()
 	ClearRoomState();
 }
 
+// [PROFILE-001] 로그인 계정의 저장 경로를 반환하며 접속이 끊겨도 마지막 계정 연결을 유지한다.
+FString UServerSubsystem::GetCustomizationSaveSlotName() const
+{
+	const int64 UserId = LoginResult.bSuccess && LoginResult.UserId > 0
+		? LoginResult.UserId : LocalCustomizationUserId;
+	return UserId > 0
+		? FString::Printf(TEXT("MOU_Customization_User_%lld"), UserId)
+		: UCustomizationSaveGame::SaveSlotName;
+}
+
+// [PROFILE-002] 본인 외형을 메모리에 보관하고 계정별 파일에 저장한다.
+bool UServerSubsystem::CacheLocalCustomization(const FCharacterCustomizationData& Data)
+{
+	if (!MOU::IsValidCustomization(MOUCustomization::ToWire(Data))) return false;
+	if (LoginResult.bSuccess && LoginResult.UserId > 0) LocalCustomizationUserId = LoginResult.UserId;
+	LocalCustomization = Data;
+	bLocalCustomizationLoaded = true;
+
+	// 저장 실패 시에도 서버가 승인한 현재 외형은 메모리에 남겨 게임맵에 전달한다.
+	UCustomizationSaveGame* Saved = Cast<UCustomizationSaveGame>(
+		UGameplayStatics::CreateSaveGameObject(UCustomizationSaveGame::StaticClass()));
+	if (!Saved) return false;
+	Saved->SavedCustomization = Data;
+	return UGameplayStatics::SaveGameToSlot(Saved, GetCustomizationSaveSlotName(), UCustomizationSaveGame::SaveUserIndex);
+}
+
+// [PROFILE-003] 계정이 바뀌면 해당 계정 파일을 읽고 맵 이동 중에는 본인 외형을 유지한다.
 FCharacterCustomizationData UServerSubsystem::GetLocalCustomization()
 {
-	if (!bLocalCustomizationLoaded)
+	const int64 UserId = LoginResult.bSuccess && LoginResult.UserId > 0
+		? LoginResult.UserId : LocalCustomizationUserId;
+	if (!bLocalCustomizationLoaded || LocalCustomizationUserId != UserId)
 	{
-		auto* Storage = NewObject<UCharacterCustomizationComponent>(this);
-		if (!Storage->LoadCustomizationFromDisk(LocalCustomization) ||
-			!MOU::IsValidCustomization(MOUCustomization::ToWire(LocalCustomization)))
+		LocalCustomizationUserId = UserId;
+		LocalCustomization = MOUCustomization::FromWire(MOU::CharacterCustomization{});
+		const FString SlotName = GetCustomizationSaveSlotName();
+		// 계정 파일이 없을 때 공용 파일로 대체하면 모든 PIE 계정이 마지막 저장자의 외형을 읽는다.
+		if (UGameplayStatics::DoesSaveGameExist(SlotName, UCustomizationSaveGame::SaveUserIndex))
 		{
-			LocalCustomization = MOUCustomization::FromWire(MOU::CharacterCustomization{});
+			const UCustomizationSaveGame* Saved = Cast<UCustomizationSaveGame>(
+				UGameplayStatics::LoadGameFromSlot(SlotName, UCustomizationSaveGame::SaveUserIndex));
+			if (Saved && MOU::IsValidCustomization(MOUCustomization::ToWire(Saved->SavedCustomization)))
+			{
+				LocalCustomization = Saved->SavedCustomization;
+			}
 		}
 		bLocalCustomizationLoaded = true;
 	}
@@ -684,6 +760,7 @@ bool UServerSubsystem::IsSelfReady() const
 	return false;
 }
 
+// [RTITLE-004] 방을 떠날 때 제목과 대기 중 요청을 포함한 방 상태를 비운다.
 void UServerSubsystem::ClearRoomState()
 {
 	++CustomizationRequestId; // Ignore replies from a previous room/session.
@@ -695,6 +772,10 @@ void UServerSubsystem::ClearRoomState()
 
 	MyRoomId      = 0;
 	CurrentRoomId = 0;
+	CurrentRoomTitle.Empty();
+	PendingCreatedRoomTitle.Empty();
+	PendingJoinedRoomTitle.Empty();
+	RoomTitlesById.Reset();
 	RoomMembers.Reset();
 	bAllMembersReady = false;
 
@@ -744,8 +825,18 @@ void UServerSubsystem::Disconnect()
 // 게임 스레드 틱 - 백엔드 -> UI 방향의 유일한 통로
 // ---------------------------------------------------------------------------
 
+// [PROFILE-004] 백엔드 이벤트를 처리하고 외형 승인·게임 시작 시 본인 계정값을 보관한다.
 bool UServerSubsystem::Tick(float DeltaTime)
 {
+    if (PendingCheckRequestId && FPlatformTime::Seconds() - CheckRequestTime > 10.0) {
+        const uint32 Id = PendingCheckRequestId; PendingCheckRequestId = 0;
+        OnLoginIdChecked.Broadcast(Id, EChatLoginResultBP::ServerError);
+    }
+    if (bHasPendingRegister && FPlatformTime::Seconds() - RegisterRequestTime > 15.0) {
+        CancelPendingRegistration();
+        OnChatRegisterCompleted.Broadcast(false, EChatLoginResultBP::ServerError);
+    }
+
 	if (bCustomizationPending && FPlatformTime::Seconds() - CustomizationRequestTime > 10.0)
 	{
 		bCustomizationPending = false;
@@ -837,7 +928,14 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			OnChatLoginCompleted.Broadcast(LoginResult);
 			break;
 
+        case EServerClientEventType::CheckLoginIdAck:
+            if (Event.CheckRequestId == PendingCheckRequestId && PendingCheckRequestId) {
+                PendingCheckRequestId = 0;
+                OnLoginIdChecked.Broadcast(Event.CheckRequestId, Event.CheckResult);
+            }
+            break;
 		case EServerClientEventType::RegisterAck:
+            if (!bHasPendingRegister) break;
 			// 응답을 받았으므로 보관본을 지운다.
 			// 안 지우면 재접속할 때마다 가입을 다시 시도해 "이미 있는 아이디" 가 반복된다.
 			bHasPendingRegister = false;
@@ -860,6 +958,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			{
 				MyRoomId      = Event.RoomId;
 				CurrentRoomId = Event.RoomId;   // 방장도 그 방의 멤버다
+				CurrentRoomTitle = PendingCreatedRoomTitle;
 				SubmitCustomization(GetLocalCustomization());
 				UE_LOG(LogMOUServer, Log, TEXT("방 생성 완료. 방번호 #%d"), MyRoomId);
 			}
@@ -868,10 +967,16 @@ bool UServerSubsystem::Tick(float DeltaTime)
 				UE_LOG(LogMOUServer, Warning, TEXT("방 생성 실패: %s"),
 					*UServerSubsystem::GetRoomResultText(Event.RoomResult));
 			}
+			PendingCreatedRoomTitle.Empty();
 			OnRoomCreated.Broadcast(Event.bRoomSuccess, Event.RoomId, Event.RoomResult);
 			break;
 
 		case EServerClientEventType::RoomListAck:
+			RoomTitlesById.Reset();
+			for (const FMOURoomInfo& Room : Event.Rooms)
+			{
+				RoomTitlesById.Add(Room.RoomId, Room.Title);
+			}
 			UE_LOG(LogMOUServer, Log, TEXT("방 목록 수신: %d개"), Event.Rooms.Num());
 			OnRoomListReceived.Broadcast(Event.Rooms);
 			break;
@@ -880,6 +985,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			if (Event.Join.bSuccess)
 			{
 				CurrentRoomId = Event.Join.RoomId;   // 대기실 입장. 방장은 아니다
+				CurrentRoomTitle = PendingJoinedRoomTitle;
 				SubmitCustomization(GetLocalCustomization());
 				UE_LOG(LogMOUServer, Log, TEXT("방 #%d 입장. 호스트 후보 %s"),
 					Event.Join.RoomId, *Event.Join.ToDisplayString());
@@ -889,6 +995,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 				UE_LOG(LogMOUServer, Warning, TEXT("방 참여 실패: %s"),
 					*UServerSubsystem::GetRoomResultText(Event.Join.Result));
 			}
+			PendingJoinedRoomTitle.Empty();
 			OnRoomJoinCompleted.Broadcast(Event.Join);
 			break;
 
@@ -913,10 +1020,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 				bool bSaved = false;
 				if (bSuccess)
 				{
-					LocalCustomization = Event.Customization;
-					bLocalCustomizationLoaded = true;
-					auto* Storage = NewObject<UCharacterCustomizationComponent>(this);
-					bSaved = Storage->SaveCustomizationToDisk(LocalCustomization);
+					bSaved = CacheLocalCustomization(Event.Customization);
 				}
 				OnLobbyCustomizationResult.Broadcast(bSuccess, bSaved);
 			}
@@ -929,6 +1033,14 @@ bool UServerSubsystem::Tick(float DeltaTime)
 
 		case EServerClientEventType::RoomStart:
 		{
+			if (Event.RoomId == 0 || Event.RoomId != CurrentRoomId) break;
+			// 로비 슬롯 번호나 방장 값이 아니라 로그인한 본인의 서버 확정값을 맵 이동 전에 보관한다.
+			const FMOURoomMember* Self = RoomMembers.FindByPredicate(
+				[this](const FMOURoomMember& Member) { return Member.UserId == LoginResult.UserId; });
+			if (Self && !CacheLocalCustomization(Self->Customization))
+			{
+				UE_LOG(LogMOUServer, Warning, TEXT("게임 시작 외형의 계정별 저장 실패. 현재 세션의 메모리 외형은 유지합니다."));
+			}
 			// bIsHost 를 여기서 계산해 넘긴다. 받는 쪽은 호스트냐 참여자냐에 따라
 			// "리슨서버를 연다" 와 "기다린다" 로 갈리는데, 그 판단 근거가
 			// 이미 여기 있으므로 UI 가 다시 따지게 하지 않는다.
@@ -1044,6 +1156,11 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			break;
 
 		case EServerClientEventType::Disconnected:
+            PendingCheckRequestId = 0;
+            if (bHasPendingRegister) {
+                bHasPendingRegister = false; PendingRegisterPassword.Empty();
+                OnChatRegisterCompleted.Broadcast(false, EChatLoginResultBP::ServerError);
+            }
 			LoginResult = FChatLoginResult();
 			// 연결이 끊기면 서버가 내 방을 지운다. 클라이언트 쪽 기억도 같이 비운다.
 			ClearRoomState();

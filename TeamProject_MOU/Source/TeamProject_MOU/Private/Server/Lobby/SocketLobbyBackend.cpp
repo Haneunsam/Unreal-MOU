@@ -1,4 +1,4 @@
-// MOU 로비 - 자체 서버 백엔드 구현.
+﻿// MOU 로비 - 자체 서버 백엔드 구현.
 //
 // 여기 있는 코드는 전부 UServerSubsystem.cpp 에서 옮겨온 것이다.
 // 옮긴 이유는 동작을 바꾸려는 게 아니라, 서브시스템이 "패킷" 이라는 단어를
@@ -125,6 +125,19 @@ void FSocketLobbyBackend::SendLogin(const FString& LoginId, const FString& Passw
 		// 비밀번호는 절대 로그에 남기지 않는다.
 		UE_LOG(LogMOUServer, Log, TEXT("LoginReq 전송: %s (팀 %d)"), *LoginId, TeamId);
 	}
+}
+
+// [AUTHUI-004] 아이디 중복 조회의 송신 가능 여부를 반환한다.
+bool FSocketLobbyBackend::SendCheckLoginId(uint32 RequestId, const FString& LoginId)
+{
+    if (!ServerClient) return false;
+    MOU::CheckLoginIdReqBody Req{};
+    Req.Version = MOU::kProtocolVersion; Req.RequestId = RequestId;
+    MOUChat::CopyFixedString(Req.LoginId, MOU::kMaxLoginIdLen, LoginId);
+    TArray<uint8> Packet;
+    if (!MOUChat::BuildPacket(Packet, MOU::EOpcode::CheckLoginIdReq, &Req, sizeof(Req))) return false;
+    ServerClient->EnqueuePacket(MoveTemp(Packet));
+    return true;
 }
 
 void FSocketLobbyBackend::SendRegister(const FString& LoginId, const FString& Password, const FString& Nickname)

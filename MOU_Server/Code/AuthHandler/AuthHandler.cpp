@@ -1,4 +1,4 @@
-#include "AuthHandler/AuthHandler.h"
+﻿#include "AuthHandler/AuthHandler.h"
 #include "ServerContext/ServerContext.h"
 #include "ServerLog/ServerLog.h"
 #include "SocialHandler/SocialHandler.h"
@@ -168,6 +168,23 @@ namespace MOU::ServerRuntime
 		return bAckSent;
 	}
 
+
+	// [AUTHUI-002] 가입 전 중복 확인 요청의 형식과 버전을 검사하고 조회 결과를 반환한다.
+	bool HandleCheckLoginIdReq(const SessionPtr& Session, const char* Body, uint32_t BodySize)
+	{
+        CheckLoginIdReqBody Req{};
+        CheckLoginIdAckBody Ack{};
+        Ack.ServerVersion = kProtocolVersion;
+        Ack.Result = static_cast<uint8_t>(ELoginResult::InvalidRequest);
+        if (Body && BodySize >= 6) {
+            std::memcpy(&Req, Body, std::min<size_t>(BodySize, sizeof(Req)));
+            Ack.RequestId = Req.RequestId;
+            if (Req.Version != kProtocolVersion) Ack.Result = static_cast<uint8_t>(ELoginResult::VersionMismatch);
+            else if (BodySize == sizeof(Req) && std::memchr(Req.LoginId, 0, sizeof(Req.LoginId)))
+                Ack.Result = static_cast<uint8_t>(ToLoginResult(Accounts::CheckLoginId(ReadFixedString(Req.LoginId, kMaxLoginIdLen))));
+        }
+        return SendPacket(Session->Sock, EOpcode::CheckLoginIdAck, &Ack, sizeof(Ack));
+	}
 
 	bool HandleRegisterReq(const SessionPtr& Session, const char* Body, uint32_t BodySize)
 	{
