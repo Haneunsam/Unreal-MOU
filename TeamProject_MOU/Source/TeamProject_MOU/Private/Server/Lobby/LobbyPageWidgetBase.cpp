@@ -285,10 +285,19 @@ void ULobbySettingsWidgetBase::NativeOnInitialized()
 	}
 }
 
+// [LSET-001] 팀원 설정 기능을 초기화하고 닫기를 로비 복귀에 연결한다.
 void ULobbySettingsWidgetBase::NativeConstruct()
 {
 	Super::NativeConstruct();
+	OnSettingsMenuClosed.AddUniqueDynamic(this, &ULobbySettingsWidgetBase::HandleBackClicked);
 	if (BackButton) { BackButton->OnClicked.AddUniqueDynamic(this, &ULobbySettingsWidgetBase::HandleBackClicked); }
+}
+
+// [LSET-002] 닫기 연결과 키 설정 팝업을 정리한다.
+void ULobbySettingsWidgetBase::NativeDestruct()
+{
+	OnSettingsMenuClosed.RemoveDynamic(this, &ULobbySettingsWidgetBase::HandleBackClicked);
+	Super::NativeDestruct();
 }
 
 void ULobbySettingsWidgetBase::BuildDefaultLayout()

@@ -1,0 +1,108 @@
+{
+  "checks": [
+    {
+      "check": "No radio hides UI",
+      "pass": true,
+      "detail": "<SlateVisibility.COLLAPSED: 1>"
+    },
+    {
+      "check": "Owned OFF radio shows UI",
+      "pass": true,
+      "detail": "<SlateVisibility.HIT_TEST_INVISIBLE: 3>"
+    },
+    {
+      "check": "OFF state",
+      "pass": true,
+      "detail": "<RadioIconState.OFF: 1>"
+    },
+    {
+      "check": "OFF removes icon saturation",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "OFF removes gauge saturation",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "Percent text is bound",
+      "pass": true,
+      "detail": "100%"
+    },
+    {
+      "check": "ON state",
+      "pass": true,
+      "detail": "<RadioIconState.ON: 2>"
+    },
+    {
+      "check": "ON restores orange",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "Idle status icon hidden",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "Handheld transmission state",
+      "pass": true,
+      "detail": "<RadioIconState.TRANSMITTING: 3>"
+    },
+    {
+      "check": "Transmission uses red dot",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "Stowed power toggle blocked",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "Stowed radio not in hand",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "Stowed battery drains",
+      "pass": true,
+      "detail": "0.9960000514984131"
+    },
+    {
+      "check": "Stowed transmit state clears",
+      "pass": true,
+      "detail": "<RadioIconState.ON: 2>"
+    },
+    {
+      "check": "Stowed transmit icon stays hidden",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "OFF battery stops draining",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "Percent follows remaining charge",
+      "pass": true,
+      "detail": "99%"
+    },
+    {
+      "check": "Dropping hides UI again",
+      "pass": true,
+      "detail": "<SlateVisibility.COLLAPSED: 1>"
+    }
+  ],
+  "diagnostics": {
+    "game_time": 3.1966627091169357,
+    "spawn_time": 2.2700349129736423,
+    "attached": "<Object '/Engine/Maps/UEDPIE_0_Entry.Entry:PersistentLevel.DefaultPawn_0' (0x000002F63B0B7200) Class 'DefaultPawn'>",
+    "pawn": "<Object '/Engine/Maps/UEDPIE_0_Entry.Entry:PersistentLevel.DefaultPawn_0' (0x000002F63B0B7200) Class 'DefaultPawn'>",
+    "found": "<Object '/Engine/Maps/UEDPIE_0_Entry.Entry:PersistentLevel.Radio_0' (0x000002F66314C300) Class 'Radio'>",
+    "owner_pc": "<Object '/Engine/Maps/UEDPIE_0_Entry.Entry:PersistentLevel.PlayerController_0' (0x000002F69EEAA000) Class 'PlayerController'>",
+    "radio_state": "<RadioIconState.OFF: 1>"
+  }
+}

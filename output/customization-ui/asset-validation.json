@@ -1,0 +1,35 @@
+[
+  {
+    "asset": "WBP_CustomizeWidget",
+    "compiled": true,
+    "parent": "/Game/02_JSY/MainLobby/WBP_LobbyCustomizeWidget.WBP_LobbyCustomizeWidget_C",
+    "graphs": []
+  },
+  {
+    "asset": "WBP_LobbyCustomizeWidget",
+    "compiled": true,
+    "parent": "/Script/TeamProject_MOU.LobbyCustomizeWidgetBase",
+    "graphs": [
+      "OnMouseMove",
+      "OnMouseButtonDown",
+      "OnMouseButtonUp",
+      "EventGraph"
+    ]
+  },
+  {
+    "asset": "WBP_LobbyColorPickerWidget",
+    "compiled": true,
+    "parent": "/Script/TeamProject_MOU.ColorPickerWidget",
+    "graphs": [
+      "OnMouseButtonDown",
+      "OnMouseMove",
+      "EventGraph"
+    ]
+  },
+  {
+    "asset": "WBP_LobbyWidget",
+    "compiled": true,
+    "parent": "/Script/TeamProject_MOU.LobbyWidgetBase",
+    "graphs": []
+  }
+]
