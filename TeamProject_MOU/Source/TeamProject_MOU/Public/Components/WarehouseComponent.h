@@ -68,6 +68,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Warehouse")
 	bool HandleActorExitedWarehouse(AActor* OtherActor);
 
+	// 작업 NPC가 운반할 수 있는 가장 가까운 아이템을 예약합니다.
+	UFUNCTION(BlueprintCallable, Category = "Warehouse|NPC Work")
+	AItemBase* ReserveNearestAvailableItem(AActor* Requester);
+
+	// 특정 아이템을 작업 NPC가 사용할 수 있도록 예약합니다.
+	UFUNCTION(BlueprintCallable, Category = "Warehouse|NPC Work")
+	bool ReserveItemFor(AItemBase* ItemInstance, AActor* Requester);
+
+	// 요청자가 소유한 아이템 예약을 해제합니다.
+	UFUNCTION(BlueprintCallable, Category = "Warehouse|NPC Work")
+	void ReleaseItemReservation(AItemBase* ItemInstance, AActor* Requester);
+
+	// 아이템이 지정한 요청자에게 예약되어 있는지 확인합니다.
+	UFUNCTION(BlueprintPure, Category = "Warehouse|NPC Work")
+	bool IsItemReservedBy(const AItemBase* ItemInstance, const AActor* Requester) const;
+
 	// 현재 창고 요약 데이터를 게임 인스턴스 서브시스템에 저장
 	UFUNCTION(BlueprintCallable, Category = "Warehouse|Persistence")
 	bool SaveStoredItemsToGameInstance();
@@ -87,6 +103,10 @@ private:
 	UFUNCTION()
 	void OnRep_StoredItems();
 
+	void CleanupItemReservations();
 	int32 FindStoredItemIndex(TSubclassOf<AItemBase> ItemClass) const;
 	void BroadcastWarehouseChanged();
+
+	// 서버에서만 사용하는 작업 NPC별 아이템 예약 정보입니다.
+	TMap<TWeakObjectPtr<AItemBase>, TWeakObjectPtr<AActor>> ItemReservations;
 };
