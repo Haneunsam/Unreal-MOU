@@ -1,0 +1,30 @@
+import unreal, pathlib
+src = pathlib.Path('C:/Users/user1/Documents/GitHub/Unreal-MOU/output/customization-ui/migrate.py').read_text(encoding='utf-8-sig')
+exec(src.split("bp = duplicate(")[0])
+bp = unreal.load_asset(DEST+'WBP_LobbyCustomizeWidget')
+ws = widgets(bp)
+root = ws['CanvasPanel_43']
+place(bp,ws['TextBlock_454'],root,890,502,190,36)
+text_style(ws['TextBlock_454'],'데칼 색상')
+place(bp,ws['CustomizationStatusText'],root,70,786,470,48)
+ws['CustomizationStatusText'].set_auto_wrap_text(True)
+for name,desc in [('Slider_Metallic','금속성: 0.00 ~ 1.00'),('Slider_RoughnessA','거칠기 A: 0.00 ~ 1.00'),('Slider_RoughnessB','거칠기 B: 0.00 ~ 1.00'),('Slider_TilingX','가로 반복: 0.01 ~ 20.00'),('Slider_TilingY','세로 반복: 0.01 ~ 20.00'),('Btn_Reset','기본 외형을 미리 봅니다. 확인 전에는 저장되지 않습니다.'),('Btn_Cancel','편집을 취소하고 대기실로 돌아갑니다.'),('Btn_Confirm','서버 승인 후 내 슬롯에 적용하고 저장합니다.')]:
+    ws[name].set_tool_tip_text(desc)
+picker=unreal.load_asset(DEST+'WBP_LobbyColorPickerWidget')
+pw=widgets(picker)
+pw['Window_Border'].slot.set_size(unreal.Vector2D(500,550))
+text_style(pw['TextBlock_39'],'선택',18)
+pw['Btn_Confirm'].set_tool_tip_text('선택한 색을 편집창에 반영합니다. 서버 적용은 편집창의 확인 버튼으로 진행합니다.')
+pw['Btn_Cancel'].set_tool_tip_text('색상창을 열기 전 색으로 되돌립니다.')
+for asset in [picker,bp]:
+    assert tool('CompileWidgetBlueprint',asset)
+    assert unreal.EditorAssetLibrary.save_loaded_asset(asset)
+legacy=unreal.load_asset(DEST+'WBP_CustomizeWidget')
+assert tool('CompileWidgetBlueprint',legacy)
+assert unreal.EditorAssetLibrary.save_loaded_asset(legacy)
+# 실제 진입 클래스도 명시하고 기존 경로는 자식 위젯으로 계속 지원한다.
+lobby=unreal.load_asset(DEST+'WBP_LobbyWidget')
+unreal.get_default_object(lobby.generated_class()).set_editor_property('customize_widget_class',bp.generated_class())
+assert tool('CompileWidgetBlueprint',lobby)
+assert unreal.EditorAssetLibrary.save_loaded_asset(lobby)
+print('POLISH_COMPLETE')

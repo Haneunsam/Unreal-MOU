@@ -1,0 +1,119 @@
+{
+  "checks": [
+    {
+      "name": "User settings are isolated",
+      "pass": true,
+      "detail": "C:/Users/user1/Documents/GitHub/Unreal-MOU/output/settings-ui/test-user/Saved/Config/"
+    },
+    {
+      "name": "Main lobby starts at depth 1",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Main lobby settings button opens migrated page",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Settings pushed on lobby stack",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Graphics tab defaults to first page",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Audio tab works",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Volume and microphone values reach user settings",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Controls tab works",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Apply writes isolated settings file",
+      "pass": true,
+      "detail": "[WindowsPath('C:/Users/user1/Documents/GitHub/Unreal-MOU/output/settings-ui/test-user/Saved/Config/WindowsEditor/GameUserSettings.ini')]"
+    },
+    {
+      "name": "Audio and controls saved",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Controls opens migrated key menu",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Key menu hides settings page",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Key defaults clear custom overrides",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Unique key saves immediately",
+      "pass": true,
+      "detail": "J"
+    },
+    {
+      "name": "Duplicate key opens conflict modal",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Conflict pending leaves saved key untouched",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Conflict cancel restores key",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Conflict confirmation reassigns key and clears former action",
+      "pass": true,
+      "detail": "None"
+    },
+    {
+      "name": "Linked quest actions stay synchronized",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Key menu back restores settings",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Settings back returns to main lobby",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Reopen reads persisted controls",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "External lobby back cleans up key popup",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

@@ -1,0 +1,172 @@
+--- TeamProject_MOU\Source\TeamProject_MOU\Public\Voice\RadioStatusWidget.h
++++ TeamProject_MOU\Source\TeamProject_MOU\Public\Voice\RadioStatusWidget.h
+@@ -13,8 +13,9 @@
+ class APawn;
+ class ARadio;
+ class UImage;
+ class UProgressBar;
++class UTextBlock;
+ class URadioComponent;
+ class UVoiceSubsystem;
+ 
+ /**
+@@ -117,8 +118,12 @@
+ 	/** WBP에 배치한 실제 배터리 잔량 바. */
+ 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Radio")
+ 	TObjectPtr<UProgressBar> BatteryBar;
+ 
++	/** WBP에 배치한 배터리 잔량 퍼센트 텍스트. */
++	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Radio")
++	TObjectPtr<UTextBlock> BatteryPercentText;
++
+ 	/** WBP에 배치한 평시/송신/수신 상태 이미지. */
+ 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Radio")
+ 	TObjectPtr<UImage> StatusIcon;
+ 
+@@ -133,10 +138,13 @@
+ 	/** 축약된 상태를 브러시/색/가시성으로 옮긴다. */
+ 	// [RUI-004] 본체 전원 색과 상태 이미지, 위젯 가시성을 적용한다.
+ 	void ApplyRadioState(ERadioIconState NewState);
+ 
++	// [RUI-011] UI 브러시의 전용 머티리얼 인스턴스로 전원 OFF 시 채도를 제거한다.
++	void ApplyPowerToBrush(FSlateBrush& Brush, bool bOff);
++
+ 	/** 배터리 바를 갱신한다. 보간하지 않는다 - 배터리는 튀는 값이 아니다. */
+-	// [RUI-009] 실제 배터리 잔량과 부족 경고 색을 표시한다.
++	// [RUI-009] 실제 배터리 잔량과 퍼센트 텍스트를 갱신한다.
+ 	void UpdateBatteryBar();
+ 
+ 	/**
+ 	 * 지금 로컬 플레이어가 가지고 있는 무전기의 컴포넌트. 없으면 null.
+--- TeamProject_MOU\Source\TeamProject_MOU\Private\Voice\RadioStatusWidget.cpp
++++ TeamProject_MOU\Source\TeamProject_MOU\Private\Voice\RadioStatusWidget.cpp
+@@ -12,8 +12,10 @@
+ #include "Blueprint/WidgetBlueprintLibrary.h"
+ #include "Components/Image.h"
+ #include "Components/InputComponent.h"
+ #include "Components/ProgressBar.h"
++#include "Components/TextBlock.h"
++#include "Materials/MaterialInstanceDynamic.h"
+ #include "Engine/LocalPlayer.h"
+ #include "Engine/World.h"
+ #include "GameFramework/Pawn.h"
+ #include "GameFramework/PlayerController.h"
+@@ -343,59 +345,91 @@
+ 		? FLinearColor(0.55f, 0.55f, 0.55f) : FLinearColor::White;
+ 
+ 	if (RadioIcon != nullptr)
+ 	{
++		FSlateBrush Brush = RadioIcon->GetBrush();
++		ApplyPowerToBrush(Brush, bOff);
++		RadioIcon->SetBrush(Brush);
+ 		RadioIcon->SetColorAndOpacity(PowerTint);
++	}
++
++	if (BatteryBar != nullptr)
++	{
++		FProgressBarStyle Style = BatteryBar->GetWidgetStyle();
++		ApplyPowerToBrush(Style.FillImage, bOff);
++		BatteryBar->SetWidgetStyle(Style);
++		BatteryBar->SetFillColorAndOpacity(PowerTint);
++	}
++
++	if (BatteryPercentText != nullptr)
++	{
++		BatteryPercentText->SetColorAndOpacity(FSlateColor(bOff
++			? PowerTint : FLinearColor(1.f, 0.35f, 0.02f)));
+ 	}
+ 
+ 	if (StatusIcon != nullptr)
+ 	{
+ 		const ERadioIconState IconState = bOff ? ERadioIconState::On : NewState;
+ 		const FSlateBrush* Brush = IconBrushes.Find(IconState);
+ 		StatusIcon->SetBrush(Brush ? *Brush : FSlateBrush());
++		StatusIcon->SetVisibility(Brush && Brush->GetResourceObject()
++			? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
+ 		const FLinearColor* Tint = IconTints.Find(NewState);
+ 		StatusIcon->SetColorAndOpacity(!bOff && Tint ? *Tint : PowerTint);
+ 	}
+ 
+ 	OnRadioStateChanged(NewState, OldState);
+ }
+ 
++// [RUI-011] UI 브러시의 전용 머티리얼 인스턴스로 전원 OFF 시 채도를 제거한다.
++void URadioStatusWidget::ApplyPowerToBrush(FSlateBrush& Brush, bool bOff)
++{
++	UMaterialInterface* Material = Cast<UMaterialInterface>(Brush.GetResourceObject());
++	if (Material == nullptr)
++	{
++		return;
++	}
++
++	UMaterialInstanceDynamic* DynamicMaterial = Cast<UMaterialInstanceDynamic>(Material);
++	if (DynamicMaterial == nullptr)
++	{
++		DynamicMaterial = UMaterialInstanceDynamic::Create(Material, this);
++		Brush.SetResourceObject(DynamicMaterial);
++	}
++
++	if (DynamicMaterial != nullptr)
++	{
++		DynamicMaterial->SetScalarParameterValue(TEXT("Desaturation"), bOff ? 1.f : 0.f);
++	}
++}
++
+ // ---------------------------------------------------------------------------
+ // 배터리 바
+ // ---------------------------------------------------------------------------
+ 
+-// [RUI-009] 실제 배터리 잔량과 부족 경고 색을 표시한다.
++// [RUI-009] 실제 배터리 잔량과 퍼센트 텍스트를 갱신한다.
+ void URadioStatusWidget::UpdateBatteryBar()
+ {
+-	// ★ 배터리는 ARadio 에만 있다. CurrentDurability 가 AItemBase 의 것이라
+-	//   테스트 무전기(AVoiceDebugRadio)에는 아예 없다.
+ 	const ARadio* Item = FindLocalRadioItem();
+-
+ 	bBatteryLow = (Item != nullptr) && (Item->GetBatteryPercent() <= GBatteryLowThreshold);
+ 
+-	if (BatteryBar == nullptr)
+-	{
+-		return; // BatteryBar가 없는 WBP에서는 게이지를 표시하지 않는다.
+-	}
+-
+-	if (Item == nullptr)
+-	{
+-		// 테스트 무전기는 배터리 개념 자체가 없다. 0% 로 그리면 "방전됨" 으로
+-		// 잘못 읽히므로 바를 아예 접는다.
+-		BatteryBar->SetVisibility(ESlateVisibility::Collapsed);
+-		return;
+-	}
+-
+-	// 보간하지 않는다. 배터리는 초당 몇 퍼센트씩 천천히 줄어드는 값이라
+-	// 0.1초 간격으로 그대로 넣어도 이미 부드럽다 - 보간을 걸면 오히려 실제
+-	// 잔량보다 늦게 따라와서 "곧 꺼진다" 를 늦게 알리게 된다.
+-	BatteryBar->SetVisibility(ESlateVisibility::HitTestInvisible);
+-	BatteryBar->SetPercent(Item->GetBatteryPercent());
+-
+-	// 색만 여기서 바꾼다. 깜빡임 같은 연출은 WBP 가 IsBatteryLow 로 건다.
+-	BatteryBar->SetFillColorAndOpacity(bBatteryLow
+-		? FLinearColor(0.95f, 0.3f, 0.3f)
+-		: FLinearColor::White);
++	const ESlateVisibility BatteryVisibility = Item
++		? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed;
++	const float BatteryPercent = Item ? Item->GetBatteryPercent() : 0.f;
++
++	if (BatteryBar != nullptr)
++	{
++		BatteryBar->SetVisibility(BatteryVisibility);
++		BatteryBar->SetPercent(BatteryPercent);
++	}
++
++	if (BatteryPercentText != nullptr)
++	{
++		BatteryPercentText->SetVisibility(BatteryVisibility);
++		FNumberFormattingOptions PercentFormat;
++		PercentFormat.SetMinimumFractionalDigits(0).SetMaximumFractionalDigits(0);
++		BatteryPercentText->SetText(FText::AsPercent(BatteryPercent, &PercentFormat));
++	}
+ }
+ 
+ // ---------------------------------------------------------------------------
+ // 콘솔 명령 - UVoiceStatusWidget 의 MOU.Voice.ShowUI 와 같은 패턴.

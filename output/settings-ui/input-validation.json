@@ -1,0 +1,49 @@
+{
+  "checks": [
+    {
+      "name": "Settings receives keyboard focus",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Real audio button changes tab",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Selected tab indicator follows click",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Real controls button changes tab",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Real key settings button opens popup",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Key popup receives keyboard focus",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Escape closes only key popup",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Keyboard focus returns to settings",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Escape returns from settings to main lobby",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

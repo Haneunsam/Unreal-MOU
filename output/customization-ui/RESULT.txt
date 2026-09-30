@@ -1,0 +1,21 @@
+로비 커스터마이징 이식 결과 (2026-09-30)
+
+WBP_LobbyCustomizeWidget: 팀원 CharacterCustomization Blueprint를 복제하고 LobbyCustomizeWidgetBase로 재부모화.
+WBP_LobbyColorPickerWidget: 팀원 ColorPicker Blueprint를 복제하고 기존 로비 패널/버튼 스타일 적용.
+WBP_LobbyWidget: 실제 진입 클래스를 WBP_LobbyCustomizeWidget으로 지정.
+WBP_CustomizeWidget: 새 위젯의 자식으로 연결하여 기존 에셋 참조 호환.
+원본 NPC 위젯과 C++ 파일은 변경하지 않음.
+
+검증: Blueprint 4개 컴파일, 원본 그래프 목록 보존, 두 PIE 클라이언트 + 별도 서버 14개 런타임 검사 통과.
+RoomCustomizationTest, RoomSlotsTest 통과.
+취소/확인/재진입, 확인 전 서버 상태 불변, 확인 후 양쪽 참여자 슬롯 1 갱신과 방장 외형 유지 확인.
+
+검증 부수 영향:
+첫 실행의 테스트 계정 번호 1/2가 기존 로컬 저장 경로와 겹쳤음.
+MOU_Customization_User_1.sav는 같은 외형값으로 재저장됨.
+MOU_Customization_User_2.sav는 테스트 외형으로 갱신됨.
+바디 색상은 색상창 취소로 원래 값을 유지했지만, 금속성 0.72, 거칠기 A 0.25/B 0.65,
+데칼 4, 데칼 색상 (0.8,0.2,0.1,1), 반복 X 2.5/Y 3.5가 저장됨.
+사전 백업이 없어 이전 User_2 외형을 확실하게 복원하지 못함. 추측으로 복원하지 않았음.
+이후 테스트는 900001/900002 계정으로 분리함.
+검증 스크립트에는 전용 사용자 번호 검사와 테스트 저장 파일 백업/복원 처리를 추가함.
