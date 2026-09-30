@@ -6,6 +6,8 @@
 #include "WaterBodyLakeActor.h"
 #include "MOULake.generated.h"
 
+class UMOUWaterHazardComponent;
+
 /**
  * 런타임에 수위를 바꿀 수 있는 Lake 액터. AWaterBodyLake와 완전히 동일하지만,
  * 내부 컴포넌트를 UMOUWaterBodyLakeComponent로 교체해 IsBodyDynamic()이 true가 되도록 한다.
@@ -19,4 +21,14 @@ class TEAMPROJECT_MOU_API AMOULake : public AWaterBodyLake
 
 public:
 	AMOULake(const FObjectInitializer& ObjectInitializer);
+
+	virtual void NotifyActorBeginOverlap(AActor* OtherActor) override;
+	virtual void NotifyActorEndOverlap(AActor* OtherActor) override;
+
+	UFUNCTION(BlueprintPure, Category = "Water|Hazard")
+	UMOUWaterHazardComponent* GetWaterHazardComponent() const { return WaterHazardComponent; }
+
+protected:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMOUWaterHazardComponent> WaterHazardComponent;
 };

@@ -11,8 +11,18 @@
 class UButton;
 class UInputKeySelector;
 class UScrollBox;
+class UTextBlock;
 class UMOU_GameUserSettings;
 class UWidgetAnimation;
+
+/** 키 바인딩 메타데이터 구조체 */
+struct FMOUActionBindingInfo
+{
+	FName ActionName;
+	FKey DefaultKey;
+	FText DisplayName;
+	FName LinkedActionName = NAME_None;
+};
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnKeyBindingMenuClosed);
 
@@ -80,6 +90,21 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "UI")
 	TObjectPtr<UButton> Button_ResetDefaults;
+
+	// =========================================================================
+	// [키 중복 경고 모달 위젯들] (선택적 바인딩)
+	// =========================================================================
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "UI|Modal")
+	TObjectPtr<UWidget> Panel_ConflictModal;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "UI|Modal")
+	TObjectPtr<UTextBlock> Text_ConflictWarningMessage;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "UI|Modal")
+	TObjectPtr<UButton> Button_ConflictConfirm;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "UI|Modal")
+	TObjectPtr<UButton> Button_ConflictCancel;
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "UI")
 	TObjectPtr<UScrollBox> ScrollBox_KeyList;
@@ -241,4 +266,30 @@ private:
 
 	FTimerHandle CloseTimerHandle;
 	bool bIsClosing = false;
+
+	// =========================================================================
+	// [키 중복 검사 및 경고 모달 제어]
+	// =========================================================================
+	void InitializeActionBindingInfos();
+	FName FindConflictingAction(FName TargetAction, const FKey& NewKey) const;
+	FText GetActionDisplayName(FName ActionName) const;
+	FKey GetDefaultKeyForAction(FName ActionName) const;
+	FKey GetCurrentKeyForAction(FName ActionName) const;
+	FName GetLinkedAction(FName ActionName) const;
+
+	void HandleKeySelected(FName ActionName, const FKey& NewKey);
+	void ShowConflictModal(FName TargetAction, const FKey& NewKey, FName ConflictingAction);
+	void HideConflictModal();
+
+	UFUNCTION()
+	void OnConflictConfirmClicked();
+
+	UFUNCTION()
+	void OnConflictCancelClicked();
+
+	TArray<FMOUActionBindingInfo> ActionBindingInfos;
+	FName PendingActionName;
+	FKey PendingNewKey;
+	FName PendingConflictingAction;
+	bool bIsConflictModalOpen = false;
 };
