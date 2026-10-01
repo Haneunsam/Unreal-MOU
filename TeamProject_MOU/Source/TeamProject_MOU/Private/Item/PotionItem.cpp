@@ -26,6 +26,30 @@ APotionItem::APotionItem()
 	TargetMode = EConsumeTarget::SelfOnly;
 }
 
+// [POTION-012] 메시 피벗과 BP 보정값을 그대로 오른손 소켓에 맞춘다.
+bool APotionItem::ShouldCenterOnCarrySocket() const
+{
+	return false;
+}
+
+// [POTION-013] 포션 블루프린트에 설정된 오른손 소켓 이름을 반환한다.
+FName APotionItem::GetCarrySocketOverride() const
+{
+	return HandSocketName;
+}
+
+// [POTION-014] 포션 블루프린트의 손 장착 위치 보정값을 반환한다.
+FVector APotionItem::GetCarryLocationOffset() const
+{
+	return HandLocationOffset;
+}
+
+// [POTION-015] 포션 블루프린트의 손 장착 회전 보정값을 반환한다.
+FRotator APotionItem::GetCarryRotationOffset() const
+{
+	return HandRotationOffset;
+}
+
 // [POTION-001] 소비 효과: 자기 사용 시 대상 하나(자신)에게 적용
 // (부모 TryConsumeOnServer에서 서버 권한으로만 호출됨)
 void APotionItem::ApplyEffect_Implementation()
@@ -40,19 +64,122 @@ void APotionItem::OnUse_Implementation()
 	// 투척형 포션(Apply on Impact 켜짐): 좌클릭 = 손에서 던지기 (충돌 시 터져서 발동)
 	if (bApplyOnImpact)
 	{
-		bThrowAsUse = true; // 이번 던지기는 "사용"이므로 터져도 됨
-		if (AActor* OwnerActor = GetOwner())
+		// 클라이언트에서만 플래그를 세우면 서버의 포션에는 전달되지 않으므로
+		// 서버 RPC로 넘겨 서버 권한 인스턴스에서 사용 투척을 시작한다.
+		if (!HasAuthority())
 		{
-			if (UCarryingComponent* Carrying = OwnerActor->FindComponentByClass<UCarryingComponent>())
-			{
-				Carrying->Throw();
-			}
+			ServerThrowAsUse();
+			return;
+		}
+
+		AActor* OwnerActor = GetOwner();
+		if (!OwnerActor)
+		{
+			OwnerActor = GetAttachParentActor();
+		}
+
+		UCarryingComponent* Carrying = OwnerActor
+			? OwnerActor->FindComponentByClass<UCarryingComponent>()
+			: nullptr;
+		if (!Carrying || Carrying->GetCarriedActor() != this)
+		{
+			POTION_DEBUG(FColor::Red, "사용 투척 실패: 소유자의 손에 든 포션을 찾지 못함");
+			return;
+		}
+
+		// 연타로 몽타주가 다시 시작되거나 투척 요청이 중복되는 것을 막는다.
+		if (bWaitingForThrowNotify)
+		{
+			return;
+		}
+
+		bWaitingForThrowNotify = true;
+		if (UseMontage)
+		{
+			// 실제 투척은 몽타주의 UAnimNotify_PotionThrow가 호출할 때 실행한다.
+			MulticastPlayThrowMontage(Cast<ACharacterBase>(OwnerActor));
+		}
+		else
+		{
+			// 몽타주가 지정되지 않은 포션은 사용 불능 상태가 되지 않도록 즉시 투척한다.
+			ExecutePendingImpactThrow();
 		}
 		return;
 	}
 
 	// 일반 포션(Apply on Impact 꺼짐): 기존대로 제자리에서 마신다
 	Super::OnUse_Implementation();
+}
+
+// [POTION-005] 클라이언트 좌클릭을 서버 권한의 사용 투척으로 다시 실행한다.
+void APotionItem::ServerThrowAsUse_Implementation()
+{
+	OnUse_Implementation();
+}
+
+// [POTION-006] BP에 지정된 투척 몽타주를 사용 캐릭터에게 네트워크 동기화해 재생한다.
+void APotionItem::MulticastPlayThrowMontage_Implementation(ACharacterBase* ThrowerCharacter)
+{
+	if (ThrowerCharacter && UseMontage)
+	{
+		ThrowerCharacter->PlayAnimMontage(UseMontage);
+	}
+}
+
+// [POTION-007] 로컬 소유 캐릭터의 Anim Notify를 서버 권한 투척으로 연결한다.
+void APotionItem::HandleThrowAnimNotify(AActor* NotifyOwner)
+{
+	if (!NotifyOwner || (GetOwner() != NotifyOwner && GetAttachParentActor() != NotifyOwner))
+	{
+		return;
+	}
+
+	if (HasAuthority())
+	{
+		ExecutePendingImpactThrow();
+	}
+	else
+	{
+		ServerConfirmThrowNotify();
+	}
+}
+
+// [POTION-008] 소유 클라이언트의 투척 Notify를 서버에서 처리한다.
+void APotionItem::ServerConfirmThrowNotify_Implementation()
+{
+	ExecutePendingImpactThrow();
+}
+
+// [POTION-009] 서버가 Notify 대기 상태를 소비하고 손에 든 포션을 실제로 던진다.
+void APotionItem::ExecutePendingImpactThrow()
+{
+	if (!HasAuthority() || !bWaitingForThrowNotify)
+	{
+		return;
+	}
+
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor)
+	{
+		OwnerActor = GetAttachParentActor();
+	}
+
+	UCarryingComponent* Carrying = OwnerActor
+		? OwnerActor->FindComponentByClass<UCarryingComponent>()
+		: nullptr;
+	if (!Carrying || Carrying->GetCarriedActor() != this)
+	{
+		bWaitingForThrowNotify = false;
+		POTION_DEBUG(FColor::Red, "Notify 투척 실패: 소유자의 손에 든 포션을 찾지 못함");
+		return;
+	}
+
+	bWaitingForThrowNotify = false;
+	bThrowAsUse = true; // 서버에서 설정해야 Throw_Implementation의 충돌 등록 조건이 성립한다.
+	Carrying->Throw();
+
+	// Throw가 CanBeDropped 등의 이유로 거부되면 Throw_Implementation이 플래그를 지우지 못하므로 정리한다.
+	bThrowAsUse = false;
 }
 
 // 실제 GE 적용 + 상태이상 태그 제거를 한 대상에게 수행 (자기 사용 / 광역 공용)
@@ -190,21 +317,21 @@ void APotionItem::ApplyPotionEffectToTarget(AActor* Target)
 	}
 }
 
-// [POTION-002] 투척: 부모(소유권 해제 + 물리 투척) 후, 투척형이면 충돌 감지 켜기
+// [POTION-002] 투척: 사용 투척이면 물리 투척 전에 충돌 감지를 등록한 뒤 부모 투척을 실행한다.
 void APotionItem::Throw_Implementation(FVector ThrowVelocity, AActor* Thrower)
 {
-	Super::Throw_Implementation(ThrowVelocity, Thrower);
+	const bool bShouldApplyOnImpact = bThrowAsUse && bApplyOnImpact && HasAuthority() && MeshComponent;
 
-	// [POTION-DEBUG] 던지기 진입 시 조건 3개 상태 출력
-	POTION_DEBUG(FColor::Cyan, "Throw 호출됨: bApplyOnImpact=%d, HasAuthority=%d, MeshComponent=%d",
-		bApplyOnImpact ? 1 : 0, HasAuthority() ? 1 : 0, MeshComponent ? 1 : 0);
+	// [POTION-DEBUG] 던지기 진입 시 충돌 발동 조건 상태 출력
+	POTION_DEBUG(FColor::Cyan, "Throw 호출됨: bThrowAsUse=%d, bApplyOnImpact=%d, HasAuthority=%d, MeshComponent=%d",
+		bThrowAsUse ? 1 : 0, bApplyOnImpact ? 1 : 0, HasAuthority() ? 1 : 0, MeshComponent ? 1 : 0);
 
 	// 좌클릭 "사용" 던지기(bThrowAsUse)일 때만 충돌 발동. Q(단순 투척)는 어떤 포션이든 절대 안 터진다.
-	if (bThrowAsUse && bApplyOnImpact && HasAuthority() && MeshComponent)
+	if (bShouldApplyOnImpact)
 	{
 		bHasImpacted = false;
 		MeshComponent->SetNotifyRigidBodyCollision(true); // OnComponentHit 활성화
-		MeshComponent->OnComponentHit.AddDynamic(this, &APotionItem::OnImpact);
+		MeshComponent->OnComponentHit.AddUniqueDynamic(this, &APotionItem::OnImpact);
 		POTION_DEBUG(FColor::Green, "충돌 감지 바인딩 완료 (OnImpact 대기)");
 	}
 	else
@@ -212,6 +339,9 @@ void APotionItem::Throw_Implementation(FVector ThrowVelocity, AActor* Thrower)
 		// bThrowAsUse가 false(Q 투척)이거나 조건 미충족 → 던져도 절대 안 터짐
 		POTION_DEBUG(FColor::Red, "충돌 감지 미설정 (Q 투척이거나 조건 미충족)");
 	}
+
+	// 부모의 충돌/물리 활성화보다 먼저 위 델리게이트가 등록되어 첫 충돌도 놓치지 않는다.
+	Super::Throw_Implementation(ThrowVelocity, Thrower);
 
 	// 다음 던지기를 위해 "사용 발" 플래그 리셋 (Q 투척이 이전 좌클릭 상태를 물려받지 않도록)
 	bThrowAsUse = false;

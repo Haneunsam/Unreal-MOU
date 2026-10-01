@@ -5,6 +5,8 @@
 #include "SprayItem.generated.h"
 
 class UDecalComponent;
+class UAnimMontage;
+class UAnimSequenceBase;
 class UMaterialInterface;
 class UPrimitiveComponent;
 class UStaticMeshComponent;
@@ -22,6 +24,8 @@ public:
 	virtual void OnUse_Implementation() override;
 	// [SPRAY-003] 입력 해제 시 서버에 분사 중지를 요청한다.
 	virtual void OnUseReleased_Implementation() override;
+	// [SPRAY-021] 바닥에서 처음 집었을 때 모든 클라이언트에서 스프레이 Idle 애니메이션을 시작한다.
+	virtual void PickUp_Implementation(AActor* Picker) override;
 	// [SPRAY-004] 장착 시 서버 RPC 소유권 복원.
 	virtual void OnEquipped_Implementation(AActor* Equipper) override;
 	// [SPRAY-005] 수납 시 분사 중지.
@@ -50,6 +54,22 @@ protected:
 	FVector HandLocationOffset = FVector::ZeroVector;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Spray|Grip")
 	FRotator HandRotationOffset = FRotator::ZeroRotator;
+
+	// 들고 있지만 분사하지 않을 때 반복할 오른팔 애니메이션 시퀀스.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Spray|Animation")
+	TObjectPtr<UAnimSequenceBase> SprayIdleAnimation;
+	// 분사 버튼을 누르고 있는 동안 반복할 오른팔 애니메이션 시퀀스.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Spray|Animation")
+	TObjectPtr<UAnimSequenceBase> SprayPressAnimation;
+	// 캐릭터 AnimBP에서 스프레이 애니메이션을 받을 슬롯 이름.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Spray|Animation")
+	FName SprayAnimationSlot = TEXT("DefaultSlot");
+	// Idle/Press 전환과 장착 해제 시 사용할 블렌드 시간.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Spray|Animation", meta=(ClampMin="0", Units="s"))
+	float SprayAnimationBlendTime = 0.12f;
+	// 입력 해제 후 Idle로 돌아가기 전에 Press 자세를 유지하는 시간. 0.5초 반복 클릭에서도 몽타주 재시작 떨림을 방지한다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Spray|Animation", meta=(ClampMin="0", Units="s"))
+	float SprayAnimationReleaseDelay = 0.65f;
 
 	// [SPRAY-016] BP에서 배치한 노즐의 기본 위치를 저장한다.
 	virtual void BeginPlay() override;
@@ -98,8 +118,27 @@ protected:
 	// [SPRAY-014] 각 클라이언트에서 피격 컴포넌트에 데칼 부착.
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastStamp(UPrimitiveComponent* Surface, FVector Location, FVector Normal, FName Bone);
+	// [SPRAY-022] 모든 클라이언트에서 장착 캐릭터의 Idle 또는 Press 시퀀스를 반복 재생한다.
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlaySprayAnimation(AActor* Holder, bool bPressed);
+	// [SPRAY-023] 현재 클라이언트의 장착 캐릭터에 스프레이 동적 몽타주를 적용한다.
+	void PlaySprayAnimation(AActor* Holder, bool bPressed);
+	// [SPRAY-024] 모든 클라이언트에서 스프레이가 시작한 동적 몽타주만 정지한다.
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastStopSprayAnimation(AActor* Holder);
+	// [SPRAY-025] 현재 클라이언트에서 활성 스프레이 동적 몽타주를 정지한다.
+	void StopSprayAnimation(AActor* Holder);
+	// [SPRAY-026] Press는 즉시 적용하고 Idle 복귀는 지연·취소 가능하게 처리한다.
+	void HandleSprayAnimationState(AActor* Holder, bool bPressed);
+	// [SPRAY-027] 입력 해제 지연이 끝났을 때 여전히 해제 상태면 Idle 애니메이션으로 복귀한다.
+	void PlayIdleAfterRelease();
 
 private:
+	TWeakObjectPtr<UAnimMontage> ActiveSprayMontage;
+	TWeakObjectPtr<AActor> SprayAnimationHolder;
+	FTimerHandle SprayIdleReturnTimer;
+	bool bHasActiveSprayAnimation = false;
+	bool bShowingPressAnimation = false;
 	FVector NozzleRestLocation = FVector::ZeroVector;
 	float NozzlePressAlpha = 0.f;
 	float ConsumeElapsed = 0.f;

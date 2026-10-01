@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Item/ConsumableItemBase.h"
@@ -6,6 +6,7 @@
 #include "PotionItem.generated.h"
 
 class UGameplayEffect;
+class ACharacterBase;
 
 /**
  * APotionItem
@@ -28,6 +29,21 @@ class TEAMPROJECT_MOU_API APotionItem : public AConsumableItemBase
 
 public:
 	APotionItem();
+
+	// [POTION-007] 전용 Anim Notify가 호출하면 대기 중인 사용 투척을 서버에서 확정한다.
+	void HandleThrowAnimNotify(AActor* NotifyOwner);
+
+	// [POTION-012] 포션은 손 소켓에 피벗을 직접 맞추므로 공통 바운딩박스 중심 보정을 사용하지 않는다.
+	virtual bool ShouldCenterOnCarrySocket() const override;
+
+	// [POTION-013] 포션 전용 오른손 소켓 이름을 반환한다.
+	virtual FName GetCarrySocketOverride() const override;
+
+	// [POTION-014] 오른손 소켓 기준 포션 위치 보정값을 반환한다.
+	virtual FVector GetCarryLocationOffset() const override;
+
+	// [POTION-015] 오른손 소켓 기준 포션 회전 보정값을 반환한다.
+	virtual FRotator GetCarryRotationOffset() const override;
 
 protected:
 #pragma region [POTION] 설정값
@@ -77,11 +93,25 @@ protected:
 	float ImpactRadius = 400.0f;
 #pragma endregion
 
+#pragma region [POTION] 손 장착 설정값
+	// 포션을 붙일 오른손 소켓. 현재 캐릭터 스켈레톤의 hand_R 아래 SpannerSocket을 기본 사용한다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Potion|Carry")
+	FName HandSocketName = TEXT("SpannerSocket");
+
+	// 오른손 소켓 기준 포션 위치 보정값(cm).
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Potion|Carry", meta = (Units = "cm"))
+	FVector HandLocationOffset = FVector::ZeroVector;
+
+	// 오른손 소켓 기준 포션 회전 보정값.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Potion|Carry")
+	FRotator HandRotationOffset = FRotator::ZeroRotator;
+#pragma endregion
+
 #pragma region [POTION] 효과 적용
 	// [POTION-001] 소비 효과: 대상 ASC에 GE 적용 + 상태이상 태그 제거 (서버에서만 호출됨)
 	virtual void ApplyEffect_Implementation() override;
 
-	// [POTION-002] 투척형: 던지면 충돌 감지 준비 (부모 물리 투척 후 OnComponentHit 바인딩)
+	// [POTION-002] 투척형: 물리 투척 전에 충돌 감지를 준비하고 첫 충돌 시 효과가 발동되게 한다.
 	virtual void Throw_Implementation(FVector ThrowVelocity, AActor* Thrower = nullptr) override;
 
 	// [POTION-004] 좌클릭 사용: bApplyOnImpact가 켜져 있으면 던진다(충돌 시 발동),
@@ -91,6 +121,21 @@ protected:
 
 private:
 #pragma region [POTION] 투척 발동
+	// [POTION-005] 클라이언트의 좌클릭 투척 요청을 서버로 전달해 서버의 bThrowAsUse 상태로 실행한다.
+	UFUNCTION(Server, Reliable)
+	void ServerThrowAsUse();
+
+	// [POTION-006] 투척형 포션에 설정된 UseMontage를 모든 클라이언트의 사용 캐릭터에게 재생한다.
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlayThrowMontage(ACharacterBase* ThrowerCharacter);
+
+	// [POTION-008] 소유 클라이언트에서 발생한 투척 Anim Notify를 서버에 전달한다.
+	UFUNCTION(Server, Reliable)
+	void ServerConfirmThrowNotify();
+
+	// [POTION-009] 서버에서 대기 상태와 손의 포션을 검증한 뒤 실제 물리 투척을 실행한다.
+	void ExecutePendingImpactThrow();
+
 	// [POTION-003] 첫 충돌 시 반경 내 플레이어 전원에게 광역 적용 후 소멸
 	UFUNCTION()
 	void OnImpact(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
@@ -105,5 +150,8 @@ private:
 	// 이번 던지기가 좌클릭 "사용" 발(發)인지 여부. true일 때만 충돌 발동(터짐).
 	// Q(단순 투척)는 이 플래그가 false라 어떤 포션이든 절대 안 터진다.
 	bool bThrowAsUse = false;
+
+	// 좌클릭 후 투척 몽타주의 Potion Throw Notify를 기다리는 중인지 여부 (서버 권한 상태).
+	bool bWaitingForThrowNotify = false;
 #pragma endregion
 };
