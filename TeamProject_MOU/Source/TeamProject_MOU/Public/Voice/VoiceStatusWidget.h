@@ -1,5 +1,6 @@
 // MOU 음성 - 마이크 이미지와 발화 음량을 표시하는 위젯.
-// WBP에 MicIcon(Image), LevelBar(ProgressBar)를 배치하고 텍스처 두 개를 지정한다.
+// WBP에 MicGauge(ProgressBar) 하나를 배치하고 텍스처 두 개를 지정한다.
+// 마이크 이미지가 배경으로 깔리고, 발화 음량만큼 같은 이미지가 아래에서 위로 초록색으로 차오른다.
 // WBP가 없으면 대체 텍스트나 레이아웃을 생성하지 않는다.
 #pragma once
 
@@ -9,7 +10,6 @@
 #include "Voice/VoiceTypes.h"
 #include "VoiceStatusWidget.generated.h"
 
-class UImage;
 class UProgressBar;
 class UTexture2D;
 class UVoiceSubsystem;
@@ -22,6 +22,9 @@ class TEAMPROJECT_MOU_API UVoiceStatusWidget : public UUserWidget
 public:
 	// [VUI-003] 마이크 표시 위젯이 입력 포커스를 가져가지 않도록 설정한다.
 	UVoiceStatusWidget(const FObjectInitializer& ObjectInitializer);
+
+	// [VUI-013] 디자이너 미리보기에서도 게이지를 마이크 이미지 모양으로 표시한다.
+	virtual void NativePreConstruct() override;
 
 	// [VUI-004] 음소거 입력을 연결하고 아이콘과 음량 바를 초기화한다.
 	virtual void NativeConstruct() override;
@@ -52,6 +55,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MOU|Voice|UI")
 	float LevelBarHeadroom = 3.f;
 
+	/** 마이크 이미지 안에서 차오르는 게이지 색상. 텍스처 색상에 곱해지므로 흰색 아이콘에서 그대로 보인다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MOU|Voice|UI")
+	FLinearColor LevelFillColor = FLinearColor(0.3f, 1.f, 0.3f);
+
 	// [VUI-010] 블루프린트에서 현재 표시 중인 마이크 상태를 조회한다.
 	UFUNCTION(BlueprintPure, Category = "MOU|Voice|UI")
 	EMicIconState GetMicState() const { return CachedState; }
@@ -61,15 +68,17 @@ public:
 	void OnMicStateChanged(EMicIconState NewState, EMicIconState OldState);
 
 protected:
-	/** WBP의 같은 이름을 가진 Image와 연결된다. */
+	/**
+	 * WBP의 같은 이름을 가진 ProgressBar와 연결된다.
+	 * 스타일(배경/채움 이미지, 채움 방향)은 코드가 덮어쓰므로 WBP에서는 크기만 정하면 된다.
+	 */
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Voice")
-	TObjectPtr<UImage> MicIcon;
-
-	/** WBP의 같은 이름을 가진 ProgressBar와 연결된다. */
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Voice")
-	TObjectPtr<UProgressBar> LevelBar;
+	TObjectPtr<UProgressBar> MicGauge;
 
 private:
+	// [VUI-014] 배경과 채움 이미지를 같은 마이크 텍스처로 설정해 아이콘 모양 게이지를 만든다.
+	void ApplyGaugeStyle(UTexture2D* Texture, const FLinearColor& IconTint);
+
 	// [VUI-008] 소유 로컬 플레이어의 음성 서브시스템을 조회한다.
 	UVoiceSubsystem* GetVoiceSubsystem() const;
 
