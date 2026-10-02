@@ -2,22 +2,20 @@
 
 #include "Item/TerminalShop.h"
 #include "Blueprint/WidgetTree.h"
-#include "Components/Image.h"
 #include "Components/Overlay.h"
 #include "Components/OverlaySlot.h"
 #include "Components/ScaleBox.h"
 #include "Components/SizeBox.h"
-#include "Engine/Texture2D.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PawnMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "InputCoreTypes.h"
 
-// [TSHOP-011] 상점 배경 텍스처를 로드한다.
+// [TSHOP-011] 키보드 입력을 받을 수 있도록 상점 위젯을 설정한다.
 UTerminalShopWidget::UTerminalShopWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
 	SetIsFocusable(true);
-	BackgroundTexture = LoadObject<UTexture2D>(nullptr,
-		TEXT("/Game/04_JJO/TerminalShop/UI/T_ShopBackground.T_ShopBackground"));
 }
 
 // [TSHOP-005] UI를 연 상점 액터를 기록한다.
@@ -31,6 +29,17 @@ void UTerminalShopWidget::ActivateShopInput()
 {
 	if (APlayerController* PC = GetOwningPlayer())
 	{
+		// 이동 입력을 누른 채 상점을 열면 UI 전환 뒤 Key Up을 받지 못해 이동이 계속될 수 있다.
+		// 현재 속도와 눌린 키 상태를 함께 비워 상점이 열리는 즉시 플레이어를 정지시킨다.
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			if (UPawnMovementComponent* MovementComponent = Pawn->GetMovementComponent())
+			{
+				MovementComponent->StopMovementImmediately();
+			}
+		}
+		PC->FlushPressedKeys();
+
 		FInputModeUIOnly InputMode;
 		InputMode.SetWidgetToFocus(TakeWidget());
 		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
@@ -55,7 +64,7 @@ void UTerminalShopWidget::CloseShop()
 	RemoveFromParent();
 }
 
-// [TSHOP-008] 배경을 0.8 불투명도로 화면에 채우고 그 위에 Widget BP 콘텐츠를 배치한다.
+// [TSHOP-008] Widget BP 콘텐츠를 기준 해상도에 맞춰 화면에 배치한다.
 void UTerminalShopWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
@@ -66,16 +75,6 @@ void UTerminalShopWidget::NativeOnInitialized()
 
 	UWidget* BlueprintContent = WidgetTree->RootWidget;
 	UOverlay* Layers = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("ShopLayers"));
-	if (BackgroundTexture)
-	{
-		UImage* Background = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("ShopBackground"));
-		Background->SetBrushFromTexture(BackgroundTexture, true);
-		Background->SetColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, 0.8f));
-		Background->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-		UOverlaySlot* BackgroundSlot = Layers->AddChildToOverlay(Background);
-		BackgroundSlot->SetHorizontalAlignment(HAlign_Fill);
-		BackgroundSlot->SetVerticalAlignment(VAlign_Fill);
-	}
 
 	UScaleBox* Scale = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("ShopScale"));
 	Scale->SetStretch(EStretch::ScaleToFit);

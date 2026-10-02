@@ -7,8 +7,10 @@
 class UDecalComponent;
 class UAnimMontage;
 class UAnimSequenceBase;
+class UAudioComponent;
 class UMaterialInterface;
 class UPrimitiveComponent;
+class USoundBase;
 class UStaticMeshComponent;
 
 UCLASS()
@@ -71,10 +73,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Spray|Animation", meta=(ClampMin="0", Units="s"))
 	float SprayAnimationReleaseDelay = 0.65f;
 
+	// 사용 중 반복 재생할 스프레이 사운드. SoundWave의 Loop 설정을 사용한다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Spray|Sound")
+	TObjectPtr<USoundBase> SprayLoopSound;
+	// 스프레이 몸체에 부착되어 사용 상태에 맞춰 재생·정지되는 오디오 컴포넌트.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Spray|Sound")
+	TObjectPtr<UAudioComponent> SprayAudioComponent;
+
 	// [SPRAY-016] BP에서 배치한 노즐의 기본 위치를 저장한다.
 	virtual void BeginPlay() override;
 	// [SPRAY-017] 분사 상태에 따라 노즐을 누르거나 기본 위치로 복귀시킨다.
 	void UpdateNozzle(float DeltaSeconds);
+	// [SPRAY-028] 복제된 분사 상태에 맞춰 루프 사운드를 재생하거나 정지한다.
+	void UpdateSpraySound(bool bActive);
 
 	// 몸통 MeshComponent에 부착되는 분사 노즐. BP에서 메시와 기본 위치를 지정한다.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Spray|Nozzle")

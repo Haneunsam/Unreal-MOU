@@ -5,7 +5,6 @@
 #include "TerminalShopWidget.generated.h"
 
 class ATerminalShop;
-class UTexture2D;
 
 /** 상점 배경 위에 Widget BP 콘텐츠를 표시한다. */
 UCLASS()
@@ -14,7 +13,7 @@ class TEAMPROJECT_MOU_API UTerminalShopWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	// [TSHOP-011] 상점 배경 텍스처를 로드한다.
+	// [TSHOP-011] 키보드 입력을 받을 수 있도록 상점 위젯을 설정한다.
 	UTerminalShopWidget(const FObjectInitializer& ObjectInitializer);
 
 	// [TSHOP-005] UI를 연 상점 액터를 기록한다.
@@ -28,7 +27,7 @@ public:
 	void CloseShop();
 
 protected:
-	// [TSHOP-008] 배경을 0.8 불투명도로 화면에 채우고 그 위에 Widget BP 콘텐츠를 배치한다.
+	// [TSHOP-008] Widget BP 콘텐츠를 기준 해상도에 맞춰 화면에 배치한다.
 	virtual void NativeOnInitialized() override;
 
 	// [TSHOP-009] Esc 입력을 받아 상점 UI를 닫는다.
@@ -36,7 +35,4 @@ protected:
 
 private:
 	TWeakObjectPtr<ATerminalShop> OwningShop;
-
-	UPROPERTY()
-	TObjectPtr<UTexture2D> BackgroundTexture;
 };

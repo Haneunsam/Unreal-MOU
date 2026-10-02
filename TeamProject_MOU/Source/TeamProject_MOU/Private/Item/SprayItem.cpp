@@ -1,5 +1,6 @@
 ﻿#include "Item/SprayItem.h"
 #include "Components/CarryingComponent.h"
+#include "Components/AudioComponent.h"
 #include "Components/DecalComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -29,6 +30,9 @@ ASprayItem::ASprayItem()
 	NozzleMesh->SetSimulatePhysics(false);
 	NozzleMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	NozzleMesh->SetGenerateOverlapEvents(false);
+	SprayAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("SprayAudioComponent"));
+	SprayAudioComponent->SetupAttachment(NozzleMesh);
+	SprayAudioComponent->bAutoActivate = false;
 }
 
 // [SPRAY-018] 노즐을 포함한 공통 바운딩박스 중심 보정을 사용하지 않는다.
@@ -63,6 +67,11 @@ void ASprayItem::BeginPlay()
 {
 	Super::BeginPlay();
 	if (NozzleMesh) NozzleRestLocation = NozzleMesh->GetRelativeLocation();
+	if (SprayAudioComponent && SprayLoopSound)
+	{
+		SprayAudioComponent->SetSound(SprayLoopSound);
+	}
+	UpdateSpraySound(bSpraying);
 }
 
 // [SPRAY-017] 분사 상태에 따라 노즐을 누르거나 기본 위치로 복귀시킨다.
@@ -179,6 +188,28 @@ void ASprayItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifeti
 void ASprayItem::OnRep_Spraying()
 {
 	OnSprayStateChanged(bSpraying);
+	UpdateSpraySound(bSpraying);
+}
+
+// [SPRAY-028] 전용 서버를 제외한 각 클라이언트에서 분사 중에만 루프 사운드를 유지한다.
+void ASprayItem::UpdateSpraySound(bool bActive)
+{
+	if (!SprayAudioComponent || GetNetMode() == NM_DedicatedServer) return;
+	if (bActive)
+	{
+		if (SprayLoopSound && SprayAudioComponent->GetSound() != SprayLoopSound)
+		{
+			SprayAudioComponent->SetSound(SprayLoopSound);
+		}
+		if (SprayAudioComponent->GetSound() && !SprayAudioComponent->IsPlaying())
+		{
+			SprayAudioComponent->Play();
+		}
+	}
+	else if (SprayAudioComponent->IsPlaying())
+	{
+		SprayAudioComponent->Stop();
+	}
 }
 
 // [SPRAY-011] 서버에서 분사 시작/중지 요청 검증.
@@ -433,6 +464,7 @@ void ASprayItem::MulticastStamp_Implementation(UPrimitiveComponent* Surface, FVe
 void ASprayItem::EndPlay(const EEndPlayReason::Type Reason)
 {
 	StopSprayAnimation(GetOwner() ? GetOwner() : GetAttachParentActor());
+	UpdateSpraySound(false);
 	OnSprayStateChanged(false);
 	Super::EndPlay(Reason);
 }
