@@ -6,6 +6,7 @@
 #include "Components/OverlaySlot.h"
 #include "Components/ScaleBox.h"
 #include "Components/SizeBox.h"
+#include "Components/Widget.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PawnMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -52,6 +53,27 @@ void UTerminalShopWidget::ActivateShopInput()
 // [TSHOP-007] 상점 UI를 닫고 게임 입력으로 돌린다.
 void UTerminalShopWidget::CloseShop()
 {
+	if (bIsClosing)
+	{
+		return;
+	}
+
+	bIsOpening = false;
+	bIsClosing = true;
+	PanelAnimationTime = 0.0f;
+
+	if (AnimatedPanel)
+	{
+		AnimatedPanel->SetVisibility(ESlateVisibility::HitTestInvisible);
+		return;
+	}
+
+	FinishCloseShop();
+}
+
+// [TSHOP-014] 닫기 애니메이션 종료 후 입력 모드와 위젯 참조를 정리한다.
+void UTerminalShopWidget::FinishCloseShop()
+{
 	if (ATerminalShop* Shop = OwningShop.Get())
 	{
 		Shop->NotifyWidgetClosed(this);
@@ -88,6 +110,11 @@ void UTerminalShopWidget::NativeOnInitialized()
 	if (BlueprintContent)
 	{
 		Fixed->AddChild(BlueprintContent);
+		AnimatedPanel = BlueprintContent;
+		PanelAnimationTime = 0.0f;
+		bIsOpening = true;
+		bIsClosing = false;
+		ApplyPanelAnimation(0.0f, false);
 	}
 	WidgetTree->RootWidget = Layers;
 }
@@ -101,4 +128,52 @@ FReply UTerminalShopWidget::NativeOnKeyDown(const FGeometry& InGeometry, const F
 		return FReply::Handled();
 	}
 	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+}
+
+// [TSHOP-012] 상점 패널의 열기·닫기 렌더 애니메이션을 프레임마다 갱신한다.
+void UTerminalShopWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+
+	if (!AnimatedPanel || (!bIsOpening && !bIsClosing))
+	{
+		return;
+	}
+
+	PanelAnimationTime += InDeltaTime;
+	const float Duration = bIsClosing ? CloseAnimationDuration : OpenAnimationDuration;
+	const float Progress = FMath::Clamp(PanelAnimationTime / Duration, 0.0f, 1.0f);
+	ApplyPanelAnimation(Progress, bIsClosing);
+
+	if (Progress < 1.0f)
+	{
+		return;
+	}
+
+	if (bIsClosing)
+	{
+		FinishCloseShop();
+		return;
+	}
+
+	bIsOpening = false;
+}
+
+// [TSHOP-013] 기존 크기와 위치를 유지하며 진행률에 맞춰 패널의 투명도만 적용한다.
+void UTerminalShopWidget::ApplyPanelAnimation(float Progress, bool bClosing) const
+{
+	if (!AnimatedPanel)
+	{
+		return;
+	}
+
+	const float ClampedProgress = FMath::Clamp(Progress, 0.0f, 1.0f);
+
+	if (bClosing)
+	{
+		AnimatedPanel->SetRenderOpacity(1.0f - ClampedProgress);
+		return;
+	}
+
+	AnimatedPanel->SetRenderOpacity(FMath::Clamp(ClampedProgress * 1.8f, 0.0f, 1.0f));
 }
