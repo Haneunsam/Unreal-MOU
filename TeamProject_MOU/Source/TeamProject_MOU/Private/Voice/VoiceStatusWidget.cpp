@@ -7,7 +7,6 @@
 #include "Voice/VoiceTypes.h"
 
 #include "Blueprint/WidgetBlueprintLibrary.h"
-#include "Components/Image.h"
 #include "Components/InputComponent.h"
 #include "Components/ProgressBar.h"
 #include "Engine/LocalPlayer.h"
@@ -26,6 +25,15 @@ UVoiceStatusWidget::UVoiceStatusWidget(const FObjectInitializer& ObjectInitializ
 // ---------------------------------------------------------------------------
 // 수명 주기
 // ---------------------------------------------------------------------------
+
+// [VUI-013] 디자이너 미리보기에서도 게이지를 마이크 이미지 모양으로 표시한다.
+void UVoiceStatusWidget::NativePreConstruct()
+{
+	Super::NativePreConstruct();
+
+	// 디자이너에서 OnMicStateChanged 가 불리지 않도록 상태 판정 없이 스타일만 적용한다.
+	ApplyGaugeStyle(NormalMicTexture.Get(), FLinearColor::White);
+}
 
 // [VUI-004] 음소거 입력을 연결하고 아이콘과 음량 바를 초기화한다.
 void UVoiceStatusWidget::NativeConstruct()
@@ -200,24 +208,59 @@ void UVoiceStatusWidget::ApplyMicState(EMicIconState NewState)
 	CachedState      = NewState;
 	bMicStateApplied = true;
 
-	if (MicIcon != nullptr)
-	{
-		UTexture2D* Texture = (NewState == EMicIconState::Muted)
-			? MutedMicTexture.Get()
-			: NormalMicTexture.Get();
+	UTexture2D* Texture = (NewState == EMicIconState::Muted)
+		? MutedMicTexture.Get()
+		: NormalMicTexture.Get();
 
-		// 위젯 크기를 유지하며, 텍스처가 없으면 이전 상태의 이미지를 지운다.
-		MicIcon->SetBrushFromTexture(Texture, false);
-		MicIcon->SetBrushTintColor(FSlateColor(FLinearColor::White));
+	// 발화 중에는 아이콘은 원본 색 그대로 두고 초록색은 게이지 채움으로만 보여준다.
+	const bool bOriginalColor = NewState == EMicIconState::Idle
+		|| NewState == EMicIconState::Muted
+		|| NewState == EMicIconState::Speaking;
 
-		const bool bOriginalColor = NewState == EMicIconState::Idle
-			|| NewState == EMicIconState::Muted;
-		MicIcon->SetColorAndOpacity(bOriginalColor
-			? FLinearColor::White
-			: GetDefaultMicTint(NewState));
-	}
+	ApplyGaugeStyle(Texture, bOriginalColor ? FLinearColor::White : GetDefaultMicTint(NewState));
 
 	OnMicStateChanged(NewState, OldState);
+}
+
+// [VUI-014] 배경과 채움 이미지를 같은 마이크 텍스처로 설정해 아이콘 모양 게이지를 만든다.
+void UVoiceStatusWidget::ApplyGaugeStyle(UTexture2D* Texture, const FLinearColor& IconTint)
+{
+	if (MicGauge == nullptr)
+	{
+		return;
+	}
+
+	// 텍스처가 없으면 이전 상태의 이미지가 남지 않도록 그리지 않는다.
+	FSlateBrush IconBrush;
+	IconBrush.SetResourceObject(Texture);
+	IconBrush.DrawAs = (Texture != nullptr) ? ESlateBrushDrawType::Image : ESlateBrushDrawType::NoDrawType;
+	if (Texture != nullptr)
+	{
+		IconBrush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
+	}
+
+	FProgressBarStyle Style = MicGauge->GetWidgetStyle();
+
+	Style.BackgroundImage = IconBrush;
+	Style.BackgroundImage.TintColor = FSlateColor(IconTint);
+
+	// 채움 색은 FillColorAndOpacity 로 곱하므로 채움 브러시 자체는 흰색으로 둔다.
+	Style.FillImage = IconBrush;
+	Style.FillImage.TintColor = FSlateColor(FLinearColor::White);
+
+	Style.MarqueeImage = FSlateNoResource();
+	Style.EnableFillAnimation = false;
+
+	MicGauge->SetWidgetStyle(Style);
+
+	// ★ Mask 여야 채움 이미지가 찌그러지지 않고 아이콘 원래 크기에서 잘려 보인다.
+	//   Scale 이면 아이콘이 퍼센트만큼 세로로 눌려서 그려진다.
+	MicGauge->SetBarFillType(EProgressBarFillType::BottomToTop);
+	MicGauge->SetBarFillStyle(EProgressBarFillStyle::Mask);
+	MicGauge->SetBorderPadding(FVector2D::ZeroVector);
+	MicGauge->SetIsMarquee(false);
+	MicGauge->SetFillColorAndOpacity(LevelFillColor);
+	MicGauge->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,20 +270,18 @@ void UVoiceStatusWidget::ApplyMicState(EMicIconState NewState)
 // [VUI-002] 발화 기준을 넘은 음량을 게이지로 표시하고 비발화 상태에서는 0으로 초기화한다.
 void UVoiceStatusWidget::UpdateLevelBar(float InDeltaTime)
 {
-	if (LevelBar == nullptr)
+	if (MicGauge == nullptr)
 	{
 		return;
 	}
 
 	const UVoiceSubsystem* Voice = GetVoiceSubsystem();
 
-	LevelBar->SetVisibility(ESlateVisibility::HitTestInvisible);
-
-	// 아이콘이 초록색으로 표시되는 발화 상태에서만 게이지를 사용한다.
+	// 음소거나 입력이 없는 상태에서는 채움 없이 지정한 마이크 이미지만 보인다.
 	if (Voice == nullptr || CachedState != EMicIconState::Speaking)
 	{
 		DisplayLevel = 0.f;
-		LevelBar->SetPercent(0.f);
+		MicGauge->SetPercent(0.f);
 		return;
 	}
 
@@ -263,7 +304,7 @@ void UVoiceStatusWidget::UpdateLevelBar(float InDeltaTime)
 		DisplayLevel = Target;
 	}
 
-	LevelBar->SetPercent(DisplayLevel);
+	MicGauge->SetPercent(DisplayLevel);
 }
 
 // [VUI-008] 소유 로컬 플레이어의 음성 서브시스템을 조회한다.
@@ -277,7 +318,7 @@ UVoiceSubsystem* UVoiceStatusWidget::GetVoiceSubsystem() const
 // ---------------------------------------------------------------------------
 // 콘솔 명령 - ChatWidgetBase 의 MOU.Chat.ShowUI 와 정확히 같은 패턴.
 //
-// 실제 표시에는 MicIcon과 LevelBar가 배치된 WBP가 필요하다.
+// 실제 표시에는 MicGauge가 배치된 WBP가 필요하다.
 // C++ 기본 클래스만 생성하면 텍스트를 포함한 대체 UI는 표시하지 않는다.
 // ---------------------------------------------------------------------------
 

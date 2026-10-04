@@ -11,7 +11,7 @@
 //   WBP 를 만들어 이 클래스를 부모로 지정하면, 아래 BindWidgetOptional 과
 //   같은 이름의 위젯을 배치하는 것만으로 디자인을 갈아끼울 수 있다.
 //     필요한 이름: LoginIdBox / PasswordBox / RegisterIdBox / RegisterPasswordBox / ConfirmPasswordBox /
-//                  LoginButton / RegisterButton / MessageText / TitleText
+//                  LoginButton / RegisterButton / QuitGameButton / MessageText / TitleText
 //
 // [비밀번호 취급 — 지켜야 할 것]
 //   - PasswordBox 는 IsPassword 를 켜서 화면에 ●●● 로만 보이게 한다.
@@ -171,6 +171,10 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Login")
 	TObjectPtr<UButton> RegisterButton;
 
+	/** LobbyMainWidgetBase 의 QuitGameButton 과 같은 이름. 로그인 전에도 게임을 끌 수 있게 한다. */
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Login")
+	TObjectPtr<UButton> QuitGameButton;
+
 	/** 실패 사유나 진행 상태를 보여주는 줄. */
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MOU|Login")
 	TObjectPtr<UTextBlock> MessageText;
@@ -256,6 +260,10 @@ private:
 	UFUNCTION()
 	// [AUTHUI-035] 가입 실행 대신 가입 화면을 연다.
 	void HandleRegisterClicked();
+
+	UFUNCTION()
+	// [AUTHUI-040] 로그인 화면에서 바로 게임을 종료한다.
+	void HandleQuitGameClicked();
 
 	// --- 내부 -------------------------------------------------------------
 

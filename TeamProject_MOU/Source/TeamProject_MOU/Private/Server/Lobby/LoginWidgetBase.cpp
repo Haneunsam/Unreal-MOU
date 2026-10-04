@@ -17,6 +17,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Engine/GameInstance.h"
+#include "Kismet/KismetSystemLibrary.h"
 
 ULoginWidgetBase::ULoginWidgetBase(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -58,6 +59,7 @@ void ULoginWidgetBase::BuildDefaultLayout()
     LoginPasswordEyeButton = Button(Login, TEXT("LoginPasswordEyeButton"), TEXT("비밀번호 표시/숨김"));
     LoginButton = Button(Login, TEXT("LoginButton"), TEXT("로그인"));
     RegisterButton = Button(Login, TEXT("RegisterButton"), TEXT("회원가입"));
+    QuitGameButton = Button(Login, TEXT("QuitGameButton"), TEXT("게임 종료"));
     MessageText = WidgetTree->ConstructWidget<UTextBlock>(); Login->AddChild(MessageText);
     RegisterIdBox = Edit(Register, TEXT("RegisterIdBox"), TEXT("아이디"), false);
     CheckIdButton = Button(Register, TEXT("CheckIdButton"), TEXT("중복 확인"));
@@ -82,6 +84,10 @@ void ULoginWidgetBase::NativeConstruct()
 	if (RegisterButton != nullptr)
 	{
 		RegisterButton->OnClicked.AddUniqueDynamic(this, &ULoginWidgetBase::HandleRegisterClicked);
+	}
+	if (QuitGameButton != nullptr)
+	{
+		QuitGameButton->OnClicked.AddUniqueDynamic(this, &ULoginWidgetBase::HandleQuitGameClicked);
 	}
 
     if (CheckIdButton) CheckIdButton->OnClicked.AddUniqueDynamic(this, &ULoginWidgetBase::HandleCheckIdClicked);
@@ -237,6 +243,13 @@ void ULoginWidgetBase::HandleLoginClicked()    { TryLogin(); }
 // [AUTHUI-035] 가입 실행 대신 가입 화면을 연다.
 void ULoginWidgetBase::HandleRegisterClicked() {
     OpenRegisterPanel();
+}
+
+// [AUTHUI-040] 로그인 화면에서 바로 게임을 종료한다.
+// 로비의 ULobbyWidgetBase::QuitGame 과 같은 호출이다. 로그인 대기 중(SetBusy)에도 잠그지 않는다.
+void ULoginWidgetBase::HandleQuitGameClicked()
+{
+	UKismetSystemLibrary::QuitGame(this, GetOwningPlayer(), EQuitPreference::Quit, /*bIgnorePlatformRestrictions=*/false);
 }
 
 // [AUTHUI-036] 가입 성공 시 자동 로그인 없이 로그인 화면으로 복귀한다.
