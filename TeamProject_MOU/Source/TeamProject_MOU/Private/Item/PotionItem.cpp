@@ -3,6 +3,7 @@
 #include "Player/MainCharacter.h"
 #include "Components/StatusComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/AudioComponent.h"
 #include "Components/CarryingComponent.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
@@ -12,6 +13,9 @@
 #include "TimerManager.h"
 #include "TeamProject_MOU.h" // LogTeamProject_MOU
 #include "Engine/Engine.h"   // GEngine->AddOnScreenDebugMessage
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+#include "UObject/ConstructorHelpers.h"
 
 // [POTION-DEBUG] 화면 + 로그 동시 출력용 임시 매크로 (원인 파악 후 제거)
 #define POTION_DEBUG(Color, Fmt, ...) \
@@ -22,8 +26,89 @@
 
 APotionItem::APotionItem()
 {
+	PrimaryActorTick.bCanEverTick = true;
+
 	// 포션은 자기 자신에게 효과를 준다 (치료 도구 등은 FocusedTarget으로 override)
 	TargetMode = EConsumeTarget::SelfOnly;
+
+	RollingAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("RollingAudioComponent"));
+	RollingAudioComponent->SetupAttachment(MeshComponent);
+	RollingAudioComponent->bAutoActivate = false;
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> BreakSoundFinder(
+		TEXT("/Game/04_JJO/Sound/SFX_BreakGlass.SFX_BreakGlass"));
+	if (BreakSoundFinder.Succeeded())
+	{
+		BreakGlassSound = BreakSoundFinder.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> RollSoundFinder(
+		TEXT("/Game/04_JJO/Sound/SFX_RollGlass.SFX_RollGlass"));
+	if (RollSoundFinder.Succeeded())
+	{
+		RollGlassSound = RollSoundFinder.Object;
+		RollingAudioComponent->SetSound(RollGlassSound);
+	}
+}
+
+// [POTION-016] Q 투척으로 바닥에 닿은 포션의 이동 속도에 따라 굴림음 볼륨과 재생 상태를 갱신한다.
+void APotionItem::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (!bRollingSoundEnabled || !RollingAudioComponent || !MeshComponent)
+	{
+		return;
+	}
+
+	const float Speed = MeshComponent->GetPhysicsLinearVelocity().Size();
+	if (!MeshComponent->IsSimulatingPhysics() || Speed < RollSoundMinSpeed)
+	{
+		RollingBelowSpeedTime += DeltaTime;
+		if (RollingBelowSpeedTime >= 0.2f)
+		{
+			RollingAudioComponent->Stop();
+			bRollingSoundEnabled = false;
+		}
+		return;
+	}
+
+	RollingBelowSpeedTime = 0.0f;
+	const float SpeedAlpha = FMath::GetMappedRangeValueClamped(
+		FVector2D(RollSoundMinSpeed, FMath::Max(RollSoundMinSpeed + 1.0f, RollSoundFullSpeed)),
+		FVector2D(0.2f, 1.0f), Speed);
+	RollingAudioComponent->SetVolumeMultiplier(RollGlassVolume * SpeedAlpha);
+	RollingAudioComponent->SetPitchMultiplier(FMath::Lerp(0.85f, 1.1f, SpeedAlpha));
+
+	// 원본 SoundWave가 루프 설정이 아니어도 계속 구르는 동안 다시 재생한다.
+	if (!RollingAudioComponent->IsPlaying() && RollGlassSound)
+	{
+		RollingAudioComponent->Play();
+	}
+}
+
+// [POTION-012] 메시 피벗과 BP 보정값을 그대로 오른손 소켓에 맞춘다.
+bool APotionItem::ShouldCenterOnCarrySocket() const
+{
+	return false;
+}
+
+// [POTION-013] 포션 블루프린트에 설정된 오른손 소켓 이름을 반환한다.
+FName APotionItem::GetCarrySocketOverride() const
+{
+	return HandSocketName;
+}
+
+// [POTION-014] 포션 블루프린트의 손 장착 위치 보정값을 반환한다.
+FVector APotionItem::GetCarryLocationOffset() const
+{
+	return HandLocationOffset;
+}
+
+// [POTION-015] 포션 블루프린트의 손 장착 회전 보정값을 반환한다.
+FRotator APotionItem::GetCarryRotationOffset() const
+{
+	return HandRotationOffset;
 }
 
 // [POTION-001] 소비 효과: 자기 사용 시 대상 하나(자신)에게 적용
@@ -40,19 +125,122 @@ void APotionItem::OnUse_Implementation()
 	// 투척형 포션(Apply on Impact 켜짐): 좌클릭 = 손에서 던지기 (충돌 시 터져서 발동)
 	if (bApplyOnImpact)
 	{
-		bThrowAsUse = true; // 이번 던지기는 "사용"이므로 터져도 됨
-		if (AActor* OwnerActor = GetOwner())
+		// 클라이언트에서만 플래그를 세우면 서버의 포션에는 전달되지 않으므로
+		// 서버 RPC로 넘겨 서버 권한 인스턴스에서 사용 투척을 시작한다.
+		if (!HasAuthority())
 		{
-			if (UCarryingComponent* Carrying = OwnerActor->FindComponentByClass<UCarryingComponent>())
-			{
-				Carrying->Throw();
-			}
+			ServerThrowAsUse();
+			return;
+		}
+
+		AActor* OwnerActor = GetOwner();
+		if (!OwnerActor)
+		{
+			OwnerActor = GetAttachParentActor();
+		}
+
+		UCarryingComponent* Carrying = OwnerActor
+			? OwnerActor->FindComponentByClass<UCarryingComponent>()
+			: nullptr;
+		if (!Carrying || Carrying->GetCarriedActor() != this)
+		{
+			POTION_DEBUG(FColor::Red, "사용 투척 실패: 소유자의 손에 든 포션을 찾지 못함");
+			return;
+		}
+
+		// 연타로 몽타주가 다시 시작되거나 투척 요청이 중복되는 것을 막는다.
+		if (bWaitingForThrowNotify)
+		{
+			return;
+		}
+
+		bWaitingForThrowNotify = true;
+		if (UseMontage)
+		{
+			// 실제 투척은 몽타주의 UAnimNotify_PotionThrow가 호출할 때 실행한다.
+			MulticastPlayThrowMontage(Cast<ACharacterBase>(OwnerActor));
+		}
+		else
+		{
+			// 몽타주가 지정되지 않은 포션은 사용 불능 상태가 되지 않도록 즉시 투척한다.
+			ExecutePendingImpactThrow();
 		}
 		return;
 	}
 
 	// 일반 포션(Apply on Impact 꺼짐): 기존대로 제자리에서 마신다
 	Super::OnUse_Implementation();
+}
+
+// [POTION-005] 클라이언트 좌클릭을 서버 권한의 사용 투척으로 다시 실행한다.
+void APotionItem::ServerThrowAsUse_Implementation()
+{
+	OnUse_Implementation();
+}
+
+// [POTION-006] BP에 지정된 투척 몽타주를 사용 캐릭터에게 네트워크 동기화해 재생한다.
+void APotionItem::MulticastPlayThrowMontage_Implementation(ACharacterBase* ThrowerCharacter)
+{
+	if (ThrowerCharacter && UseMontage)
+	{
+		ThrowerCharacter->PlayAnimMontage(UseMontage);
+	}
+}
+
+// [POTION-007] 로컬 소유 캐릭터의 Anim Notify를 서버 권한 투척으로 연결한다.
+void APotionItem::HandleThrowAnimNotify(AActor* NotifyOwner)
+{
+	if (!NotifyOwner || (GetOwner() != NotifyOwner && GetAttachParentActor() != NotifyOwner))
+	{
+		return;
+	}
+
+	if (HasAuthority())
+	{
+		ExecutePendingImpactThrow();
+	}
+	else
+	{
+		ServerConfirmThrowNotify();
+	}
+}
+
+// [POTION-008] 소유 클라이언트의 투척 Notify를 서버에서 처리한다.
+void APotionItem::ServerConfirmThrowNotify_Implementation()
+{
+	ExecutePendingImpactThrow();
+}
+
+// [POTION-009] 서버가 Notify 대기 상태를 소비하고 손에 든 포션을 실제로 던진다.
+void APotionItem::ExecutePendingImpactThrow()
+{
+	if (!HasAuthority() || !bWaitingForThrowNotify)
+	{
+		return;
+	}
+
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor)
+	{
+		OwnerActor = GetAttachParentActor();
+	}
+
+	UCarryingComponent* Carrying = OwnerActor
+		? OwnerActor->FindComponentByClass<UCarryingComponent>()
+		: nullptr;
+	if (!Carrying || Carrying->GetCarriedActor() != this)
+	{
+		bWaitingForThrowNotify = false;
+		POTION_DEBUG(FColor::Red, "Notify 투척 실패: 소유자의 손에 든 포션을 찾지 못함");
+		return;
+	}
+
+	bWaitingForThrowNotify = false;
+	bThrowAsUse = true; // 서버에서 설정해야 Throw_Implementation의 충돌 등록 조건이 성립한다.
+	Carrying->Throw();
+
+	// Throw가 CanBeDropped 등의 이유로 거부되면 Throw_Implementation이 플래그를 지우지 못하므로 정리한다.
+	bThrowAsUse = false;
 }
 
 // 실제 GE 적용 + 상태이상 태그 제거를 한 대상에게 수행 (자기 사용 / 광역 공용)
@@ -119,9 +307,16 @@ void APotionItem::ApplyPotionEffectToTarget(AActor* Target)
 		}
 	}
 
-	// 상태이상 태그 제거 (감전 State.CC.Electirc 등) - StatusComponent 경유
+	// 상태이상 제거:
+	// GA/GE 방식 상태이상은 활성 GameplayEffect가 태그를 계속 부여하므로 GE부터 제거한다.
+	// 이후 기존 Loose Tag 방식 상태이상도 StatusComponent를 통해 함께 정리한다.
 	if (!TagsToRemove.IsEmpty())
 	{
+		if (TargetASC)
+		{
+			TargetASC->RemoveActiveEffectsWithGrantedTags(TagsToRemove);
+		}
+
 		if (ACharacterBase* TargetCharacter = Cast<ACharacterBase>(Target))
 		{
 			if (UStatusComponent* Status = TargetCharacter->GetStatusComponent())
@@ -190,21 +385,30 @@ void APotionItem::ApplyPotionEffectToTarget(AActor* Target)
 	}
 }
 
-// [POTION-002] 투척: 부모(소유권 해제 + 물리 투척) 후, 투척형이면 충돌 감지 켜기
+// [POTION-002] 투척: 사용 투척이면 물리 투척 전에 충돌 감지를 등록한 뒤 부모 투척을 실행한다.
 void APotionItem::Throw_Implementation(FVector ThrowVelocity, AActor* Thrower)
 {
-	Super::Throw_Implementation(ThrowVelocity, Thrower);
+	const bool bShouldApplyOnImpact = bThrowAsUse && bApplyOnImpact && HasAuthority() && MeshComponent;
+	const bool bIsSimpleThrow = !bThrowAsUse;
+	if (HasAuthority())
+	{
+		bSimpleThrowRollingEligible = bIsSimpleThrow;
+		if (!bIsSimpleThrow)
+		{
+			MulticastSetRollingSoundEnabled(false);
+		}
+	}
 
-	// [POTION-DEBUG] 던지기 진입 시 조건 3개 상태 출력
-	POTION_DEBUG(FColor::Cyan, "Throw 호출됨: bApplyOnImpact=%d, HasAuthority=%d, MeshComponent=%d",
-		bApplyOnImpact ? 1 : 0, HasAuthority() ? 1 : 0, MeshComponent ? 1 : 0);
+	// [POTION-DEBUG] 던지기 진입 시 충돌 발동 조건 상태 출력
+	POTION_DEBUG(FColor::Cyan, "Throw 호출됨: bThrowAsUse=%d, bApplyOnImpact=%d, HasAuthority=%d, MeshComponent=%d",
+		bThrowAsUse ? 1 : 0, bApplyOnImpact ? 1 : 0, HasAuthority() ? 1 : 0, MeshComponent ? 1 : 0);
 
 	// 좌클릭 "사용" 던지기(bThrowAsUse)일 때만 충돌 발동. Q(단순 투척)는 어떤 포션이든 절대 안 터진다.
-	if (bThrowAsUse && bApplyOnImpact && HasAuthority() && MeshComponent)
+	if (bShouldApplyOnImpact)
 	{
 		bHasImpacted = false;
 		MeshComponent->SetNotifyRigidBodyCollision(true); // OnComponentHit 활성화
-		MeshComponent->OnComponentHit.AddDynamic(this, &APotionItem::OnImpact);
+		MeshComponent->OnComponentHit.AddUniqueDynamic(this, &APotionItem::OnImpact);
 		POTION_DEBUG(FColor::Green, "충돌 감지 바인딩 완료 (OnImpact 대기)");
 	}
 	else
@@ -213,8 +417,47 @@ void APotionItem::Throw_Implementation(FVector ThrowVelocity, AActor* Thrower)
 		POTION_DEBUG(FColor::Red, "충돌 감지 미설정 (Q 투척이거나 조건 미충족)");
 	}
 
+	// 부모의 충돌/물리 활성화보다 먼저 위 델리게이트가 등록되어 첫 충돌도 놓치지 않는다.
+	Super::Throw_Implementation(ThrowVelocity, Thrower);
+
 	// 다음 던지기를 위해 "사용 발" 플래그 리셋 (Q 투척이 이전 좌클릭 상태를 물려받지 않도록)
 	bThrowAsUse = false;
+}
+
+// [POTION-017] 포션을 다시 집었을 때 모든 클라이언트에서 굴림음을 즉시 정지한다.
+void APotionItem::PickUp_Implementation(AActor* Picker)
+{
+	if (HasAuthority())
+	{
+		bSimpleThrowRollingEligible = false;
+		MulticastSetRollingSoundEnabled(false);
+	}
+
+	Super::PickUp_Implementation(Picker);
+}
+
+// [POTION-018] 단순 내려놓기는 Q 투척이 아니므로 굴림음 추적 상태를 해제한다.
+void APotionItem::Drop_Implementation(FVector DropLocation, AActor* Dropper)
+{
+	if (HasAuthority())
+	{
+		bSimpleThrowRollingEligible = false;
+		MulticastSetRollingSoundEnabled(false);
+	}
+
+	Super::Drop_Implementation(DropLocation, Dropper);
+}
+
+// [POTION-019] Q로 던진 포션이 실제 표면에 처음 닿았을 때부터 굴림음을 활성화한다.
+void APotionItem::OnItemHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+{
+	Super::OnItemHit(HitComponent, OtherActor, OtherComp, NormalImpulse, Hit);
+
+	if (HasAuthority() && bSimpleThrowRollingEligible && OtherActor != LastThrower.Get())
+	{
+		MulticastSetRollingSoundEnabled(true);
+	}
 }
 
 // [POTION-003] 첫 충돌 → 반경 내 플레이어 전원에게 적용 → 깨짐
@@ -239,6 +482,10 @@ void APotionItem::OnImpact(UPrimitiveComponent* HitComp, AActor* OtherActor, UPr
 	}
 
 	bHasImpacted = true;
+	const FVector BreakLocation = Hit.ImpactPoint.IsNearlyZero()
+		? GetActorLocation()
+		: FVector(Hit.ImpactPoint);
+	MulticastPlayBreakGlassSound(BreakLocation);
 
 	// 반경 내 모든 캐릭터(플레이어 + NPC = ACharacterBase 파생)에게 효과 적용
 	// ACharacterBase로 필터링하면 AMainCharacter(플레이어)와 NPC 모두 포함된다.
@@ -263,4 +510,25 @@ void APotionItem::OnImpact(UPrimitiveComponent* HitComp, AActor* OtherActor, UPr
 	// 깨짐 연출(전 클라, OnUseEffect BP 훅) 후 소멸
 	MulticastPlayUseEffect();
 	Destroy();
+}
+
+// [POTION-020] 포션이 사용 충돌로 깨지는 순간 모든 클라이언트에서 파손음을 재생한다.
+void APotionItem::MulticastPlayBreakGlassSound_Implementation(FVector Location)
+{
+	if (BreakGlassSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, BreakGlassSound, Location, BreakGlassVolume);
+	}
+}
+
+// [POTION-021] Q 투척 굴림음의 로컬 재생 상태를 모든 클라이언트에서 동일하게 전환한다.
+void APotionItem::MulticastSetRollingSoundEnabled_Implementation(bool bEnabled)
+{
+	bRollingSoundEnabled = bEnabled;
+	RollingBelowSpeedTime = 0.0f;
+
+	if (!bEnabled && RollingAudioComponent)
+	{
+		RollingAudioComponent->Stop();
+	}
 }

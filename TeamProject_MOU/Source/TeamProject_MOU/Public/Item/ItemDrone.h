@@ -5,6 +5,7 @@
 #include "ItemDrone.generated.h"
 
 class USceneComponent;
+class UAudioComponent;
 class ACharacter;
 
 // ---------------------------------------------------------
@@ -40,6 +41,10 @@ public:
 	// 맡긴 택배(APackageBase)가 거치될 위치 (드론 머리 위)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<USceneComponent> PackageHoldPoint;
+
+	// 드론이 배치된 동안 위치를 따라다니며 루프 사운드를 재생한다.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UAudioComponent> DroneLoopAudio;
 
 	// ---------------------------------------------------------
 	// [배치 / 팔로우 상태]
@@ -155,6 +160,9 @@ private:
 	// [DRONE-012] 플레이어에서 각 후보 오프셋 지점까지 경로가 뚫려 있는지 검사해, 따라갈 오프셋을 고른다.
 	// 우선순위: 오른쪽뒤(기본) -> 왼쪽뒤 -> 정뒤 -> 오른쪽옆 -> 왼쪽옆. 다 막히면 기본값 반환.
 	FVector ChooseFollowOffset() const;
+
+	// [DRONE-013] 배치 상태에 맞춰 드론 루프 사운드를 재생하거나 정지한다.
+	void UpdateDroneLoopSound();
 
 	// 보빙 위상 누적용
 	float BobbingPhase = 0.0f;

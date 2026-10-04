@@ -83,7 +83,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Map|Fog")
 	FVector2D MapWorldSize = FVector2D(20000.0f, 20000.0f);
 #pragma endregion
-
+ 
 #pragma region [MAP] 소지/갱신/토글
 	// 이 지도를 현재 소지 중인 플레이어 (PickUp/OnEquipped 기준으로 세팅).
 	//   서버에서 세팅되므로 클라의 좌클릭 사용(OnUse)에서도 쓰려면 복제 필수. [MAP-013]
