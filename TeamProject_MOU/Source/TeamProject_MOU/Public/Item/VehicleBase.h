@@ -8,6 +8,7 @@
 class USpringArmComponent;
 class UCameraComponent;
 class UBoxComponent;
+class UAudioComponent;
 class ACharacterBase;
 class AController;
 struct FInputActionValue;
@@ -77,6 +78,14 @@ public:
 	// 탑승 상호작용 감지용 콜라이더 (F키 포커스 대상 범위)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Vehicle|Interaction")
 	TObjectPtr<UBoxComponent> InteractionVolume;
+
+	// 차량이 움직이는 동안 차체 위치에서 재생되는 기본 주행음.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Vehicle|Audio")
+	TObjectPtr<UAudioComponent> CarBaseAudio;
+
+	// 이 속도(km/h) 이상일 때 기본 주행음을 재생한다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Vehicle|Audio", meta = (ClampMin = "0.0"))
+	float CarBaseSoundMinSpeedKmh = 1.0f;
 
 	// ---------------------------------------------------------
 	// [좌석 구성] - 운전석(0) + 동승석
@@ -161,6 +170,9 @@ protected:
 	TObjectPtr<class UInputMappingContext> DrivingMappingContext;
 
 private:
+	// [VEHICLE-003] BP에 설정된 좌석을 보존하면서 4인 탑승에 부족한 좌석을 자동으로 보충한다.
+	void EnsureFourPlayerSeats();
+
 	UPROPERTY(EditDefaultsOnly, Category = "Vehicle|Drift", meta = (ClampMin = "0.05", ClampMax = "1.0"))
 	float DriftRearGripScale = 0.25f;
 
@@ -174,6 +186,10 @@ private:
 	void ServerSetDriftDirection(float Direction);
 
 	void UpdateDrift(float DeltaTime);
+
+	// [VEHICLE-070] 실제 전후 이동 속도에 따라 기본 주행음을 재생하거나 정지한다.
+	void UpdateCarBaseSound();
+
 	TArray<float> DefaultWheelGrip;
 	float LocalDriftDirection = 0.0f;
 	float DriftBlend = 0.0f;

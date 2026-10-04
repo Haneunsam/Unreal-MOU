@@ -9,8 +9,10 @@
 #include "InputCoreTypes.h"
 #include "PhysicsEngine/PhysicsSettings.h"
 #include "Camera/CameraComponent.h"
+#include "Components/AudioComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/InteractionComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -19,6 +21,8 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "InputMappingContext.h"
 #include "Net/UnrealNetwork.h"
+#include "Sound/SoundBase.h"
+#include "UObject/ConstructorHelpers.h"
 
 // [VEHICLE-001] 생성자: 카메라/상호작용 볼륨 구성 및 기본값
 AVehicleBase::AVehicleBase()
@@ -52,6 +56,24 @@ AVehicleBase::AVehicleBase()
 	InteractionVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionVolume->SetCollisionResponseToAllChannels(ECR_Overlap);
 
+	// 차체를 따라다니는 3D 기본 주행음. SoundWave 에셋의 Looping 설정을 그대로 사용한다.
+	CarBaseAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("CarBaseAudio"));
+	CarBaseAudio->SetupAttachment(GetMesh());
+	CarBaseAudio->bAutoActivate = false;
+	CarBaseAudio->bAllowSpatialization = true;
+	CarBaseAudio->bOverrideAttenuation = true;
+	CarBaseAudio->AttenuationOverrides.bAttenuate = true;
+	CarBaseAudio->AttenuationOverrides.AttenuationShape = EAttenuationShape::Sphere;
+	CarBaseAudio->AttenuationOverrides.AttenuationShapeExtents = FVector(300.0f, 0.0f, 0.0f);
+	CarBaseAudio->AttenuationOverrides.FalloffDistance = 2500.0f;
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> CarBaseSoundAsset(
+		TEXT("/Game/04_JJO/Sound/SFX_CarBaseSound.SFX_CarBaseSound"));
+	if (CarBaseSoundAsset.Succeeded())
+	{
+		CarBaseAudio->SetSound(CarBaseSoundAsset.Object);
+	}
+
 	// 차량은 네트워크에서 서버 권위로 위치가 복제되어야 한다.
 	bReplicates = true;
 	SetReplicateMovement(true);
@@ -69,6 +91,14 @@ void AVehicleBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 void AVehicleBase::BeginPlay()
 {
 	Super::BeginPlay();
+	EnsureFourPlayerSeats();
+
+	// 플레이어와 NPC의 캡슐이 차체에 물리 힘을 전달해 차량을 미는 현상을 차단한다.
+	// 탑승 판정은 별도의 InteractionVolume을 사용하므로 그대로 동작한다.
+	if (USkeletalMeshComponent* VehicleMesh = GetMesh())
+	{
+		VehicleMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	}
 
 	if (const UChaosWheeledVehicleMovementComponent* Wheeled = Cast<UChaosWheeledVehicleMovementComponent>(GetVehicleMovementComponent()))
 	{
@@ -100,6 +130,35 @@ void AVehicleBase::BeginPlay()
 	}
 }
 
+// [VEHICLE-003] BP에 설정된 좌석을 보존하면서 4인 탑승에 부족한 좌석을 자동으로 보충한다.
+void AVehicleBase::EnsureFourPlayerSeats()
+{
+	static const FName DefaultSeatSocketNames[] =
+	{
+		TEXT("Seat_Driver"),
+		TEXT("Seat_Passenger1"),
+		TEXT("Seat_Passenger2"),
+		TEXT("Seat_Passenger3")
+	};
+
+	const int32 ExistingSeatCount = Seats.Num();
+	Seats.Reserve(UE_ARRAY_COUNT(DefaultSeatSocketNames));
+	for (int32 SeatIndex = ExistingSeatCount; SeatIndex < UE_ARRAY_COUNT(DefaultSeatSocketNames); ++SeatIndex)
+	{
+		FVehicleSeat& NewSeat = Seats.AddDefaulted_GetRef();
+		NewSeat.SeatSocketName = DefaultSeatSocketNames[SeatIndex];
+	}
+
+	const bool bHasDriverSeat = Seats.ContainsByPredicate([](const FVehicleSeat& Seat)
+	{
+		return Seat.bIsDriverSeat;
+	});
+	if (!bHasDriverSeat && !Seats.IsEmpty())
+	{
+		Seats[0].bIsDriverSeat = true;
+	}
+}
+
 // [VEHICLE-002] 좌석 복제 콜백: 클라이언트에서 좌석 변화 연출 훅 호출
 void AVehicleBase::OnRep_Seats()
 {
@@ -115,16 +174,16 @@ bool AVehicleBase::CanInteract_Implementation(AActor* Interactor) const
 		return false;
 	}
 
-	// 이미 이 차량에 타고 있으면(하차는 별도 입력) 상호작용 대상에서 제외
+	// 이미 이 차량에 탄 동승자도 F키로 다시 상호작용해 하차할 수 있다.
 	if (GetSeatIndexOf(Character) != INDEX_NONE)
 	{
-		return false;
+		return true;
 	}
 
 	return FindNearestFreeSeat(Interactor) != INDEX_NONE;
 }
 
-// [VEHICLE-011] F키 상호작용 실행: 서버에 탑승 요청 (드론과 동일하게 서버 권위 처리)
+// [VEHICLE-011] F키 상호작용 실행: 플레이어 소유 컴포넌트를 통해 서버에서 탑승 처리
 void AVehicleBase::Interact_Implementation(AActor* Interactor)
 {
 	ACharacterBase* Character = Cast<ACharacterBase>(Interactor);
@@ -133,8 +192,25 @@ void AVehicleBase::Interact_Implementation(AActor* Interactor)
 		return;
 	}
 
-	// 상호작용은 로컬 클라에서도 호출되므로, 상태 변경은 서버 RPC로 위임한다.
-	ServerRequestEnter(Character);
+	// 탑승 전 차량은 클라이언트 소유가 아니므로 차량 자신의 Server RPC를 호출하면 거부된다.
+	// 클라이언트에서는 플레이어가 소유한 InteractionComponent를 통해 서버에서 다시 실행한다.
+	if (!HasAuthority())
+	{
+		if (UInteractionComponent* InteractionComp = Character->FindComponentByClass<UInteractionComponent>())
+		{
+			InteractionComp->ServerRunInteract(this);
+		}
+		return;
+	}
+
+	if (GetSeatIndexOf(Character) != INDEX_NONE)
+	{
+		ExitVehicle(Character);
+	}
+	else
+	{
+		EnterVehicle(Character);
+	}
 }
 
 FText AVehicleBase::GetInteractPrompt_Implementation() const
@@ -368,8 +444,7 @@ void AVehicleBase::MulticastAttachOccupant_Implementation(ACharacterBase* Charac
 	USkeletalMeshComponent* MeshComp = GetMesh();
 	const FName SocketName = Seats[SeatIndex].SeatSocketName;
 
-	// [임시 진단] 캐릭터 Attach 가 차량 물리를 방해하는지 배제하기 위해,
-	// 지금은 Attach 하지 않고 숨기기만 한다. 이래도 차가 안 굴러가면 캐릭터는 원인이 아니다.
+	// 먼저 이동과 충돌을 끈 뒤 붙여서 동승자가 차량 물리에 힘을 전달하지 않게 한다.
 	if (UCharacterMovementComponent* CharMove = Character->GetCharacterMovement())
 	{
 		CharMove->DisableMovement();
@@ -378,7 +453,27 @@ void AVehicleBase::MulticastAttachOccupant_Implementation(ACharacterBase* Charac
 	{
 		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
+
+	if (MeshComp && SocketName != NAME_None && MeshComp->DoesSocketExist(SocketName))
+	{
+		Character->AttachToComponent(MeshComp, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
+	}
+	else
+	{
+		// 전용 좌석 소켓이 없는 추가 동승석은 탑승 순간 위치를 유지한 채 차량에 붙인다.
+		Character->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
+	}
+
 	Character->SetActorHiddenInGame(true);
+
+	// 운전자뿐 아니라 동승자의 로컬 화면도 차량 카메라로 전환한다.
+	if (APlayerController* PassengerController = Cast<APlayerController>(Character->GetController()))
+	{
+		if (PassengerController->IsLocalController())
+		{
+			PassengerController->SetViewTargetWithBlend(this, 0.35f, VTBlend_Cubic);
+		}
+	}
 }
 
 // [VEHICLE-051] 모든 머신: 캐릭터 Detach + 이동/충돌 복구 + 안전 위치 이동
@@ -407,6 +502,15 @@ void AVehicleBase::MulticastDetachOccupant_Implementation(ACharacterBase* Charac
 	if (Character->HasAuthority())
 	{
 		Character->SetActorLocation(ExitLocation, false, nullptr, ETeleportType::TeleportPhysics);
+	}
+
+	// 하차한 로컬 플레이어의 화면을 자신의 캐릭터 카메라로 복원한다.
+	if (APlayerController* PassengerController = Cast<APlayerController>(Character->GetController()))
+	{
+		if (PassengerController->IsLocalController())
+		{
+			PassengerController->SetViewTargetWithBlend(Character, 0.35f, VTBlend_Cubic);
+		}
 	}
 }
 
@@ -534,12 +638,13 @@ void AVehicleBase::ApplyDrivingInput()
 	{
 		return;
 	}
-	// Space requests a powered slide, not a wheel-locking brake.
+	// Space applies the handbrake while steering still requests the powered drift assist.
 	Movement->bReverseAsBrake = bDefaultReverseAsBrake;
 	Movement->SetThrottleInput(FMath::Max(ThrottleAxis, 0.0f));
 	Movement->SetBrakeInput(FMath::Max(-ThrottleAxis, 0.0f));
-	Movement->SetHandbrakeInput(false);
-	const float Requested = PC->IsInputKeyDown(EKeys::SpaceBar) && ThrottleAxis >= 0.0f ? SteeringAxis : 0.0f;
+	const bool bHandbrakeRequested = PC->IsInputKeyDown(EKeys::SpaceBar);
+	Movement->SetHandbrakeInput(bHandbrakeRequested);
+	const float Requested = bHandbrakeRequested && ThrottleAxis >= 0.0f ? SteeringAxis : 0.0f;
 	if (!FMath::IsNearlyEqual(Requested, LocalDriftDirection, 0.01f))
 	{
 		LocalDriftDirection = Requested;
@@ -581,9 +686,36 @@ void AVehicleBase::UpdateDrift(float DeltaTime)
 	}
 }
 
+// [VEHICLE-070] 전진/후진 구분 없이 실제 속도가 기준 이상이면 기본 주행음을 유지한다.
+void AVehicleBase::UpdateCarBaseSound()
+{
+	if (!CarBaseAudio || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	const UChaosVehicleMovementComponent* Movement = GetVehicleMovementComponent();
+	// Chaos 차량 속도는 cm/s이므로, 게임에서 사용하는 km/h로 변환해 기준값과 비교한다.
+	const float SpeedKmh = Movement ? FMath::Abs(Movement->GetForwardSpeed()) * 0.036f : 0.0f;
+	const bool bShouldPlay = SpeedKmh >= CarBaseSoundMinSpeedKmh;
+
+	if (bShouldPlay)
+	{
+		if (!CarBaseAudio->IsPlaying())
+		{
+			CarBaseAudio->Play();
+		}
+	}
+	else if (CarBaseAudio->IsPlaying())
+	{
+		CarBaseAudio->Stop();
+	}
+}
+
 void AVehicleBase::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	UpdateCarBaseSound();
 
 	if (UChaosWheeledVehicleMovementComponent* Wheeled = Cast<UChaosWheeledVehicleMovementComponent>(GetVehicleMovementComponent()))
 	{

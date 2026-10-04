@@ -307,9 +307,16 @@ void APotionItem::ApplyPotionEffectToTarget(AActor* Target)
 		}
 	}
 
-	// 상태이상 태그 제거 (감전 State.CC.Electirc 등) - StatusComponent 경유
+	// 상태이상 제거:
+	// GA/GE 방식 상태이상은 활성 GameplayEffect가 태그를 계속 부여하므로 GE부터 제거한다.
+	// 이후 기존 Loose Tag 방식 상태이상도 StatusComponent를 통해 함께 정리한다.
 	if (!TagsToRemove.IsEmpty())
 	{
+		if (TargetASC)
+		{
+			TargetASC->RemoveActiveEffectsWithGrantedTags(TagsToRemove);
+		}
+
 		if (ACharacterBase* TargetCharacter = Cast<ACharacterBase>(Target))
 		{
 			if (UStatusComponent* Status = TargetCharacter->GetStatusComponent())
