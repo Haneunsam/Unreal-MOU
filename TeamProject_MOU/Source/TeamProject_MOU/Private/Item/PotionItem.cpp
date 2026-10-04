@@ -3,6 +3,7 @@
 #include "Player/MainCharacter.h"
 #include "Components/StatusComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/AudioComponent.h"
 #include "Components/CarryingComponent.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
@@ -12,6 +13,9 @@
 #include "TimerManager.h"
 #include "TeamProject_MOU.h" // LogTeamProject_MOU
 #include "Engine/Engine.h"   // GEngine->AddOnScreenDebugMessage
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+#include "UObject/ConstructorHelpers.h"
 
 // [POTION-DEBUG] 화면 + 로그 동시 출력용 임시 매크로 (원인 파악 후 제거)
 #define POTION_DEBUG(Color, Fmt, ...) \
@@ -22,8 +26,65 @@
 
 APotionItem::APotionItem()
 {
+	PrimaryActorTick.bCanEverTick = true;
+
 	// 포션은 자기 자신에게 효과를 준다 (치료 도구 등은 FocusedTarget으로 override)
 	TargetMode = EConsumeTarget::SelfOnly;
+
+	RollingAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("RollingAudioComponent"));
+	RollingAudioComponent->SetupAttachment(MeshComponent);
+	RollingAudioComponent->bAutoActivate = false;
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> BreakSoundFinder(
+		TEXT("/Game/04_JJO/Sound/SFX_BreakGlass.SFX_BreakGlass"));
+	if (BreakSoundFinder.Succeeded())
+	{
+		BreakGlassSound = BreakSoundFinder.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> RollSoundFinder(
+		TEXT("/Game/04_JJO/Sound/SFX_RollGlass.SFX_RollGlass"));
+	if (RollSoundFinder.Succeeded())
+	{
+		RollGlassSound = RollSoundFinder.Object;
+		RollingAudioComponent->SetSound(RollGlassSound);
+	}
+}
+
+// [POTION-016] Q 투척으로 바닥에 닿은 포션의 이동 속도에 따라 굴림음 볼륨과 재생 상태를 갱신한다.
+void APotionItem::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (!bRollingSoundEnabled || !RollingAudioComponent || !MeshComponent)
+	{
+		return;
+	}
+
+	const float Speed = MeshComponent->GetPhysicsLinearVelocity().Size();
+	if (!MeshComponent->IsSimulatingPhysics() || Speed < RollSoundMinSpeed)
+	{
+		RollingBelowSpeedTime += DeltaTime;
+		if (RollingBelowSpeedTime >= 0.2f)
+		{
+			RollingAudioComponent->Stop();
+			bRollingSoundEnabled = false;
+		}
+		return;
+	}
+
+	RollingBelowSpeedTime = 0.0f;
+	const float SpeedAlpha = FMath::GetMappedRangeValueClamped(
+		FVector2D(RollSoundMinSpeed, FMath::Max(RollSoundMinSpeed + 1.0f, RollSoundFullSpeed)),
+		FVector2D(0.2f, 1.0f), Speed);
+	RollingAudioComponent->SetVolumeMultiplier(RollGlassVolume * SpeedAlpha);
+	RollingAudioComponent->SetPitchMultiplier(FMath::Lerp(0.85f, 1.1f, SpeedAlpha));
+
+	// 원본 SoundWave가 루프 설정이 아니어도 계속 구르는 동안 다시 재생한다.
+	if (!RollingAudioComponent->IsPlaying() && RollGlassSound)
+	{
+		RollingAudioComponent->Play();
+	}
 }
 
 // [POTION-012] 메시 피벗과 BP 보정값을 그대로 오른손 소켓에 맞춘다.
@@ -321,6 +382,15 @@ void APotionItem::ApplyPotionEffectToTarget(AActor* Target)
 void APotionItem::Throw_Implementation(FVector ThrowVelocity, AActor* Thrower)
 {
 	const bool bShouldApplyOnImpact = bThrowAsUse && bApplyOnImpact && HasAuthority() && MeshComponent;
+	const bool bIsSimpleThrow = !bThrowAsUse;
+	if (HasAuthority())
+	{
+		bSimpleThrowRollingEligible = bIsSimpleThrow;
+		if (!bIsSimpleThrow)
+		{
+			MulticastSetRollingSoundEnabled(false);
+		}
+	}
 
 	// [POTION-DEBUG] 던지기 진입 시 충돌 발동 조건 상태 출력
 	POTION_DEBUG(FColor::Cyan, "Throw 호출됨: bThrowAsUse=%d, bApplyOnImpact=%d, HasAuthority=%d, MeshComponent=%d",
@@ -347,6 +417,42 @@ void APotionItem::Throw_Implementation(FVector ThrowVelocity, AActor* Thrower)
 	bThrowAsUse = false;
 }
 
+// [POTION-017] 포션을 다시 집었을 때 모든 클라이언트에서 굴림음을 즉시 정지한다.
+void APotionItem::PickUp_Implementation(AActor* Picker)
+{
+	if (HasAuthority())
+	{
+		bSimpleThrowRollingEligible = false;
+		MulticastSetRollingSoundEnabled(false);
+	}
+
+	Super::PickUp_Implementation(Picker);
+}
+
+// [POTION-018] 단순 내려놓기는 Q 투척이 아니므로 굴림음 추적 상태를 해제한다.
+void APotionItem::Drop_Implementation(FVector DropLocation, AActor* Dropper)
+{
+	if (HasAuthority())
+	{
+		bSimpleThrowRollingEligible = false;
+		MulticastSetRollingSoundEnabled(false);
+	}
+
+	Super::Drop_Implementation(DropLocation, Dropper);
+}
+
+// [POTION-019] Q로 던진 포션이 실제 표면에 처음 닿았을 때부터 굴림음을 활성화한다.
+void APotionItem::OnItemHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+{
+	Super::OnItemHit(HitComponent, OtherActor, OtherComp, NormalImpulse, Hit);
+
+	if (HasAuthority() && bSimpleThrowRollingEligible && OtherActor != LastThrower.Get())
+	{
+		MulticastSetRollingSoundEnabled(true);
+	}
+}
+
 // [POTION-003] 첫 충돌 → 반경 내 플레이어 전원에게 적용 → 깨짐
 void APotionItem::OnImpact(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
 	FVector NormalImpulse, const FHitResult& Hit)
@@ -369,6 +475,10 @@ void APotionItem::OnImpact(UPrimitiveComponent* HitComp, AActor* OtherActor, UPr
 	}
 
 	bHasImpacted = true;
+	const FVector BreakLocation = Hit.ImpactPoint.IsNearlyZero()
+		? GetActorLocation()
+		: FVector(Hit.ImpactPoint);
+	MulticastPlayBreakGlassSound(BreakLocation);
 
 	// 반경 내 모든 캐릭터(플레이어 + NPC = ACharacterBase 파생)에게 효과 적용
 	// ACharacterBase로 필터링하면 AMainCharacter(플레이어)와 NPC 모두 포함된다.
@@ -393,4 +503,25 @@ void APotionItem::OnImpact(UPrimitiveComponent* HitComp, AActor* OtherActor, UPr
 	// 깨짐 연출(전 클라, OnUseEffect BP 훅) 후 소멸
 	MulticastPlayUseEffect();
 	Destroy();
+}
+
+// [POTION-020] 포션이 사용 충돌로 깨지는 순간 모든 클라이언트에서 파손음을 재생한다.
+void APotionItem::MulticastPlayBreakGlassSound_Implementation(FVector Location)
+{
+	if (BreakGlassSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, BreakGlassSound, Location, BreakGlassVolume);
+	}
+}
+
+// [POTION-021] Q 투척 굴림음의 로컬 재생 상태를 모든 클라이언트에서 동일하게 전환한다.
+void APotionItem::MulticastSetRollingSoundEnabled_Implementation(bool bEnabled)
+{
+	bRollingSoundEnabled = bEnabled;
+	RollingBelowSpeedTime = 0.0f;
+
+	if (!bEnabled && RollingAudioComponent)
+	{
+		RollingAudioComponent->Stop();
+	}
 }

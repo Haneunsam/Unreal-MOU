@@ -1,9 +1,12 @@
 #include "Item/ItemDrone.h"
 #include "Base/PackageBase.h"
+#include "Components/AudioComponent.h"
 #include "Components/CarryingComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "Net/UnrealNetwork.h"
+#include "Sound/SoundBase.h"
+#include "UObject/ConstructorHelpers.h"
 
 AItemDrone::AItemDrone()
 {
@@ -18,6 +21,24 @@ AItemDrone::AItemDrone()
 	PackageHoldPoint = CreateDefaultSubobject<USceneComponent>(TEXT("PackageHoldPoint"));
 	PackageHoldPoint->SetupAttachment(RootComponent);
 	PackageHoldPoint->SetRelativeLocation(FVector(0.0f, 0.0f, 50.0f));
+
+	// 드론 본체 위치에서 재생되는 3D 루프 사운드. SoundWave의 Looping 설정을 그대로 사용한다.
+	DroneLoopAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("DroneLoopAudio"));
+	DroneLoopAudio->SetupAttachment(RootComponent);
+	DroneLoopAudio->bAutoActivate = false;
+	DroneLoopAudio->bAllowSpatialization = true;
+	DroneLoopAudio->bOverrideAttenuation = true;
+	DroneLoopAudio->AttenuationOverrides.bAttenuate = true;
+	DroneLoopAudio->AttenuationOverrides.AttenuationShape = EAttenuationShape::Sphere;
+	DroneLoopAudio->AttenuationOverrides.AttenuationShapeExtents = FVector(200.0f, 0.0f, 0.0f);
+	DroneLoopAudio->AttenuationOverrides.FalloffDistance = 1800.0f;
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> DroneSoundAsset(
+		TEXT("/Game/04_JJO/Sound/SFX_Drone.SFX_Drone"));
+	if (DroneSoundAsset.Succeeded())
+	{
+		DroneLoopAudio->SetSound(DroneSoundAsset.Object);
+	}
 }
 
 void AItemDrone::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -31,7 +52,28 @@ void AItemDrone::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifeti
 
 void AItemDrone::OnRep_IsDeployed()
 {
-	// 클라이언트에서 배치 상태 변경 시의 훅 (현재 특별 처리는 없음)
+	UpdateDroneLoopSound();
+}
+
+// [DRONE-013] 배치된 동안에만 드론 위치에서 루프 사운드를 재생한다.
+void AItemDrone::UpdateDroneLoopSound()
+{
+	if (!DroneLoopAudio || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	if (bIsDeployed)
+	{
+		if (!DroneLoopAudio->IsPlaying())
+		{
+			DroneLoopAudio->Play();
+		}
+	}
+	else if (DroneLoopAudio->IsPlaying())
+	{
+		DroneLoopAudio->Stop();
+	}
 }
 
 // [DRONE-012] 후보 오프셋 중 플레이어에서 경로가 뚫린 첫 위치를 골라 반환.
@@ -237,6 +279,7 @@ void AItemDrone::DeployAndFollow(ACharacter* User)
 	// 배치 상태 및 팔로우 대상 설정.
 	FollowTarget = User;
 	bIsDeployed = true;
+	UpdateDroneLoopSound();
 
 	// 목표 위치 캐시 초기화 (다음 Tick에서 현재 플레이어 위치 기준으로 새로 잡도록)
 	bHasCachedFollowBase = false;

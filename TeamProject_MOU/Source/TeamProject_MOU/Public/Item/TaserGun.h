@@ -5,6 +5,7 @@
 #include "TaserGun.generated.h"
 
 class USceneComponent;
+class USoundBase;
 
 /**
  * ATaserGun
@@ -37,6 +38,14 @@ public:
 	// 맞은 대상의 기절 지속 시간 (초)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Taser")
 	float StunDuration = 3.0f;
+
+	// 발사 시 총구 위치에서 재생할 테이저 효과음
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Taser|Audio")
+	TObjectPtr<USoundBase> FireSound;
+
+	// 테이저 발사음 볼륨
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Taser|Audio", meta = (ClampMin = "0.0"))
+	float FireSoundVolume = 1.0f;
 #pragma endregion
 
 #pragma region [TASER] 사용/발사
@@ -72,6 +81,10 @@ protected:
 	UFUNCTION(NetMulticast, Unreliable)
 	// [TASER-005] 발사 이펙트 훅 (전기 줄기 등). 시작/끝 지점 전달, 모든 클라 재생
 	void MulticastPlayFireEffect(FVector Start, FVector End, bool bHit);
+
+	// [TASER-011] 모든 클라이언트에서 총구 위치에 테이저 발사음을 재생한다.
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPlayFireSound();
 
 	// 블루프린트에서 실제 나이아가라/케이블 VFX를 붙이는 이벤트
 	UFUNCTION(BlueprintImplementableEvent, Category = "Taser|FX")
