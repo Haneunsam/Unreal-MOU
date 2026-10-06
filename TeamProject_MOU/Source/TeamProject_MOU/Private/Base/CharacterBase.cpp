@@ -432,20 +432,10 @@ void ACharacterBase::UpdateCharacterSpeed()
 
 	float TargetSpeed = GetCalculatedWalkSpeed();
 
-	if (AMainCharacter* MainChar = Cast<AMainCharacter>(this))
-	{
-		float MaxW = BaseAttribute->GetMaxWeight();
-		float WeightRatio = MaxW > 0.0f ? (BaseAttribute->GetCurrentWeight() / MaxW) : 0.0f;
-		if (MainChar->bIsSprinting && WeightRatio <= 1.3f)
-		{
-			TargetSpeed *= 2.0f;
-		}
-	}
-
 	BaseAttribute->SetMoveSpeed(TargetSpeed);
 	if (GetCharacterMovement())
 	{
-		GetCharacterMovement()->MaxWalkSpeed = TargetSpeed;
+		GetCharacterMovement()->MaxWalkSpeed = BaseAttribute->GetMoveSpeed();
 	}
 }
 
