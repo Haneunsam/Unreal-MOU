@@ -1,9 +1,12 @@
 #include "Item/ItemDrone.h"
 #include "Base/PackageBase.h"
+#include "Components/AudioComponent.h"
 #include "Components/CarryingComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "Net/UnrealNetwork.h"
+#include "Sound/SoundBase.h"
+#include "UObject/ConstructorHelpers.h"
 
 AItemDrone::AItemDrone()
 {
@@ -18,6 +21,24 @@ AItemDrone::AItemDrone()
 	PackageHoldPoint = CreateDefaultSubobject<USceneComponent>(TEXT("PackageHoldPoint"));
 	PackageHoldPoint->SetupAttachment(RootComponent);
 	PackageHoldPoint->SetRelativeLocation(FVector(0.0f, 0.0f, 50.0f));
+
+	// 드론 본체 위치에서 재생되는 3D 루프 사운드. SoundWave의 Looping 설정을 그대로 사용한다.
+	DroneLoopAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("DroneLoopAudio"));
+	DroneLoopAudio->SetupAttachment(RootComponent);
+	DroneLoopAudio->bAutoActivate = false;
+	DroneLoopAudio->bAllowSpatialization = true;
+	DroneLoopAudio->bOverrideAttenuation = true;
+	DroneLoopAudio->AttenuationOverrides.bAttenuate = true;
+	DroneLoopAudio->AttenuationOverrides.AttenuationShape = EAttenuationShape::Sphere;
+	DroneLoopAudio->AttenuationOverrides.AttenuationShapeExtents = FVector(200.0f, 0.0f, 0.0f);
+	DroneLoopAudio->AttenuationOverrides.FalloffDistance = 1800.0f;
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> DroneSoundAsset(
+		TEXT("/Game/04_JJO/Sound/SFX_Drone.SFX_Drone"));
+	if (DroneSoundAsset.Succeeded())
+	{
+		DroneLoopAudio->SetSound(DroneSoundAsset.Object);
+	}
 }
 
 void AItemDrone::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -31,7 +52,28 @@ void AItemDrone::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifeti
 
 void AItemDrone::OnRep_IsDeployed()
 {
-	// 클라이언트에서 배치 상태 변경 시의 훅 (현재 특별 처리는 없음)
+	UpdateDroneLoopSound();
+}
+
+// [DRONE-013] 배치된 동안에만 드론 위치에서 루프 사운드를 재생한다.
+void AItemDrone::UpdateDroneLoopSound()
+{
+	if (!DroneLoopAudio || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	if (bIsDeployed)
+	{
+		if (!DroneLoopAudio->IsPlaying())
+		{
+			DroneLoopAudio->Play();
+		}
+	}
+	else if (DroneLoopAudio->IsPlaying())
+	{
+		DroneLoopAudio->Stop();
+	}
 }
 
 // [DRONE-012] 후보 오프셋 중 플레이어에서 경로가 뚫린 첫 위치를 골라 반환.
@@ -79,7 +121,7 @@ FVector AItemDrone::ChooseFollowOffset() const
 	return TargetTransform.TransformPosition(FollowOffset);
 }
 
-// [DRONE-004] 팔로우 목표 위치 계산
+// [DRONE-004] 팔로우 목표 위치 계산. 차량 탑승 중에는 부착된 부모 액터의 이동도 추적한다.
 FVector AItemDrone::CalcTargetLocation()
 {
 	if (!FollowTarget)
@@ -88,8 +130,16 @@ FVector AItemDrone::CalcTargetLocation()
 	}
 
 	// 플레이어가 이동 중일 때만 베이스 목표 위치를 갱신한다(막힌 방향은 뚫린 후보로 자동 우회).
-	// 정지 중(이동값 0)이면 마지막 베이스 위치를 그대로 유지 → 카메라만 돌려도 드론이 안 따라 돈다.
-	const bool bIsMoving = FollowTarget->GetVelocity().Size2D() > MoveThreshold;
+	// 차량 좌석에 부착되면 CharacterMovement가 비활성화되어 캐릭터 속도는 0이 되므로,
+	// 부착 부모(차량)의 속도도 함께 검사해야 탑승 중인 플레이어를 계속 따라갈 수 있다.
+	FVector FollowVelocity = FollowTarget->GetVelocity();
+	if (const AActor* AttachParent = FollowTarget->GetAttachParentActor())
+	{
+		FollowVelocity = AttachParent->GetVelocity();
+	}
+
+	// 플레이어와 부모가 모두 정지 중이면 마지막 베이스 위치를 유지해 카메라 회전만으로 드론이 돌지 않게 한다.
+	const bool bIsMoving = FollowVelocity.Size2D() > MoveThreshold;
 
 	if (bIsMoving || !bHasCachedFollowBase)
 	{
@@ -132,12 +182,29 @@ void AItemDrone::Tick(float DeltaTime)
 
 	BobbingPhase += DeltaTime * BobbingSpeed;
 
-	const FVector TargetLoc = CalcTargetLocation();
-	const FVector NewLoc = FMath::VInterpTo(GetActorLocation(), TargetLoc, DeltaTime, FollowInterpSpeed);
+	// 차량 급가속이나 플레이어 순간이동 등으로 너무 멀어진 경우에는 오래 추격하지 않고 즉시 복귀한다.
+	const bool bShouldTeleport = TeleportDistance > 0.0f
+		&& FVector::DistSquared(GetActorLocation(), FollowTarget->GetActorLocation())
+			> FMath::Square(TeleportDistance);
+	if (bShouldTeleport)
+	{
+		// 정지 중 캐시가 이전 위치를 가리킬 수 있으므로 현재 플레이어 기준 목표 위치를 다시 계산한다.
+		bHasCachedFollowBase = false;
+	}
 
-	// bSweep=true: 목표(오른쪽 뒤)로 가는 경로에 벽/오브젝트가 있으면 그 앞에서 막힌다(뚫기 방지).
-	// 장애물이 사라지면 매 프레임 다시 목표로 VInterp하므로 자연히 원위치(오른쪽 뒤)로 복귀한다.
-	SetActorLocation(NewLoc, /*bSweep=*/true);
+	const FVector TargetLoc = CalcTargetLocation();
+	if (bShouldTeleport)
+	{
+		SetActorLocation(TargetLoc, /*bSweep=*/false, nullptr, ETeleportType::TeleportPhysics);
+	}
+	else
+	{
+		const FVector NewLoc = FMath::VInterpTo(GetActorLocation(), TargetLoc, DeltaTime, FollowInterpSpeed);
+
+		// bSweep=true: 목표(오른쪽 뒤)로 가는 경로에 벽/오브젝트가 있으면 그 앞에서 막힌다(뚫기 방지).
+		// 장애물이 사라지면 매 프레임 다시 목표로 VInterp하므로 자연히 원위치(오른쪽 뒤)로 복귀한다.
+		SetActorLocation(NewLoc, /*bSweep=*/true);
+	}
 
 	// 드론이 플레이어를 바라보도록 회전 (수평만). 실제 위치는 sweep으로 막혔을 수 있으니 현재 위치 사용.
 	const FVector CurrentLoc = GetActorLocation();
@@ -237,6 +304,7 @@ void AItemDrone::DeployAndFollow(ACharacter* User)
 	// 배치 상태 및 팔로우 대상 설정.
 	FollowTarget = User;
 	bIsDeployed = true;
+	UpdateDroneLoopSound();
 
 	// 목표 위치 캐시 초기화 (다음 Tick에서 현재 플레이어 위치 기준으로 새로 잡도록)
 	bHasCachedFollowBase = false;

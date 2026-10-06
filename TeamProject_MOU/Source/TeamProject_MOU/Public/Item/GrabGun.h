@@ -8,6 +8,7 @@ class USceneComponent;
 class UStaticMeshComponent;
 class USphereComponent;
 class UPrimitiveComponent;
+class USoundBase;
 class ACharacterBase;
 class UGrabFollowComponent;
 
@@ -166,6 +167,20 @@ protected:
 	float TriggerPullAngle = 24.0f;
 #pragma endregion
 
+#pragma region [GRAB] 사운드
+	// 집게가 앞으로 펼쳐질 때 재생하는 원본 사운드다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GrabGun|Audio")
+	TObjectPtr<USoundBase> ExtendSound;
+
+	// 집게가 돌아올 때 재생하는 역재생 사운드다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GrabGun|Audio")
+	TObjectPtr<USoundBase> RetractSound;
+
+	// 그래버 구동음의 공통 볼륨이다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GrabGun|Audio", meta = (ClampMin = "0.0"))
+	float LinkageSoundVolume = 1.0f;
+#pragma endregion
+
 #pragma region [GRAB] 사용/발사 (WeaponItemBase 훅)
 	// GRAB-001 발사 override: 잡고 있으면 놓기, 아니면 트레이스해서 잡기 (재발사 토글)
 	// [GRAB-001] 서버에서 무기 사용과 발사 처리
@@ -210,6 +225,10 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "GrabGun|FX")
 	// [GRAB-024] BP에서 구현하는 발사 연출 이벤트
 	void OnFireEffect(FVector Start, FVector End, bool bHit);
+
+	UFUNCTION(NetMulticast, Unreliable)
+	// [GRAB-035] 모든 클라이언트에서 전개 또는 회수 사운드를 총구 위치에 재생
+	void MulticastPlayLinkageSound(bool bRetracting);
 #pragma endregion
 
 private:

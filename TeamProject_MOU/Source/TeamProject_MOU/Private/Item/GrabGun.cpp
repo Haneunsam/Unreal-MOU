@@ -10,7 +10,9 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Sound/SoundBase.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "DrawDebugHelpers.h" // [DEBUG-GRAB] 확인용 임시
@@ -64,6 +66,20 @@ AGrabGun::AGrabGun()
 
 	MaxDurability = 100.0f;
 	CurrentDurability = MaxDurability;
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> ExtendSoundFinder(
+		TEXT("/Game/04_JJO/Sound/GrabGun/SFX_GrabGun_Extend.SFX_GrabGun_Extend"));
+	if (ExtendSoundFinder.Succeeded())
+	{
+		ExtendSound = ExtendSoundFinder.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> RetractSoundFinder(
+		TEXT("/Game/04_JJO/Sound/GrabGun/SFX_GrabGun_Retract.SFX_GrabGun_Retract"));
+	if (RetractSoundFinder.Succeeded())
+	{
+		RetractSound = RetractSoundFinder.Object;
+	}
 
 	// 루트(MeshComponent) = body_shell 총몸. ItemBase의 물리/줍기/충돌이 이 메시 기준이라 여기 둔다.
 	// 링크·집게가 전부 이 자식이라, 루트를 돌리면 총 전체가 같이 돌아간다.
@@ -546,6 +562,7 @@ void AGrabGun::Tick(float DeltaTime)
 				SetJawColliderActive(false);
 				TargetExtendAlpha = 0.0f;
 				bPulling = true;
+				MulticastPlayLinkageSound(true);
 				NextAlpha = CurrentExtendAlpha;
 				ForceNetUpdate();
 			}
@@ -569,6 +586,7 @@ void AGrabGun::Tick(float DeltaTime)
 			SetJawColliderActive(false);
 			TargetExtendAlpha = 0.0f; // 다시 접힘
 			bPulling = true;          // 접힘 완료 시 잠금해제 되도록 pulling 처리(대상 없음)
+			MulticastPlayLinkageSound(true);
 		}
 	}
 }
@@ -593,6 +611,7 @@ void AGrabGun::Fire()
 	TargetExtendAlpha = 1.0f;
 	bGrabArmed = true;
 	SetJawColliderActive(true);
+	MulticastPlayLinkageSound(false);
 
 	// 사용자 이동+카메라 잠금 (아이템 사용~완전히 당겨질 때까지)
 	SetOwnerInputLocked(true);
@@ -694,6 +713,7 @@ void AGrabGun::GrabTarget(ACharacterBase* Target)
 	// 대상은 집게에 attach돼 있어 링크가 접히면 사용자 쪽으로 딸려온다.
 	bPulling = true;
 	TargetExtendAlpha = 0.0f;
+	MulticastPlayLinkageSound(true);
 
 	// 잡기 성공 시에만 내구도 소모 (ShouldConsumeUseOnFire=false라 여기서 수동 차감)
 	if (CurrentDurability > 0.0f)
@@ -928,4 +948,17 @@ void AGrabGun::Throw_Implementation(FVector ThrowVelocity, AActor* Thrower)
 void AGrabGun::MulticastPlayFireEffect_Implementation(FVector Start, FVector End, bool bHit)
 {
 	OnFireEffect(Start, End, bHit);
+}
+
+// [GRAB-035] 모든 클라이언트에서 전개 또는 회수 사운드를 총구 위치에 재생
+void AGrabGun::MulticastPlayLinkageSound_Implementation(bool bRetracting)
+{
+	USoundBase* SoundToPlay = bRetracting ? RetractSound : ExtendSound;
+	if (!SoundToPlay)
+	{
+		return;
+	}
+
+	const FVector SoundLocation = MuzzlePoint ? MuzzlePoint->GetComponentLocation() : GetActorLocation();
+	UGameplayStatics::PlaySoundAtLocation(this, SoundToPlay, SoundLocation, LinkageSoundVolume);
 }

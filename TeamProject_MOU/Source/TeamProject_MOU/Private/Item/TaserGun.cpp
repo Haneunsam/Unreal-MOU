@@ -8,6 +8,9 @@
 #include "TimerManager.h"
 #include "AbilitySystemBlueprintLibrary.h" // SendGameplayEventToActor
 #include "DrawDebugHelpers.h" // [DEBUG-TASER] 확인용 임시
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+#include "UObject/ConstructorHelpers.h"
 
 // [TASER-008] 초기 컴포넌트와 기본값 설정
 ATaserGun::ATaserGun()
@@ -19,6 +22,13 @@ ATaserGun::ATaserGun()
 	// 총구 지점 컴포넌트 (VFX 시작 위치용). BP에서 메시 총구로 이동시킴
 	MuzzlePoint = CreateDefaultSubobject<USceneComponent>(TEXT("MuzzlePoint"));
 	MuzzlePoint->SetupAttachment(MeshComponent);
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> FireSoundFinder(
+		TEXT("/Game/04_JJO/Sound/SFX_TazerGun.SFX_TazerGun"));
+	if (FireSoundFinder.Succeeded())
+	{
+		FireSound = FireSoundFinder.Object;
+	}
 }
 
 // TASER-001 발사 override: 카메라 조준 방향으로 피아식별 트레이스 + VFX
@@ -79,6 +89,7 @@ void ATaserGun::Fire()
 	// VFX 시작점은 총구(MuzzlePoint), 끝점은 트레이스 도착지점(히트면 히트, 아니면 최대거리)
 	const FVector FxStart = MuzzlePoint ? MuzzlePoint->GetComponentLocation() : TraceStart;
 	const FVector FxEnd = Hit.GetActor() ? Hit.ImpactPoint : TraceEnd;
+	MulticastPlayFireSound();
 	MulticastPlayFireEffect(FxStart, FxEnd, bHit);
 
 	// 발사 쿨다운 동안 "사용 중" 유지 → FireCooldown 후 슬롯 변경 다시 허용 WEAPON-017
@@ -140,4 +151,16 @@ void ATaserGun::ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResult
 void ATaserGun::MulticastPlayFireEffect_Implementation(FVector Start, FVector End, bool bHit)
 {
 	OnFireEffect(Start, End, bHit);
+}
+
+// [TASER-011] 서버의 발사 판정을 모든 클라이언트에 전달해 총구 위치에서 효과음을 재생한다.
+void ATaserGun::MulticastPlayFireSound_Implementation()
+{
+	if (!FireSound)
+	{
+		return;
+	}
+
+	const FVector SoundLocation = MuzzlePoint ? MuzzlePoint->GetComponentLocation() : GetActorLocation();
+	UGameplayStatics::PlaySoundAtLocation(this, FireSound, SoundLocation, FireSoundVolume);
 }

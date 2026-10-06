@@ -5,6 +5,7 @@
 #include "ItemDrone.generated.h"
 
 class USceneComponent;
+class UAudioComponent;
 class ACharacter;
 
 // ---------------------------------------------------------
@@ -41,6 +42,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<USceneComponent> PackageHoldPoint;
 
+	// 드론이 배치된 동안 위치를 따라다니며 루프 사운드를 재생한다.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UAudioComponent> DroneLoopAudio;
+
 	// ---------------------------------------------------------
 	// [배치 / 팔로우 상태]
 	// ---------------------------------------------------------
@@ -76,6 +81,10 @@ public:
 	// (정지 중 카메라만 돌려도 드론이 따라 돌지 않게 해서, 정면에서 상호작용 가능하도록)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Follow")
 	float MoveThreshold = 10.0f;
+
+	// 플레이어와 이 거리 이상 벌어지면 보간 이동 대신 플레이어 주변 목표 위치로 즉시 이동한다. 0이면 비활성.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Follow", meta = (ClampMin = "0.0", Units = "cm"))
+	float TeleportDistance = 1500.0f;
 
 	// ---------------------------------------------------------
 	// [보관 상태]
@@ -149,12 +158,15 @@ private:
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastAttachToDrone(AItemBase* Item);
 
-	// [DRONE-004] 팔로우 목표 위치 계산 (선택된 오프셋 + 보빙). 서버 Tick에서만 호출.
+	// [DRONE-004] 팔로우 목표 위치 계산. 차량 등 부모 액터에 부착된 플레이어는 부모 속도까지 반영한다.
 	FVector CalcTargetLocation();
 
 	// [DRONE-012] 플레이어에서 각 후보 오프셋 지점까지 경로가 뚫려 있는지 검사해, 따라갈 오프셋을 고른다.
 	// 우선순위: 오른쪽뒤(기본) -> 왼쪽뒤 -> 정뒤 -> 오른쪽옆 -> 왼쪽옆. 다 막히면 기본값 반환.
 	FVector ChooseFollowOffset() const;
+
+	// [DRONE-013] 배치 상태에 맞춰 드론 루프 사운드를 재생하거나 정지한다.
+	void UpdateDroneLoopSound();
 
 	// 보빙 위상 누적용
 	float BobbingPhase = 0.0f;

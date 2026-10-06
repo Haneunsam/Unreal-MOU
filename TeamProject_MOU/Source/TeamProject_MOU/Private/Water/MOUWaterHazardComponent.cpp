@@ -58,6 +58,7 @@ void UMOUWaterHazardComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	OverlappingCharacters.Empty();
 	OriginalSpeedMap.Empty();
 	ActiveSlowEffectMap.Empty();
+	SprintBlockedCharacters.Empty();
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -69,25 +70,51 @@ void UMOUWaterHazardComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 	DOREPLIFETIME(UMOUWaterHazardComponent, bIsHazardActive);
 }
 
+// [WATERHAZARD-002] 건조 영역 경계를 감시하고 감속 및 서버 대미지 타이머를 동기화한다.
 void UMOUWaterHazardComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (bIsHazardActive)
+	bool bHasAffectedCharacter = false;
+	for (int32 Index = OverlappingCharacters.Num() - 1; Index >= 0; --Index)
 	{
-		for (TWeakObjectPtr<ACharacter>& CharPtr : OverlappingCharacters)
+		ACharacter* Char = OverlappingCharacters[Index].Get();
+		if (!Char)
 		{
-			if (ACharacter* Char = CharPtr.Get())
+			OverlappingCharacters.RemoveAt(Index);
+			continue;
+		}
+		if (!ShouldAffectCharacter(Char))
+		{
+			RestoreCharacterMovement(Char);
+			continue;
+		}
+		bHasAffectedCharacter = true;
+		ApplySlowToCharacter(Char);
+		if (UCharacterMovementComponent* MoveComp = Char->GetCharacterMovement())
+		{
+			if (const float* BaseSpeed = OriginalSpeedMap.Find(Char))
 			{
-				if (UCharacterMovementComponent* MoveComp = Char->GetCharacterMovement())
+				const float MaxAllowedSpeed = *BaseSpeed * SlowSpeedMultiplier;
+				if (MoveComp->MaxWalkSpeed > MaxAllowedSpeed + 1.0f)
 				{
-					float BaseSpeed = OriginalSpeedMap.Contains(Char) ? OriginalSpeedMap[Char] : 300.0f;
-					float MaxAllowedSpeed = BaseSpeed * SlowSpeedMultiplier;
-					if (MoveComp->MaxWalkSpeed > MaxAllowedSpeed + 1.0f)
-					{
-						MoveComp->MaxWalkSpeed = MaxAllowedSpeed;
-					}
+					MoveComp->MaxWalkSpeed = MaxAllowedSpeed;
 				}
+			}
+		}
+	}
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (!bHasAffectedCharacter)
+			{
+				World->GetTimerManager().ClearTimer(DamageTimerHandle);
+			}
+			else if (!World->GetTimerManager().IsTimerActive(DamageTimerHandle))
+			{
+				World->GetTimerManager().SetTimer(DamageTimerHandle, this,
+					&UMOUWaterHazardComponent::OnDamageTick, DamageInterval, true);
 			}
 		}
 	}
@@ -265,9 +292,22 @@ void UMOUWaterHazardComponent::OnRep_IsHazardActive()
 	}
 }
 
+// [WATERHAZARD-001] 활성 상태와 해당 물의 제외 볼륨을 기준으로 효과 적용 여부를 판정한다.
+bool UMOUWaterHazardComponent::ShouldAffectCharacter(const ACharacter* Character) const
+{
+	if (!Character || !bIsHazardActive)
+	{
+		return false;
+	}
+	const AWaterBody* WaterBody = Cast<AWaterBody>(GetOwner());
+	const UWaterBodyComponent* WaterComponent = WaterBody ? WaterBody->GetWaterBodyComponent() : nullptr;
+	return !WaterComponent || !WaterComponent->IsWorldLocationInExclusionVolume(Character->GetActorLocation());
+}
+
+// [WATERHAZARD-003] 제외 영역 밖의 캐릭터에게 감속을 한 번 적용한다.
 void UMOUWaterHazardComponent::ApplySlowToCharacter(ACharacter* Character)
 {
-	if (!Character)
+	if (!ShouldAffectCharacter(Character) || OriginalSpeedMap.Contains(Character))
 	{
 		return;
 	}
@@ -292,6 +332,7 @@ void UMOUWaterHazardComponent::ApplySlowToCharacter(ACharacter* Character)
 		if (BlockSprintTag.IsValid())
 		{
 			ASC->AddLooseGameplayTag(BlockSprintTag);
+			SprintBlockedCharacters.Add(Character);
 
 			static const FGameplayTag SprintTag = FGameplayTag::RequestGameplayTag(FName("Ability.Player.Sprint"), false);
 			if (SprintTag.IsValid())
@@ -312,9 +353,11 @@ void UMOUWaterHazardComponent::ApplySlowToCharacter(ACharacter* Character)
 	}
 }
 
+// [WATERHAZARD-004] 이 컴포넌트가 적용한 감속과 달리기 차단만 해제한다.
 void UMOUWaterHazardComponent::RestoreCharacterMovement(ACharacter* Character)
 {
-	if (!Character)
+	if (!Character || (!OriginalSpeedMap.Contains(Character) && !ActiveSlowEffectMap.Contains(Character)
+		&& !SprintBlockedCharacters.Contains(Character)))
 	{
 		return;
 	}
@@ -322,7 +365,7 @@ void UMOUWaterHazardComponent::RestoreCharacterMovement(ACharacter* Character)
 	if (UAbilitySystemComponent* ASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Character))
 	{
 		static const FGameplayTag BlockSprintTag = FGameplayTag::RequestGameplayTag(FName("Ability.Player.Block.Sprint"), false);
-		if (BlockSprintTag.IsValid())
+		if (BlockSprintTag.IsValid() && SprintBlockedCharacters.Contains(Character))
 		{
 			ASC->RemoveLooseGameplayTag(BlockSprintTag);
 		}
@@ -330,9 +373,10 @@ void UMOUWaterHazardComponent::RestoreCharacterMovement(ACharacter* Character)
 		if (FActiveGameplayEffectHandle* Handle = ActiveSlowEffectMap.Find(Character))
 		{
 			ASC->RemoveActiveGameplayEffect(*Handle);
-			ActiveSlowEffectMap.Remove(Character);
 		}
 	}
+	ActiveSlowEffectMap.Remove(Character);
+	SprintBlockedCharacters.Remove(Character);
 
 	UCharacterMovementComponent* MoveComp = Character->GetCharacterMovement();
 	if (MoveComp)
@@ -343,11 +387,13 @@ void UMOUWaterHazardComponent::RestoreCharacterMovement(ACharacter* Character)
 			OriginalSpeedMap.Remove(Character);
 		}
 	}
+	OriginalSpeedMap.Remove(Character);
 }
 
+// [WATERHAZARD-005] 서버에서 제외 영역을 재확인한 뒤 물 대미지를 적용한다.
 void UMOUWaterHazardComponent::ApplyDamageToCharacter(ACharacter* Character)
 {
-	if (!Character || !GetOwner() || !GetOwner()->HasAuthority())
+	if (!ShouldAffectCharacter(Character) || !GetOwner() || !GetOwner()->HasAuthority())
 	{
 		return;
 	}

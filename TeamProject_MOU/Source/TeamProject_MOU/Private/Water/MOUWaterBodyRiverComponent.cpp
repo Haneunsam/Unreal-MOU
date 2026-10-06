@@ -34,12 +34,12 @@ void UMOUWaterBodyRiverComponent::SetRiverWaterLevelZ(float NewWorldZ, bool bUse
 		}
 	}
 
-	// 화면에 보이는 물 표면은 SplineMeshComponent가 아니라 WaterZone이 각 워터바디를 캡처해서
+	// 화면에 보이는 물 표면은 SplineMeshComponent가 아니라 WaterZone이 각 워터바디를 캡처해
 	// 만드는 "Water Info Texture"를 샘플링해서 그려진다. 위치만 옮기고 이 텍스처를 갱신하라고
 	// 알려주지 않으면 액터는 움직여도 화면상 물은 예전 위치에 멈춰 보인다. 이 함수는 플래그만
 	// 세팅하고(무거운 작업 없음), 실제 재캡처는 WaterSubsystem이 프레임당 한 번만 처리한다.
 	MarkOwningWaterZoneForRebuild(EWaterZoneRebuildFlags::UpdateWaterInfoTexture);
-}
+} 
 
 void UMOUWaterBodyRiverComponent::AdjustRiverWaterLevel(float DeltaZ, bool bUserTriggered)
 {

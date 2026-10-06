@@ -1,15 +1,21 @@
 ﻿#include "Item/SprayItem.h"
 #include "Components/CarryingComponent.h"
+#include "Components/AudioComponent.h"
 #include "Components/DecalComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "StaticMeshResources.h"
 #include "Engine/World.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/AnimSequenceBase.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/MainCharacter.h"
+#include "TimerManager.h"
 #include "DrawDebugHelpers.h" // [DEBUG-SPRAY] 트레이스 시각화용 (디버그 끝나면 제거)
 
 // [SPRAY-000] 기본 분사 주기와 용량 설정.
@@ -24,6 +30,9 @@ ASprayItem::ASprayItem()
 	NozzleMesh->SetSimulatePhysics(false);
 	NozzleMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	NozzleMesh->SetGenerateOverlapEvents(false);
+	SprayAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("SprayAudioComponent"));
+	SprayAudioComponent->SetupAttachment(NozzleMesh);
+	SprayAudioComponent->bAutoActivate = false;
 }
 
 // [SPRAY-018] 노즐을 포함한 공통 바운딩박스 중심 보정을 사용하지 않는다.
@@ -58,6 +67,11 @@ void ASprayItem::BeginPlay()
 {
 	Super::BeginPlay();
 	if (NozzleMesh) NozzleRestLocation = NozzleMesh->GetRelativeLocation();
+	if (SprayAudioComponent && SprayLoopSound)
+	{
+		SprayAudioComponent->SetSound(SprayLoopSound);
+	}
+	UpdateSpraySound(bSpraying);
 }
 
 // [SPRAY-017] 분사 상태에 따라 노즐을 누르거나 기본 위치로 복귀시킨다.
@@ -115,31 +129,51 @@ void ASprayItem::OnUseReleased_Implementation()
 	else ServerSetSpraying(false);
 }
 
+// [SPRAY-021] 첫 습득 경로에서도 장착 경로와 동일하게 Idle 애니메이션을 시작한다.
+void ASprayItem::PickUp_Implementation(AActor* Picker)
+{
+	Super::PickUp_Implementation(Picker);
+	if (HasAuthority() && Picker)
+	{
+		MulticastPlaySprayAnimation(Picker, false);
+	}
+}
+
 // [SPRAY-004] 장착 시 서버 RPC 소유권 복원.
 void ASprayItem::OnEquipped_Implementation(AActor* Equipper)
 {
 	Super::OnEquipped_Implementation(Equipper);
 	if (HasAuthority()) SetOwner(Equipper);
+	HandleSprayAnimationState(Equipper, false);
 }
 
 // [SPRAY-005] 수납 시 분사 중지.
 void ASprayItem::OnUnequipped_Implementation(AActor* Equipper)
 {
 	if (HasAuthority()) SetSpraying(false);
+	StopSprayAnimation(Equipper);
 	Super::OnUnequipped_Implementation(Equipper);
 }
 
 // [SPRAY-006] 내려놓기 전에 분사 중지.
 void ASprayItem::Drop_Implementation(FVector Location, AActor* Dropper)
 {
-	if (HasAuthority()) SetSpraying(false);
+	if (HasAuthority())
+	{
+		SetSpraying(false);
+		MulticastStopSprayAnimation(Dropper ? Dropper : GetOwner());
+	}
 	Super::Drop_Implementation(Location, Dropper);
 }
 
 // [SPRAY-007] 던지기 전에 분사 중지.
 void ASprayItem::Throw_Implementation(FVector Velocity, AActor* Thrower)
 {
-	if (HasAuthority()) SetSpraying(false);
+	if (HasAuthority())
+	{
+		SetSpraying(false);
+		MulticastStopSprayAnimation(Thrower ? Thrower : GetOwner());
+	}
 	Super::Throw_Implementation(Velocity, Thrower);
 }
 
@@ -154,6 +188,28 @@ void ASprayItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifeti
 void ASprayItem::OnRep_Spraying()
 {
 	OnSprayStateChanged(bSpraying);
+	UpdateSpraySound(bSpraying);
+}
+
+// [SPRAY-028] 전용 서버를 제외한 각 클라이언트에서 분사 중에만 루프 사운드를 유지한다.
+void ASprayItem::UpdateSpraySound(bool bActive)
+{
+	if (!SprayAudioComponent || GetNetMode() == NM_DedicatedServer) return;
+	if (bActive)
+	{
+		if (SprayLoopSound && SprayAudioComponent->GetSound() != SprayLoopSound)
+		{
+			SprayAudioComponent->SetSound(SprayLoopSound);
+		}
+		if (SprayAudioComponent->GetSound() && !SprayAudioComponent->IsPlaying())
+		{
+			SprayAudioComponent->Play();
+		}
+	}
+	else if (SprayAudioComponent->IsPlaying())
+	{
+		SprayAudioComponent->Stop();
+	}
 }
 
 // [SPRAY-011] 서버에서 분사 시작/중지 요청 검증.
@@ -166,16 +222,139 @@ void ASprayItem::ServerSetSpraying_Implementation(bool bActive)
 void ASprayItem::SetSpraying(bool bActive)
 {
 	if (!HasAuthority()) return;
+	AMainCharacter* Holder = Cast<AMainCharacter>(GetOwner());
 	if (bActive)
 	{
-		AMainCharacter* Holder = Cast<AMainCharacter>(GetOwner());
 		UCarryingComponent* Carry = Holder ? Holder->FindComponentByClass<UCarryingComponent>() : nullptr;
 		if (!Holder || !Holder->CanAct() || !Carry || Carry->GetCarriedActor() != this || ConsumeUseCount <= 0) return;
 	}
 	if (bSpraying == bActive) return;
 	bSpraying = bActive;
 	OnRep_Spraying();
+	MulticastPlaySprayAnimation(Holder, bSpraying);
 	ForceNetUpdate();
+}
+
+// [SPRAY-022] 장착 캐릭터의 Idle/Press 애니메이션을 모든 클라이언트에서 동일하게 전환한다.
+void ASprayItem::MulticastPlaySprayAnimation_Implementation(AActor* Holder, bool bPressed)
+{
+	HandleSprayAnimationState(Holder, bPressed);
+}
+
+// [SPRAY-026] 광클릭 중에는 Press를 유지하고, 완전히 놓았을 때만 지연 후 Idle로 복귀한다.
+void ASprayItem::HandleSprayAnimationState(AActor* Holder, bool bPressed)
+{
+	SprayAnimationHolder = Holder;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(SprayIdleReturnTimer);
+	}
+
+	if (bPressed)
+	{
+		// 해제 지연 중 다시 눌렀다면 기존 Press를 그대로 유지해 시작 프레임 반복을 막는다.
+		if (bHasActiveSprayAnimation && bShowingPressAnimation)
+		{
+			return;
+		}
+		PlaySprayAnimation(Holder, true);
+		return;
+	}
+
+	// 처음 장착했거나 이미 Idle이라면 즉시 Idle을 보장하고 중복 재생은 하지 않는다.
+	if (!bHasActiveSprayAnimation)
+	{
+		PlaySprayAnimation(Holder, false);
+		return;
+	}
+	if (!bShowingPressAnimation)
+	{
+		return;
+	}
+
+	if (SprayAnimationReleaseDelay <= KINDA_SMALL_NUMBER)
+	{
+		PlayIdleAfterRelease();
+		return;
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			SprayIdleReturnTimer,
+			this,
+			&ASprayItem::PlayIdleAfterRelease,
+			SprayAnimationReleaseDelay,
+			false);
+	}
+}
+
+// [SPRAY-027] 짧은 입력 공백이 끝날 때 Press 몽타주를 한 번만 Idle로 전환한다.
+void ASprayItem::PlayIdleAfterRelease()
+{
+	if (SprayAnimationHolder.IsValid())
+	{
+		PlaySprayAnimation(SprayAnimationHolder.Get(), false);
+	}
+}
+
+// [SPRAY-023] 기존 시퀀스를 DefaultSlot 동적 몽타주로 만들어 장착 중 반복 재생한다.
+void ASprayItem::PlaySprayAnimation(AActor* Holder, bool bPressed)
+{
+	ACharacter* Character = Cast<ACharacter>(Holder);
+	UAnimInstance* AnimInstance = Character && Character->GetMesh()
+		? Character->GetMesh()->GetAnimInstance()
+		: nullptr;
+	UAnimSequenceBase* Animation = bPressed ? SprayPressAnimation : SprayIdleAnimation;
+	if (!AnimInstance || !Animation || SprayAnimationSlot.IsNone())
+	{
+		return;
+	}
+
+	if (ActiveSprayMontage.IsValid())
+	{
+		AnimInstance->Montage_Stop(SprayAnimationBlendTime, ActiveSprayMontage.Get());
+	}
+
+	ActiveSprayMontage = AnimInstance->PlaySlotAnimationAsDynamicMontage(
+		Animation,
+		SprayAnimationSlot,
+		SprayAnimationBlendTime,
+		SprayAnimationBlendTime,
+		1.0f,
+		MAX_int32);
+	if (ActiveSprayMontage.IsValid())
+	{
+		bHasActiveSprayAnimation = true;
+		bShowingPressAnimation = bPressed;
+	}
+}
+
+// [SPRAY-024] 스프레이 장착 해제·드롭·투척 시 모든 클라이언트의 스프레이 몽타주를 정지한다.
+void ASprayItem::MulticastStopSprayAnimation_Implementation(AActor* Holder)
+{
+	StopSprayAnimation(Holder);
+}
+
+// [SPRAY-025] 다른 DefaultSlot 몽타주를 건드리지 않고 이 스프레이가 시작한 몽타주만 정지한다.
+void ASprayItem::StopSprayAnimation(AActor* Holder)
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(SprayIdleReturnTimer);
+	}
+	ACharacter* Character = Cast<ACharacter>(Holder);
+	UAnimInstance* AnimInstance = Character && Character->GetMesh()
+		? Character->GetMesh()->GetAnimInstance()
+		: nullptr;
+	if (AnimInstance && ActiveSprayMontage.IsValid())
+	{
+		AnimInstance->Montage_Stop(SprayAnimationBlendTime, ActiveSprayMontage.Get());
+	}
+	ActiveSprayMontage.Reset();
+	SprayAnimationHolder.Reset();
+	bHasActiveSprayAnimation = false;
+	bShowingPressAnimation = false;
 }
 
 // [SPRAY-013] 표면 검사 후 반지름 밖에서만 새 데칼 생성.
@@ -284,6 +463,8 @@ void ASprayItem::MulticastStamp_Implementation(UPrimitiveComponent* Surface, FVe
 // [SPRAY-015] 소진 및 레벨 종료 시 분사 이펙트 정리.
 void ASprayItem::EndPlay(const EEndPlayReason::Type Reason)
 {
+	StopSprayAnimation(GetOwner() ? GetOwner() : GetAttachParentActor());
+	UpdateSpraySound(false);
 	OnSprayStateChanged(false);
 	Super::EndPlay(Reason);
 }
