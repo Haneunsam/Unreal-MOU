@@ -40,6 +40,7 @@
 #include "Ability/GA_Death.h"
 #include "Ability/GA_Knockdown.h"
 #include "Ability/GA_HitReaction.h"
+#include "AbilitySystemBlueprintLibrary.h"
 #include "TeamProject_MOUPlayerController.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
@@ -137,9 +138,21 @@ AMainCharacter::AMainCharacter()
 	FirstPersonShadowMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 }
 
+// [PLAYER-000] 서버에서 모든 플레이어 Pawn에 Character.Player 태그를 보장한다.
 void AMainCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (HasAuthority() && AbilitySystemComponent)
+	{
+		const FGameplayTag PlayerTag = FGameplayTag::RequestGameplayTag(TEXT("Character.Player"), false);
+		if (PlayerTag.IsValid() && !AbilitySystemComponent->HasMatchingGameplayTag(PlayerTag))
+		{
+			FGameplayTagContainer PlayerTags;
+			PlayerTags.AddTag(PlayerTag);
+			UAbilitySystemBlueprintLibrary::AddLooseGameplayTags(this, PlayerTags, true);
+		}
+	}
 
 	// 1인칭 그림자/반사용 프록시 메시 설정 (로컬 플레이어만 활성화)
 	if (IsLocallyControlled())
