@@ -16,6 +16,7 @@ UNPCTargetLockComponent::UNPCTargetLockComponent()
 	RequiredTargetTag = FGameplayTag::RequestGameplayTag(TEXT("Character.Player"), false);
 }
 
+// [NPCTARGET-000] Perception 이벤트를 연결하고 이미 시야에 들어온 타깃까지 즉시 검색한다.
 void UNPCTargetLockComponent::InitializeTargetLock(
 	UAIPerceptionComponent* InPerceptionComponent,
 	ENPCTargetSelectionPolicy InSelectionPolicy,
@@ -39,6 +40,11 @@ void UNPCTargetLockComponent::InitializeTargetLock(
 
 	SelectionPolicy = InSelectionPolicy;
 	TargetLoseGraceTime = FMath::Max(0.0f, InTargetLoseGraceTime);
+
+	if (GetOwner() && GetOwner()->HasAuthority() && PerceptionComponent)
+	{
+		SetCurrentTarget(FindBestPerceivedTarget());
+	}
 }
 
 void UNPCTargetLockComponent::ClearTarget()

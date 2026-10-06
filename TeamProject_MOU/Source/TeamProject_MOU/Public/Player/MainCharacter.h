@@ -24,6 +24,7 @@ public:
 	AMainCharacter();
 
 protected:
+	// [PLAYER-000] 서버에서 모든 플레이어 Pawn에 Character.Player 태그를 보장한다.
 	virtual void BeginPlay() override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void PawnClientRestart() override;

@@ -26,7 +26,7 @@ class TEAMPROJECT_MOU_API UNPCTargetLockComponent : public UActorComponent
 public:
 	UNPCTargetLockComponent();
 
-	/** 사용할 Perception 컴포넌트와 NPCData의 타깃 정책을 적용한다. */
+	// [NPCTARGET-000] Perception 이벤트를 연결하고 이미 시야에 들어온 타깃까지 즉시 검색한다.
 	UFUNCTION(BlueprintCallable, Category = "NPC|Perception")
 	void InitializeTargetLock(
 		UAIPerceptionComponent* InPerceptionComponent,
