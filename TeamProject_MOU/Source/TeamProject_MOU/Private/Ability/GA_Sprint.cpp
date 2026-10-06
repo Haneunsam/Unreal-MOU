@@ -1,5 +1,6 @@
 #include "Ability/GA_Sprint.h"
 #include "Base/CharacterBase.h"
+#include "Player/MainCharacter.h"
 #include "Base/BaseAttributeSet.h"
 #include "AbilitySystemComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -12,9 +13,11 @@ UGA_Sprint::UGA_Sprint()
 	FGameplayTag SprintTag = FGameplayTag::RequestGameplayTag(FName("Ability.Player.Sprint"), false);
 	if (SprintTag.IsValid())
 	{
-		FGameplayTagContainer AssetTagsContainer;
-		AssetTagsContainer.AddTag(SprintTag);
-		SetAssetTags(AssetTagsContainer);
+		FGameplayTagContainer SprintTagContainer;
+		SprintTagContainer.AddTag(SprintTag);
+		SetAssetTags(SprintTagContainer);
+		AbilityTags.AddTag(SprintTag);
+		ActivationOwnedTags.AddTag(SprintTag);
 	}
 
 	FGameplayTag BlockSprintTag = FGameplayTag::RequestGameplayTag(FName("Ability.Player.Block.Sprint"), false);
@@ -109,22 +112,34 @@ void UGA_Sprint::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const 
 	UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo();
 	ACharacterBase* Char = GetCharacterFromActorInfo();
 
+	if (AMainCharacter* MainChar = Cast<AMainCharacter>(Char))
+	{
+		MainChar->bIsSprinting = true;
+	}
+
 	if (ASC && SprintEffectClass)
 	{
 		FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
 		Context.AddSourceObject(Char);
 		ActiveSprintEffectHandle = ASC->ApplyGameplayEffectToSelf(SprintEffectClass.GetDefaultObject(), 1.0f, Context);
 	}
-	else if (UBaseAttributeSet* Attr = GetBaseAttributeSet())
+	else if (Char)
 	{
-		if (HasAuthority(&ActivationInfo) && Char)
+		if (Char->HasAuthority())
 		{
 			float BaseWalkSpeed = Char->GetCalculatedWalkSpeed();
-			Attr->SetMoveSpeed(BaseWalkSpeed * SprintSpeedMultiplier);
+			if (UBaseAttributeSet* Attr = GetBaseAttributeSet())
+			{
+				Attr->SetMoveSpeed(BaseWalkSpeed * SprintSpeedMultiplier);
+			}
 			if (Char->GetCharacterMovement())
 			{
 				Char->GetCharacterMovement()->MaxWalkSpeed = BaseWalkSpeed * SprintSpeedMultiplier;
 			}
+		}
+		else if (Char->GetCharacterMovement())
+		{
+			Char->GetCharacterMovement()->MaxWalkSpeed = Char->GetCalculatedWalkSpeed() * SprintSpeedMultiplier;
 		}
 	}
 }
@@ -139,16 +154,21 @@ void UGA_Sprint::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGame
 		ASC->RemoveActiveGameplayEffect(ActiveSprintEffectHandle);
 		ActiveSprintEffectHandle.Invalidate();
 	}
-	else if (UBaseAttributeSet* Attr = GetBaseAttributeSet())
+
+	if (Char)
 	{
-		if (HasAuthority(&ActivationInfo) && Char)
+		if (AMainCharacter* MainChar = Cast<AMainCharacter>(Char))
 		{
-			float BaseWalkSpeed = Char->GetCalculatedWalkSpeed();
-			Attr->SetMoveSpeed(BaseWalkSpeed);
-			if (Char->GetCharacterMovement())
-			{
-				Char->GetCharacterMovement()->MaxWalkSpeed = BaseWalkSpeed;
-			}
+			MainChar->bIsSprinting = false;
+		}
+
+		if (Char->HasAuthority())
+		{
+			Char->UpdateCharacterSpeed();
+		}
+		else if (Char->GetCharacterMovement())
+		{
+			Char->GetCharacterMovement()->MaxWalkSpeed = Char->GetCalculatedWalkSpeed();
 		}
 	}
 

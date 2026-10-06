@@ -1333,8 +1333,16 @@ void AMainCharacter::StopSprinting()
 		}
 	}
 
-	if (!HasAuthority())
+	if (HasAuthority())
 	{
+		UpdateCharacterSpeed();
+	}
+	else
+	{
+		if (GetCharacterMovement())
+		{
+			GetCharacterMovement()->MaxWalkSpeed = GetCalculatedWalkSpeed();
+		}
 		ServerSetSprinting(false);
 	}
 }
@@ -1346,6 +1354,7 @@ void AMainCharacter::ServerSetSprinting_Implementation(bool bSprint)
 		if (!CanMove() || bIsPushingMode)
 		{
 			bIsSprinting = false;
+			UpdateCharacterSpeed();
 			return;
 		}
 
@@ -1357,6 +1366,7 @@ void AMainCharacter::ServerSetSprinting_Implementation(bool bSprint)
 				if (Pkg->PackageType == EPackageType::Heavy)
 				{
 					bIsSprinting = false;
+					UpdateCharacterSpeed();
 					return;
 				}
 			}
@@ -1369,12 +1379,14 @@ void AMainCharacter::ServerSetSprinting_Implementation(bool bSprint)
 			if (MaxW > 0.0f && (BaseAttribute->GetCurrentWeight() / MaxW) > 1.3f)
 			{
 				bIsSprinting = false;
+				UpdateCharacterSpeed();
 				return;
 			}
 
 			if (BaseAttribute->GetStemina() <= 0.0f)
 			{
 				bIsSprinting = false;
+				UpdateCharacterSpeed();
 				return;
 			}
 		}
@@ -1404,6 +1416,7 @@ void AMainCharacter::ServerSetSprinting_Implementation(bool bSprint)
 				(ExhaustedTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(ExhaustedTag)))
 			{
 				bIsSprinting = false;
+				UpdateCharacterSpeed();
 				return;
 			}
 
@@ -1419,6 +1432,7 @@ void AMainCharacter::ServerSetSprinting_Implementation(bool bSprint)
 		}
 
 		bIsSprinting = true;
+		UpdateCharacterSpeed();
 	}
 	else
 	{
@@ -1436,6 +1450,8 @@ void AMainCharacter::ServerSetSprinting_Implementation(bool bSprint)
 				AbilitySystemComponent->CancelAbilities(&SprintTagContainer);
 			}
 		}
+
+		UpdateCharacterSpeed();
 	}
 }
 
@@ -2108,6 +2124,9 @@ void AMainCharacter::Knockdown()
 		return;
 	}
 
+	// 넉다운 시 달리기 즉시 강제 취소 및 속도 정상화
+	StopSprinting();
+
 	if (!HasAuthority())
 	{
 		ServerKnockdown();
@@ -2132,6 +2151,9 @@ void AMainCharacter::PlayHitReaction(float Duration)
 	{
 		return;
 	}
+
+	// 피격 시 달리기 즉시 강제 취소 및 속도 정상화
+	StopSprinting();
 
 	if (!HasAuthority())
 	{
