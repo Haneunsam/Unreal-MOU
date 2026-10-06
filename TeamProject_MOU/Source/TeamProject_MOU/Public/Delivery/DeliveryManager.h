@@ -104,6 +104,7 @@ private:
 	bool bCompletionBroadcast = false;
 	bool bPendingInitialized = false;
 
+	// [DELIVERY-000] 배달 맵에서 선택 목록을 읽고 스포너가 사용한 다음 영속 목록을 소비합니다.
 	void InitializeFromPendingDelivery();
 	void DiscoverPlacedZones();
 	void AssignWaitingPackages();
