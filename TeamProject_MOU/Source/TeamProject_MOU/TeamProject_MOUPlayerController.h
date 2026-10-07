@@ -34,6 +34,17 @@ class ATeamProject_MOUPlayerController : public APlayerController
 	GENERATED_BODY()
 
 public:
+    // [LATEJOIN-014] 호스트가 생존 관전 대상을 선택하여 먼 거리의 대상도 복제되게 합니다.
+    UFUNCTION(Server, Reliable)
+    void ServerCycleLateJoinTarget(int32 Direction);
+    // 서버에서 결정하며 맵의 정상적인 이동 동안 유지합니다.
+    // [LATEJOIN-007] 심리스 이동으로 컨트롤러가 교체되어도 합류 제한을 보존합니다.
+    virtual void SeamlessTravelTo(APlayerController* NewPC) override;
+    FString PlaySessionId;
+    UPROPERTY(Replicated)
+    bool bWaitForSafeLobby = false;
+    // [LATEJOIN-004] 도중 합류의 관전 제한을 소유 클라이언트로 복제합니다.
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	ATeamProject_MOUPlayerController();
 
 	// [SETTLEMENT-000] 정산 UI의 확인 상태를 서버에 전달합니다.
@@ -109,9 +120,11 @@ public:
 	FOnViewTargetActorChanged OnViewTargetActorChanged;
 
 	UFUNCTION(BlueprintCallable, Category = "Spectator")
+	// [LATEJOIN-009] 다음 생존자를 관전하며 도중 합류자는 대상이 없어도 대기합니다.
 	void SpectateNextPlayer();
 
 	UFUNCTION(BlueprintCallable, Category = "Spectator")
+	// [LATEJOIN-010] 이전 생존자를 관전하며 도중 합류자는 대상이 없어도 대기합니다.
 	void SpectatePrevPlayer();
 
 	UFUNCTION(BlueprintCallable, Category = "Spectator")
@@ -127,6 +140,7 @@ public:
 	bool IsSpectating() const { return bIsSpectating; }
 
 	UFUNCTION(BlueprintCallable, Category = "Spectator")
+	// [LATEJOIN-008] 사망 또는 도중 합류 관전을 시작하고 대상 복제를 기다립니다.
 	void StartSpectating();
 
 	UFUNCTION(BlueprintCallable, Category = "Spectator")
@@ -288,6 +302,7 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void PreClientTravel(const FString& PendingURL, ETravelType TravelType, bool bIsSeamlessTravel) override;
 
+	// [LATEJOIN-011] 복제된 합류 제한에 따라 관전을 시작하고 기존 카메라를 갱신합니다.
 	virtual void PlayerTick(float DeltaTime) override;
 
 	/** Input mapping context setup */

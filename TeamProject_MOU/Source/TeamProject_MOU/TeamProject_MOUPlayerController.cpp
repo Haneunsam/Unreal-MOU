@@ -2,6 +2,7 @@
 
 
 #include "TeamProject_MOUPlayerController.h"
+#include "Net/UnrealNetwork.h"
 #include "TeamProject_MOUGameMode.h"
 #include "Subsystems/WarehouseDataSubsystem.h"
 #include "EnhancedInputSubsystems.h"
@@ -439,9 +440,31 @@ bool ATeamProject_MOUPlayerController::ShouldUseTouchControls() const
 	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
 }
 
+// [LATEJOIN-011] 복제된 합류 제한에 따라 관전을 시작하고 기존 카메라를 갱신합니다.
 void ATeamProject_MOUPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
+    if (HasAuthority() && bWaitForSafeLobby)
+    {
+        AMainCharacter* Target = Cast<AMainCharacter>(GetViewTarget());
+        if (!IsValid(Target) || Target->bIsDead || !Target->IsPlayerControlled())
+            ServerCycleLateJoinTarget(1);
+    }
+    if (IsLocalPlayerController())
+    {
+        if (bWaitForSafeLobby && !bIsSpectating) StartSpectating();
+        if (bWaitForSafeLobby && bIsSpectating)
+        {
+            AMainCharacter* Target = Cast<AMainCharacter>(GetViewTarget());
+            if (IsValid(Target) && !Target->bIsDead && CurrentSpectateTarget.Get() != Target)
+                SetSpectateTarget(Target, 0.f);
+        }
+        else if (!bWaitForSafeLobby && bIsSpectating)
+        {
+            if (AMainCharacter* OwnCharacter = Cast<AMainCharacter>(GetPawn()); OwnCharacter && !OwnCharacter->bIsDead)
+                StopSpectating();
+        }
+    }
 
 	if (!IsLocalPlayerController())
 	{
@@ -481,7 +504,7 @@ void ATeamProject_MOUPlayerController::PlayerTick(float DeltaTime)
 
 	if (bIsSpectating)
 	{
-		CheckSpectateTargetAlive();
+		if (!bWaitForSafeLobby) CheckSpectateTargetAlive();
 
 		if (CurrentSpectateTarget.IsValid() && IsLocalPlayerController())
 		{
@@ -541,12 +564,19 @@ TArray<AMainCharacter*> ATeamProject_MOUPlayerController::GetAliveTeammates() co
 	return AliveList;
 }
 
+// [LATEJOIN-009] 다음 생존자를 관전하며 도중 합류자는 대상이 없어도 대기합니다.
 void ATeamProject_MOUPlayerController::SpectateNextPlayer()
 {
 	if (!IsLocalPlayerController())
 	{
 		return;
 	}
+
+    if (bWaitForSafeLobby)
+    {
+        ServerCycleLateJoinTarget(1);
+        return;
+    }
 
 	TArray<AMainCharacter*> AliveList = GetAliveTeammates();
 	if (AliveList.Num() == 0)
@@ -564,12 +594,19 @@ void ATeamProject_MOUPlayerController::SpectateNextPlayer()
 	SetSpectateTarget(AliveList[CurrentSpectateIndex]);
 }
 
+// [LATEJOIN-010] 이전 생존자를 관전하며 도중 합류자는 대상이 없어도 대기합니다.
 void ATeamProject_MOUPlayerController::SpectatePrevPlayer()
 {
 	if (!IsLocalPlayerController())
 	{
 		return;
 	}
+
+    if (bWaitForSafeLobby)
+    {
+        ServerCycleLateJoinTarget(-1);
+        return;
+    }
 
 	TArray<AMainCharacter*> AliveList = GetAliveTeammates();
 	if (AliveList.Num() == 0)
@@ -618,6 +655,7 @@ void ATeamProject_MOUPlayerController::SetSpectateTarget(AMainCharacter* NewTarg
 	UpdateSpectatorOverlay();
 }
 
+// [LATEJOIN-008] 사망 또는 도중 합류 관전을 시작하고 대상 복제를 기다립니다.
 void ATeamProject_MOUPlayerController::StartSpectating()
 {
 	if (!IsLocalPlayerController() || bIsSpectating)
@@ -626,7 +664,7 @@ void ATeamProject_MOUPlayerController::StartSpectating()
 	}
 
 	AMainCharacter* MyChar = Cast<AMainCharacter>(GetPawn());
-	if (!MyChar || !MyChar->bIsDead)
+	if (!bWaitForSafeLobby && (!MyChar || !MyChar->bIsDead))
 	{
 		return;
 	}
@@ -647,13 +685,20 @@ void ATeamProject_MOUPlayerController::StartSpectating()
 
 	ShowSpectatorOverlay();
 
+    if (bWaitForSafeLobby)
+    {
+        if (AMainCharacter* Target = Cast<AMainCharacter>(GetViewTarget()); IsValid(Target) && !Target->bIsDead)
+            SetSpectateTarget(Target, 0.f);
+        return;
+    }
+
 	TArray<AMainCharacter*> AliveList = GetAliveTeammates();
 	if (AliveList.Num() > 0)
 	{
 		CurrentSpectateIndex = 0;
 		SetSpectateTarget(AliveList[0], 0.0f);
 	}
-	else
+	else if (!bWaitForSafeLobby)
 	{
 		StopSpectating();
 	}
@@ -1227,3 +1272,35 @@ void ATeamProject_MOUPlayerController::ApplyUserSettingsToPlayer()
 
 
 
+
+// [LATEJOIN-004] 도중 합류의 관전 제한을 소유 클라이언트로 복제합니다.
+void ATeamProject_MOUPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ATeamProject_MOUPlayerController, bWaitForSafeLobby);
+}
+
+// [LATEJOIN-007] 심리스 이동으로 컨트롤러가 교체되어도 합류 제한을 보존합니다.
+void ATeamProject_MOUPlayerController::SeamlessTravelTo(APlayerController* NewPC)
+{
+    Super::SeamlessTravelTo(NewPC);
+    if (ATeamProject_MOUPlayerController* Next = Cast<ATeamProject_MOUPlayerController>(NewPC))
+    {
+        Next->PlaySessionId = PlaySessionId;
+        Next->bWaitForSafeLobby = bWaitForSafeLobby;
+    }
+}
+
+// [LATEJOIN-014] 호스트가 생존 관전 대상을 선택하여 먼 거리의 대상도 복제되게 합니다.
+void ATeamProject_MOUPlayerController::ServerCycleLateJoinTarget_Implementation(int32 Direction)
+{
+    if (!bWaitForSafeLobby) return;
+    const TArray<AMainCharacter*> Alive = GetAliveTeammates();
+    if (Alive.IsEmpty()) return;
+    const int32 Previous = Alive.IndexOfByKey(Cast<AMainCharacter>(GetViewTarget()));
+    const int32 Index = Previous == INDEX_NONE ? 0
+        : (Previous + (Direction < 0 ? -1 : 1) + Alive.Num()) % Alive.Num();
+    // 서버의 ViewTarget도 갱신해야 관전 위치를 기준으로 네트워크 관련성을 판단합니다.
+    SetViewTarget(Alive[Index]);
+    ClientSetViewTarget(Alive[Index]);
+}

@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Base/ProjectGameInstanceBase.h"
+#include "Server/MOUOnlineSession.h"
 
 #include "Base/ProjectGameStateBase.h"
 #include "Engine/World.h"
@@ -197,3 +198,9 @@ void UProjectGameInstanceBase::ResetRunData()
 	}
 }
 
+
+// [HOSTLOST-009] 확인 후 복귀를 지원하는 네트워크 세션을 생성합니다.
+TSubclassOf<UOnlineSession> UProjectGameInstanceBase::GetOnlineSessionClass()
+{
+    return UMOUOnlineSession::StaticClass();
+}

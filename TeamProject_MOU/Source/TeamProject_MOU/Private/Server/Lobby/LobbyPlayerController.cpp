@@ -28,6 +28,8 @@ void ALobbyPlayerController::ShowLoginWidgetIfNeeded()
 		return;
 	}
 
+	if (Chat->IsHostDisconnectPending()) return;
+
 	// 로그인된 사용자는 방에 속해 있지 않을 때 메인로비 화면을 연다.
 	if (Chat->GetConnectionState() == EChatConnectionState::LoggedIn)
 	{

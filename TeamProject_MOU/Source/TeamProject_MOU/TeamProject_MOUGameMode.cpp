@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "TeamProject_MOUGameMode.h"
+#include "TeamProject_MOUPlayerController.h"
+#include "Server/ServerSubsystem.h"
 
 #include "Base/ItemBase.h"
 #include "Base/ProjectGameInstanceBase.h"
@@ -60,9 +62,11 @@ void ATeamProject_MOUGameMode::Logout(AController* Exiting)
 	CheckAllPlayersConfirmedSettlement();
 }
 
+// [LATEJOIN-012] 지정된 안전구역을 판별하며 미설정 시 LobbyLevel을 사용합니다.
 bool ATeamProject_MOUGameMode::IsLobbyLevel() const
 {
-	if (LobbyMap.IsNull() || !GetWorld()) return false;
+	if (!GetWorld()) return false;
+	if (LobbyMap.IsNull()) return UGameplayStatics::GetCurrentLevelName(this, true) == TEXT("LobbyLevel");
 	const FString LobbyPackage = LobbyMap.ToSoftObjectPath().GetLongPackageName();
 	return UGameplayStatics::GetCurrentLevelName(this, true) == FPackageName::GetShortName(LobbyPackage);
 }
@@ -516,4 +520,42 @@ void ATeamProject_MOUGameMode::TravelToLobbyAfterTimeout()
 
 	RunState->SetRunState(ERunPhase::Resetting, RunState->RunEndReason);
 	GetWorld()->ServerTravel(LobbyPackageName, false);
+}
+
+// [LATEJOIN-005] 새 접속의 식별자로 안전구역 합류 여부를 결정합니다.
+FString ATeamProject_MOUGameMode::InitNewPlayer(APlayerController* NewPlayerController,
+    const FUniqueNetIdRepl& UniqueId, const FString& Options, const FString& Portal)
+{
+    const FString Error = Super::InitNewPlayer(NewPlayerController, UniqueId, Options, Portal);
+    if (Error.IsEmpty())
+    {
+        if (ATeamProject_MOUPlayerController* PC = Cast<ATeamProject_MOUPlayerController>(NewPlayerController))
+        {
+            PC->PlaySessionId = UGameplayStatics::ParseOption(Options, TEXT("MOUPlaySession"));
+            if (UServerSubsystem* Server = GetGameInstance()->GetSubsystem<UServerSubsystem>())
+                PC->bWaitForSafeLobby = !PC->IsLocalController() && !Server->AdmitPlaySession(PC->PlaySessionId, IsLobbyLevel());
+        }
+    }
+    return Error;
+}
+
+// [LATEJOIN-006] 일반 및 심리스 이동 후 관전 제한을 적용하거나 안전구역에서 해제합니다.
+void ATeamProject_MOUGameMode::GenericPlayerInitialization(AController* C)
+{
+    if (ATeamProject_MOUPlayerController* PC = Cast<ATeamProject_MOUPlayerController>(C))
+    {
+        if (IsLobbyLevel())
+        {
+            PC->bWaitForSafeLobby = false;
+            if (UServerSubsystem* Server = GetGameInstance()->GetSubsystem<UServerSubsystem>())
+                Server->AdmitPlaySession(PC->PlaySessionId, true);
+        }
+        if (PC->PlayerState)
+        {
+            PC->PlayerState->SetIsOnlyASpectator(PC->bWaitForSafeLobby);
+            PC->PlayerState->SetIsSpectator(PC->bWaitForSafeLobby);
+        }
+        if (PC->bWaitForSafeLobby) PC->StartSpectatingOnly();
+    }
+    Super::GenericPlayerInitialization(C);
 }

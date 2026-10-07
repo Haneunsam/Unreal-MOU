@@ -16,6 +16,7 @@
 //   여기서 다시 적으면 서버가 상한을 바꿨을 때 조용히 어긋난다.
 
 #include "Server/ServerSubsystem.h"
+#include "Server/Lobby/HostDisconnectedWidget.h"
 #include "Data/CustomizationTypes.h"
 #include "Server/Net/CustomizationWire.h"
 
@@ -74,6 +75,7 @@ namespace
 void UServerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+    FCoreUObjectDelegates::PreLoadMapWithContext.AddUObject(this, &UServerSubsystem::ReleaseHostDisconnectedWidget);
 
 	// 여기서 자동 접속하지 않는다.
 	// 접속 시점(타이틀 화면인지, 인게임 진입 후인지)은 게임 흐름에 따라 달라야 하고,
@@ -97,6 +99,9 @@ void UServerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UServerSubsystem::Deinitialize()
 {
+    FCoreUObjectDelegates::PreLoadMapWithContext.RemoveAll(this);
+    if (HostDisconnectedWidget) HostDisconnectedWidget->RemoveFromParent();
+    HostDisconnectedWidget = nullptr;
 	// 순서가 중요하다.
 	// 틱을 먼저 끊어야 워커를 정리하는 도중에 Tick 이 죽은 큐를 읽는 일이 없다.
 	if (TickHandle.IsValid())
@@ -763,6 +768,8 @@ bool UServerSubsystem::IsSelfReady() const
 // [RTITLE-004] 방을 떠날 때 제목과 대기 중 요청을 포함한 방 상태를 비운다.
 void UServerSubsystem::ClearRoomState()
 {
+    PlaySessionId.Reset();
+    AdmittedPlaySessions.Reset();
 	++CustomizationRequestId; // Ignore replies from a previous room/session.
 	if (bCustomizationPending)
 	{
@@ -831,6 +838,7 @@ void UServerSubsystem::Disconnect()
 // [PROFILE-004] 백엔드 이벤트를 처리하고 외형 승인·게임 시작 시 본인 계정값을 보관한다.
 bool UServerSubsystem::Tick(float DeltaTime)
 {
+    UpdateHostDisconnectedWidget();
     if (bReturnToLobbyAfterFailure)
     {
         bReturnToLobbyAfterFailure = false;
@@ -1047,7 +1055,8 @@ bool UServerSubsystem::Tick(float DeltaTime)
 		case EServerClientEventType::RoomClosed:
             if (Event.RoomId == 0 || Event.RoomId != CurrentRoomId) break;
 			UE_LOG(LogMOUServer, Log, TEXT("방 #%d 이(가) 닫혔다. 방장이 나갔다."), Event.RoomId);
-			ClearRoomState();
+			if (MyRoomId == 0) NotifyHostDisconnected();
+            else ClearRoomState();
 			OnRoomClosed.Broadcast(Event.RoomId, Event.CloseReason);
 			break;
 
@@ -2508,11 +2517,16 @@ void UServerSubsystem::PollTravelConnection(float DeltaTime)
 }
 
 // [REJOIN-021] 현재 게임 인스턴스의 네트워크 실패를 처리하고 접속 경로를 재시도한다.
-void UServerSubsystem::HandleNetworkFailure(UWorld* World, UNetDriver* /*NetDriver*/,
+void UServerSubsystem::HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver,
                                             ENetworkFailure::Type FailureType,
                                             const FString& ErrorString)
 {
 	if (World && World->GetGameInstance() != GetGameInstance()) return;
+    if (bHostDisconnectPending) return;
+    if (NetDriver && NetDriver->NetDriverName != NAME_GameNetDriver && NetDriver->NetDriverName != NAME_PendingNetDriver) return;
+    // 접속 시도 실패는 기존 후보 재시도를 유지하고, 이미 입장한 연결의 종료만 알립니다.
+    if (DeferHostDisconnect(World)) return;
+
 	const FString Target = PendingTravelAddress.IsEmpty()
 		? TEXT("호스트") : PendingTravelAddress;
 
@@ -2576,6 +2590,7 @@ void UServerSubsystem::HandleTravelFailure(UWorld* World,
                                            const FString& ErrorString)
 {
 	if (World && World->GetGameInstance() != GetGameInstance()) return;
+    if (bHostDisconnectPending) return;
 	// 여기까지 오는 것은 대개 맵 문제다(이름이 틀렸거나 쿠킹에서 빠졌거나).
 	// 네트워크 실패와 구분해서 말해야 엉뚱한 곳을 뒤지지 않는다.
 	const FString Reason = FString::Printf(
@@ -2959,4 +2974,82 @@ namespace
 					Chat->Disconnect();
 				}
 			}));
+}
+
+// [LATEJOIN-001] 방을 떠날 때까지 유지하는 접속 식별자를 로그인 옵션에 제공합니다.
+FString UServerSubsystem::GetPlaySessionId()
+{
+    if (PlaySessionId.IsEmpty()) PlaySessionId = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+    return PlaySessionId;
+}
+// [LATEJOIN-002] 안전구역에서 승인된 접속만 활동을 허용합니다.
+bool UServerSubsystem::AdmitPlaySession(const FString& Session, bool bSafeLevel)
+{
+    if (Session.IsEmpty()) return bSafeLevel;
+    if (bSafeLevel) AdmittedPlaySessions.Add(Session);
+    return AdmittedPlaySessions.Contains(Session);
+}
+
+// [HOSTLOST-001] 호스트 종료 알림을 예약하고 방 상태를 정리합니다.
+void UServerSubsystem::NotifyHostDisconnected()
+{
+    if (bHostDisconnectPending) return;
+    if (Backend.IsValid()) Backend->LeaveRoom();
+    ClearRoomState();
+    bHostDisconnectPending = true;
+}
+// [HOSTLOST-002] 확인 후 로그인 상태를 유지하여 메인로비로 이동합니다.
+void UServerSubsystem::ConfirmHostDisconnected()
+{
+    if (!bHostDisconnectPending) return;
+    bHostDisconnectPending = false;
+    if (HostDisconnectedWidget) HostDisconnectedWidget->RemoveFromParent();
+    HostDisconnectedWidget = nullptr;
+    bReturnToLobbyAfterFailure = true;
+}
+// [HOSTLOST-004] 엔진의 실패 복귀 중에도 알림을 현재 화면에 유지합니다.
+void UServerSubsystem::UpdateHostDisconnectedWidget()
+{
+    if (!bHostDisconnectPending) return;
+    UWorld* World = GetGameInstance()->GetWorld();
+    APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+    if (!PC || !PC->IsLocalController()) return;
+    if (HostDisconnectedWidget && HostDisconnectedWidget->GetOwningPlayer() != PC)
+    {
+        HostDisconnectedWidget->RemoveFromParent();
+        HostDisconnectedWidget = nullptr;
+    }
+    if (!HostDisconnectedWidget)
+        HostDisconnectedWidget = CreateWidget<UHostDisconnectedWidget>(PC, UHostDisconnectedWidget::StaticClass());
+    if (HostDisconnectedWidget)
+    {
+        if (HostDisconnectedWidget->IsInViewport()) return;
+        HostDisconnectedWidget->AddToViewport(10000);
+        FInputModeUIOnly Input;
+        Input.SetWidgetToFocus(HostDisconnectedWidget->TakeWidget());
+        PC->SetInputMode(Input);
+        PC->SetShowMouseCursor(true);
+    }
+}
+
+// [HOSTLOST-007] 맵을 비우기 전에 알림의 이전 월드 참조를 해제합니다.
+void UServerSubsystem::ReleaseHostDisconnectedWidget(const FWorldContext& Context, const FString& MapName)
+{
+    if (Context.OwningGameInstance != GetGameInstance()) return;
+    if (HostDisconnectedWidget) HostDisconnectedWidget->RemoveFromParent();
+    HostDisconnectedWidget = nullptr;
+}
+
+// [HOSTLOST-010] 실제 입장한 방의 종료만 확인 대기로 전환하고 최초 접속 실패는 기존 처리를 유지합니다.
+bool UServerSubsystem::DeferHostDisconnect(UWorld* World)
+{
+    if (!World || World->GetGameInstance() != GetGameInstance()) return false;
+    if (bHostDisconnectPending) return true;
+    if (MyRoomId == 0 && CurrentRoomId != 0 && World->GetNetMode() == NM_Client
+        && ActiveTravelTransport == EMOUTravelTransport::None)
+    {
+        NotifyHostDisconnected();
+        return true;
+    }
+    return false;
 }

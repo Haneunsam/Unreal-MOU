@@ -137,6 +137,19 @@ class TEAMPROJECT_MOU_API UServerSubsystem : public UGameInstanceSubsystem
 	GENERATED_BODY()
 
 public:
+    // [LATEJOIN-001] 방을 떠날 때까지 유지하는 접속 식별자를 로그인 옵션에 제공합니다.
+    FString GetPlaySessionId();
+    // [LATEJOIN-002] 안전구역에서 승인된 접속만 활동을 허용합니다.
+    bool AdmitPlaySession(const FString& Session, bool bSafeLevel);
+    // [HOSTLOST-010] 실제 입장한 방의 종료만 확인 대기로 전환하고 최초 접속 실패는 기존 처리를 유지합니다.
+    bool DeferHostDisconnect(UWorld* World);
+    // [HOSTLOST-001] 호스트 종료 알림을 예약하고 방 상태를 정리합니다.
+    void NotifyHostDisconnected();
+    // [HOSTLOST-002] 확인 후 로그인 상태를 유지하여 메인로비로 이동합니다.
+    UFUNCTION()
+    void ConfirmHostDisconnected();
+    // [HOSTLOST-003] 호스트 종료 확인 대기 상태를 조회합니다.
+    bool IsHostDisconnectPending() const { return bHostDisconnectPending; }
 	// [PROFILE-003] 계정이 바뀌면 해당 계정 파일을 읽고 맵 이동 중에는 본인 외형을 유지한다.
 	UFUNCTION(BlueprintPure, Category = "MOU|Lobby|Customization")
 	FCharacterCustomizationData GetLocalCustomization();
@@ -724,6 +737,16 @@ public:
 	int32 GetTotalUnreadCount() const;
 
 private:
+    friend class FLateJoinRegressionTest;
+    // [HOSTLOST-007] 맵을 비우기 전에 알림의 이전 월드 참조를 해제합니다.
+    void ReleaseHostDisconnectedWidget(const FWorldContext& Context, const FString& MapName);
+    FString PlaySessionId;
+    TSet<FString> AdmittedPlaySessions;
+    bool bHostDisconnectPending = false;
+    UPROPERTY(Transient)
+    TObjectPtr<class UHostDisconnectedWidget> HostDisconnectedWidget;
+    // [HOSTLOST-004] 엔진의 실패 복귀 중에도 알림을 현재 화면에 유지합니다.
+    void UpdateHostDisconnectedWidget();
 	// [PROFILE-004] 백엔드 이벤트를 처리하고 외형 승인·게임 시작 시 본인 계정값을 보관한다.
 	bool Tick(float DeltaTime);
 

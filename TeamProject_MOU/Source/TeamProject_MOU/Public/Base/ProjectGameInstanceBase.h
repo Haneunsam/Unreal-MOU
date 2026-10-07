@@ -13,6 +13,8 @@ class TEAMPROJECT_MOU_API UProjectGameInstanceBase : public UGameInstance
 	GENERATED_BODY()
 
 public:
+    // [HOSTLOST-009] 확인 후 복귀를 지원하는 네트워크 세션을 생성합니다.
+    virtual TSubclassOf<UOnlineSession> GetOnlineSessionClass() override;
 	// GameInstance가 생성될 때 맵 로딩 감지 델리게이트를 등록
 	virtual void Init() override;
 	// GameInstance 종료 시 등록했던 맵 로딩 델리게이트를 해제
