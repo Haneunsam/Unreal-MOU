@@ -176,6 +176,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "UI|InGameMenu")
 	bool IsInGameMenuOpen() const { return bIsInGameMenuOpen; }
 
+	// [LOBBYRETURN-001] 로그인 연결은 유지하고 방을 나간 뒤 메인로비 레벨로 이동한다.
 	UFUNCTION(BlueprintCallable, Category = "UI|InGameMenu")
 	void ReturnToLobby();
 

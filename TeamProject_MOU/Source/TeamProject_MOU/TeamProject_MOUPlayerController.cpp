@@ -18,6 +18,7 @@
 #include "Widgets/Input/SVirtualJoystick.h"
 
 #include "Engine/GameInstance.h"
+#include "Server/ServerSubsystem.h"
 
 // 음성 RPC 창구. 컨트롤러는 음성 시스템의 내부를 몰라도 되지만,
 // "모든 컨트롤러가 음성 창구를 하나씩 갖는다" 는 것은 컨트롤러의 책임이다
@@ -992,8 +993,22 @@ void ATeamProject_MOUPlayerController::CloseInGameMenu()
 	SetIgnoreLookInput(false);
 }
 
+// [LOBBYRETURN-001] 로그인 연결은 유지하고 방을 나간 뒤 메인로비 레벨로 이동한다.
 void ATeamProject_MOUPlayerController::ReturnToLobby()
 {
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UServerSubsystem* Server = GI->GetSubsystem<UServerSubsystem>())
+		{
+			Server->LeaveRoom();
+		}
+	}
+
 	CloseInGameMenu();
 	UGameplayStatics::OpenLevel(this, FName(TEXT("/Game/02_JSY/MainLobby/MainLobby")));
 }
