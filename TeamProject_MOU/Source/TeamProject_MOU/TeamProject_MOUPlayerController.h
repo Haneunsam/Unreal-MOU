@@ -319,6 +319,8 @@ protected:
 
 private:
 	TWeakObjectPtr<AMainCharacter> CurrentSpectateTarget;
+	// 재참여 관전 대상이 준비될 때까지 서버 요청 간격을 제한합니다.
+	double NextSpectateTargetRetryTime = 0.0;
 	int32 CurrentSpectateIndex = -1;
 	bool bIsSpectating = false;
 	bool bIsDeathSequenceActive = false;

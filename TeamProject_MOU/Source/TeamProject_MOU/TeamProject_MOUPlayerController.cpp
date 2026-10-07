@@ -456,8 +456,24 @@ void ATeamProject_MOUPlayerController::PlayerTick(float DeltaTime)
         if (bWaitForSafeLobby && bIsSpectating)
         {
             AMainCharacter* Target = Cast<AMainCharacter>(GetViewTarget());
-            if (IsValid(Target) && !Target->bIsDead && CurrentSpectateTarget.Get() != Target)
-                SetSpectateTarget(Target, 0.f);
+            if (IsValid(Target) && !Target->bIsDead)
+            {
+                if (CurrentSpectateTarget.Get() != Target)
+                    SetSpectateTarget(Target, 0.f);
+
+                ShowSpectatorOverlay();
+            }
+            else
+            {
+                HideSpectatorOverlay();
+
+                const double Now = GetWorld()->GetTimeSeconds();
+                if (Now >= NextSpectateTargetRetryTime)
+                {
+                    NextSpectateTargetRetryTime = Now + 0.5;
+                    ServerCycleLateJoinTarget(0);
+                }
+            }
         }
         else if (!bWaitForSafeLobby && bIsSpectating)
         {
@@ -683,12 +699,17 @@ void ATeamProject_MOUPlayerController::StartSpectating()
 		}
 	}
 
-	ShowSpectatorOverlay();
+	if (!bWaitForSafeLobby)
+		ShowSpectatorOverlay();
 
     if (bWaitForSafeLobby)
     {
+        NextSpectateTargetRetryTime = 0.0;
         if (AMainCharacter* Target = Cast<AMainCharacter>(GetViewTarget()); IsValid(Target) && !Target->bIsDead)
+        {
             SetSpectateTarget(Target, 0.f);
+            ShowSpectatorOverlay();
+        }
         return;
     }
 
@@ -1299,6 +1320,7 @@ void ATeamProject_MOUPlayerController::ServerCycleLateJoinTarget_Implementation(
     if (Alive.IsEmpty()) return;
     const int32 Previous = Alive.IndexOfByKey(Cast<AMainCharacter>(GetViewTarget()));
     const int32 Index = Previous == INDEX_NONE ? 0
+        : Direction == 0 ? Previous
         : (Previous + (Direction < 0 ? -1 : 1) + Alive.Num()) % Alive.Num();
     // 서버의 ViewTarget도 갱신해야 관전 위치를 기준으로 네트워크 관련성을 판단합니다.
     SetViewTarget(Alive[Index]);
