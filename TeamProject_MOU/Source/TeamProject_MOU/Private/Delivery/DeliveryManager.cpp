@@ -12,6 +12,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Player/MainCharacter.h"
 #include "GameFramework/PlayerState.h"
+#include "TimerManager.h"
 
 ADeliveryManager::ADeliveryManager()
 {
@@ -169,19 +170,21 @@ void ADeliveryManager::AssignWaitingPackages()
 	}
 }
 
+// [DELIVERY-000] 배달 맵에서 선택 목록을 읽고 스포너가 사용한 다음 영속 목록을 소비합니다.
 void ADeliveryManager::InitializeFromPendingDelivery()
 {
 	if (bPendingInitialized) return;
 	bPendingInitialized = true;
 
-	const UProjectGameInstanceBase* GameInstance = GetGameInstance<UProjectGameInstanceBase>();
+	UProjectGameInstanceBase* GameInstance = GetGameInstance<UProjectGameInstanceBase>();
 	if (!GameInstance)
 	{
 		bPendingInitialized = false;
 		return;
 	}
 
-	const FDeliveryData& Data = GameInstance->PendingDeliveryData;
+	// 초기화 뒤 원본 선택 목록이 비워져도 배달 진행 데이터가 유지되도록 복사합니다.
+	const FDeliveryData Data = GameInstance->PendingDeliveryData;
 	if (!Data.SelectedItemInstances.IsEmpty())
 	{
 		for (const FStoredItemInstanceData& Item : Data.SelectedItemInstances)
@@ -210,6 +213,20 @@ void ADeliveryManager::InitializeFromPendingDelivery()
 	BroadcastProgress();
 	UE_LOG(LogTemp, Log, TEXT("[Delivery] Pending initialized. Total=%d RequiredClasses=%d"),
 		Progress.TotalItemCount, RemainingRequiredCounts.Num());
+
+	if (!Data.IsEmpty())
+	{
+		// BP_DeliverItemSpawner도 BeginPlay에서 같은 목록을 읽습니다.
+		// 모든 액터의 BeginPlay가 끝난 다음 틱에 원본을 소비하여 스폰 순서와 무관하게 만듭니다.
+		GetWorldTimerManager().SetTimerForNextTick(
+			FTimerDelegate::CreateWeakLambda(this, [this]()
+			{
+				if (UProjectGameInstanceBase* Instance = GetGameInstance<UProjectGameInstanceBase>())
+				{
+					Instance->ClearPendingDeliveryData();
+				}
+			}));
+	}
 }
 
 bool ADeliveryManager::TryDeliverPackage(APackageBase* Package)

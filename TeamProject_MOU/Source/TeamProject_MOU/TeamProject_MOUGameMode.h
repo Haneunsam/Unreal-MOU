@@ -106,6 +106,7 @@ private:
 	void FinishRun(ERunEndReason Reason);
 	void DestroyPlayerOwnedItems();
 	void ResetRunToDayOne();
+	// [RUN-000] 플레이어 전멸 시 영속 런 데이터를 보존하고 로비로 즉시 이동합니다.
 	void TravelToLobbyAfterWipe();
 	void TravelToLobbyAfterTimeout();
 	// [SETTLEMENT-002] 현재 접속 인원이 모두 확인했는지 검사합니다.

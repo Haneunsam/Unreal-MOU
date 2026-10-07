@@ -473,13 +473,9 @@ void ATeamProject_MOUGameMode::ResetRunToDayOne()
 	GetWorld()->ServerTravel(CurrentLevelName, false);
 }
 
+// [RUN-000] 플레이어 전멸 시 영속 런 데이터를 보존하고 로비로 즉시 이동합니다.
 void ATeamProject_MOUGameMode::TravelToLobbyAfterWipe()
 {
-	if (UProjectGameInstanceBase* GameInstance = GetGameInstance<UProjectGameInstanceBase>())
-	{
-		GameInstance->ResetRunData();
-	}
-
 	const FSoftObjectPath LobbyPath = LobbyMap.ToSoftObjectPath();
 	const FString LobbyPackageName = LobbyPath.GetLongPackageName();
 	if (LobbyPackageName.IsEmpty())
