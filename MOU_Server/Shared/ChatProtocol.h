@@ -52,7 +52,7 @@ namespace MOU
 	// v12: RoomMemberInfo에 고정 좌석 SlotIndex 추가. 서버/클라이언트 함께 갱신.
 	// v13: 이미 접속 중인 계정의 로그인을 거부하는 결과 코드 추가.
 	// v14: member material customization + request/ack. Rebuild both endpoints.
-	constexpr uint16_t kProtocolVersion = 15;
+	constexpr uint16_t kProtocolVersion = 16;
 
 	// BodySize 가 이 값을 넘으면 악성 패킷으로 보고 연결을 끊는다.
 	constexpr uint32_t kMaxBodySize = 4096;
@@ -241,6 +241,8 @@ namespace MOU
 		RoomCustomizationAck = 45,
 		CheckLoginIdReq = 46,
 		CheckLoginIdAck = 47,
+		RoomGuestConnectPrepare = 48, // 서버 -> 호스트: 중도 입장 경로 준비
+		RoomGuestConnectAck = 49, // 호스트 -> 서버: 준비 결과
 		ClientEndpointAck   = 43,  // S->C. "네 공인 엔드포인트를 이렇게 봤다"
 	};
 
@@ -594,6 +596,8 @@ namespace MOU
 		uint8_t       bSuccess;
 		uint8_t       Result;                           // ERoomResult
 		uint8_t       bLanOnly;                         // 1 이면 같은 LAN 에서만 들어올 수 있다 (v9)
+		uint8_t State;
+		uint64_t ConnectRequestId;
 	};
 
 	// 호스트가 진행 상태를 알린다. 방장만 보낼 수 있다.
@@ -817,6 +821,24 @@ namespace MOU
 		// 이 패킷은 참여자별로 만든다. GuestPort 로 ClientTravel 하면 된다.
 		// Address 가 비었거나 Port 가 0 이면 이 방에는 relay 폴백이 없다.
 		RelayGuestRoute Relay;
+		uint64_t ConnectRequestId;
+	};
+
+	struct RoomGuestConnectPrepareBody
+	{
+		uint32_t RoomId;
+		uint64_t GuestUserId;
+		uint64_t ConnectRequestId;
+		PeerEndpoint PunchTarget;
+		RelayHostRoute Relay;
+	};
+
+	struct RoomGuestConnectAckBody
+	{
+		uint32_t RoomId;
+		uint64_t GuestUserId;
+		uint64_t ConnectRequestId;
+		uint8_t bReady;
 	};
 
 	// ------------------------------------------------------------------
@@ -995,7 +1017,7 @@ namespace MOU
 	static_assert(sizeof(RoomInfo)          == 96, "RoomInfo 에 패딩이 끼었다");
 	static_assert(sizeof(RoomListAckBody)   ==  2, "RoomListAckBody 에 패딩이 끼었다");
 	static_assert(sizeof(RoomJoinReqBody)   ==  8, "RoomJoinReqBody 에 패딩이 끼었다");
-	static_assert(sizeof(RoomJoinAckBody)   == 68, "RoomJoinAckBody 에 패딩이 끼었다");
+	static_assert(sizeof(RoomJoinAckBody)   == 77, "RoomJoinAckBody 에 패딩이 끼었다");
 	static_assert(sizeof(RoomStateUpdateBody) == 6, "RoomStateUpdateBody 에 패딩이 끼었다");
 	static_assert(sizeof(CharacterCustomization) == 56, "Customization wire size");
 	static_assert(sizeof(RoomCustomizationReqBody) == 64, "Customization request size");
@@ -1008,10 +1030,12 @@ namespace MOU
 	static_assert(sizeof(RelayHostRoute)         == 58, "RelayHostRoute 에 패딩이 끼었다");
 	static_assert(sizeof(RelayGuestRoute)        == 58, "RelayGuestRoute 에 패딩이 끼었다");
 	static_assert(sizeof(RelayRegistrationDatagram) == 48, "RelayRegistrationDatagram 에 패딩이 끼었다");
+	static_assert(sizeof(RoomGuestConnectPrepareBody) == 98, "Guest prepare wire size");
+	static_assert(sizeof(RoomGuestConnectAckBody) == 21, "Guest ack wire size");
 	static_assert(sizeof(RoomStartBody)      == 330, "RoomStartBody 에 패딩이 끼었다");
 	static_assert(sizeof(ClientEndpointDatagram) == 16, "ClientEndpointDatagram 에 패딩이 끼었다");
 	static_assert(sizeof(ClientEndpointAckBody)  == 24, "ClientEndpointAckBody 에 패딩이 끼었다");
-	static_assert(sizeof(RoomHostReadyBody)  == 126, "RoomHostReadyBody 에 패딩이 끼었다");
+	static_assert(sizeof(RoomHostReadyBody)  == 134, "RoomHostReadyBody 에 패딩이 끼었다");
 	static_assert(sizeof(HostProbeDatagram)     == 8, "HostProbeDatagram 에 패딩이 끼었다");
 	static_assert(sizeof(HostProbeReqBody)      == 8, "HostProbeReqBody 에 패딩이 끼었다");
 	static_assert(sizeof(HostProbeSentBody)     == 8, "HostProbeSentBody 에 패딩이 끼었다");

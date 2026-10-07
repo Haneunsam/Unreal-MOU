@@ -180,6 +180,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "UI|InGameMenu")
 	void ReturnToLobby();
 
+	// [REJOIN-006] 서버 연결을 정리하여 퇴장 처리를 유도한 뒤 게임을 종료한다.
 	UFUNCTION(BlueprintCallable, Category = "UI|InGameMenu")
 	void QuitToDesktop();
 

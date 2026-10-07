@@ -1013,8 +1013,15 @@ void ATeamProject_MOUPlayerController::ReturnToLobby()
 	UGameplayStatics::OpenLevel(this, FName(TEXT("/Game/02_JSY/MainLobby/MainLobby")));
 }
 
+// [REJOIN-006] 서버 연결을 정리하여 퇴장 처리를 유도한 뒤 게임을 종료한다.
 void ATeamProject_MOUPlayerController::QuitToDesktop()
 {
+    if (!IsLocalPlayerController()) return;
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UServerSubsystem* Server = GI->GetSubsystem<UServerSubsystem>())
+            Server->Disconnect();
+    }
 	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
 }
 

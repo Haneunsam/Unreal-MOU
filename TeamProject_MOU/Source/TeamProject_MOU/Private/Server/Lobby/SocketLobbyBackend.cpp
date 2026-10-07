@@ -338,6 +338,21 @@ void FSocketLobbyBackend::StartGame()
 	SendEmpty(MOU::EOpcode::RoomStartReq, TEXT("RoomStartReq"));
 }
 
+// [REJOIN-005] 중도 입장 요청 번호와 호스트의 준비 결과를 서버에 전송한다.
+bool FSocketLobbyBackend::SendGuestConnectAck(int32 RoomId, int64 GuestUserId, uint64 ConnectRequestId, bool bReady)
+{
+    if (!ServerClient) return false;
+    MOU::RoomGuestConnectAckBody Body{};
+    Body.RoomId = RoomId;
+    Body.GuestUserId = GuestUserId;
+    Body.ConnectRequestId = ConnectRequestId;
+    Body.bReady = bReady ? 1 : 0;
+    TArray<uint8> Packet;
+    if (!MOUChat::BuildPacket(Packet, MOU::EOpcode::RoomGuestConnectAck, &Body, sizeof(Body))) return false;
+    ServerClient->EnqueuePacket(MoveTemp(Packet));
+    return true;
+}
+
 void FSocketLobbyBackend::NotifyHostReady()
 {
 	SendEmpty(MOU::EOpcode::RoomHostReadyReq, TEXT("RoomHostReadyReq"));
