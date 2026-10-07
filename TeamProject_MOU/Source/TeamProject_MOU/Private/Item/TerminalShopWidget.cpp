@@ -71,6 +71,18 @@ void UTerminalShopWidget::CloseShop()
 	FinishCloseShop();
 }
 
+void UTerminalShopWidget::ForceCloseShopImmediately()
+{
+	bIsOpening = false;
+	bIsClosing = true;
+	FinishCloseShop();
+}
+
+void UTerminalShopWidget::HandlePreLoadMap(const FString& MapName)
+{
+	ForceCloseShopImmediately();
+}
+
 // [TSHOP-014] 닫기 애니메이션 종료 후 입력 모드와 위젯 참조를 정리한다.
 void UTerminalShopWidget::FinishCloseShop()
 {
@@ -84,6 +96,39 @@ void UTerminalShopWidget::FinishCloseShop()
 		PC->bShowMouseCursor = false;
 	}
 	RemoveFromParent();
+}
+
+void UTerminalShopWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+
+	if (!PreLoadMapHandle.IsValid())
+	{
+		PreLoadMapHandle = FCoreUObjectDelegates::PreLoadMap.AddUObject(
+			this,
+			&UTerminalShopWidget::HandlePreLoadMap);
+	}
+}
+
+void UTerminalShopWidget::NativeDestruct()
+{
+	if (PreLoadMapHandle.IsValid())
+	{
+		FCoreUObjectDelegates::PreLoadMap.Remove(PreLoadMapHandle);
+		PreLoadMapHandle.Reset();
+	}
+
+	if (ATerminalShop* Shop = OwningShop.Get())
+	{
+		Shop->NotifyWidgetClosed(this);
+	}
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		PC->SetInputMode(FInputModeGameOnly());
+		PC->bShowMouseCursor = false;
+	}
+
+	Super::NativeDestruct();
 }
 
 // [TSHOP-008] Widget BP 콘텐츠를 기준 해상도에 맞춰 화면에 배치한다.
@@ -134,6 +179,24 @@ FReply UTerminalShopWidget::NativeOnKeyDown(const FGeometry& InGeometry, const F
 void UTerminalShopWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+
+	if (!bIsClosing)
+	{
+		ATerminalShop* Shop = OwningShop.Get();
+		APlayerController* PC = GetOwningPlayer();
+		if (!Shop || !PC)
+		{
+			ForceCloseShopImmediately();
+			return;
+		}
+
+		APawn* Pawn = PC->GetPawn();
+		if (!Pawn || FVector::DistSquared(Pawn->GetActorLocation(), Shop->GetActorLocation()) > FMath::Square(Shop->GetInteractionRadius() * 1.5f))
+		{
+			CloseShop();
+			return;
+		}
+	}
 
 	if (!AnimatedPanel || (!bIsOpening && !bIsClosing))
 	{

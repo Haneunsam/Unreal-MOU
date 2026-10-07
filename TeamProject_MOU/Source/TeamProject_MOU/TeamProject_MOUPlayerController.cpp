@@ -10,6 +10,11 @@
 #include "InputModifiers.h"
 #include "Blueprint/UserWidget.h"
 #include "TeamProject_MOU.h"
+#include "Item/ItemSpawnRow.h"
+#include "Item/TerminalShopWidget.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Base/ProjectGameStateBase.h"
+#include "Engine/DataTable.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
 #include "Engine/GameInstance.h"
@@ -94,6 +99,116 @@ void ATeamProject_MOUPlayerController::ClientWarehouseDeliveryRemoveCompleted_Im
 	OnWarehouseDeliveryRemoveCompleted.Broadcast(bSucceeded);
 }
 
+void ATeamProject_MOUPlayerController::ServerSpendGold_Implementation(int32 Amount)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (AProjectGameStateBase* GS = GetWorld() ? GetWorld()->GetGameState<AProjectGameStateBase>() : nullptr)
+	{
+		GS->SpendGold(Amount);
+	}
+}
+
+void ATeamProject_MOUPlayerController::ServerRequestTerminalPurchase_Implementation(const TArray<FTerminalCartItem>& Items)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (Items.IsEmpty())
+	{
+		ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "EmptyCart", "장바구니가 비어 있습니다."));
+		return;
+	}
+
+	UDataTable* Table = TerminalShopItemTable;
+	if (!Table)
+	{
+		Table = LoadObject<UDataTable>(nullptr, TEXT("/Game/04_JJO/DT_Item.DT_Item"));
+	}
+
+	if (!Table)
+	{
+		ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "TableNotFound", "상품 데이터를 찾을 수 없습니다."));
+		return;
+	}
+
+	int32 TotalPrice = 0;
+	TArray<TPair<const FItemSpawnRow*, int32>> ValidatedRows;
+
+	for (const FTerminalCartItem& CartItem : Items)
+	{
+		if (CartItem.Quantity <= 0)
+		{
+			continue;
+		}
+
+		const FItemSpawnRow* Row = Table->FindRow<FItemSpawnRow>(CartItem.RowName, TEXT("TerminalShopPurchase"));
+		if (!Row)
+		{
+			ClientTerminalPurchaseCompleted(false, FText::Format(
+				NSLOCTEXT("TerminalShop", "ItemNotFound", "존재하지 않는 상품이 포함되어 있습니다: {0}"),
+				FText::FromName(CartItem.RowName)));
+			return;
+		}
+
+		TotalPrice += (Row->Price * CartItem.Quantity);
+		ValidatedRows.Emplace(Row, CartItem.Quantity);
+	}
+
+	if (ValidatedRows.IsEmpty())
+	{
+		ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "InvalidQuantity", "구매 수량이 올바르지 않습니다."));
+		return;
+	}
+
+	AProjectGameStateBase* GS = GetWorld() ? GetWorld()->GetGameState<AProjectGameStateBase>() : nullptr;
+	if (!GS)
+	{
+		ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "NoGameState", "게임 상태를 확인할 수 없습니다."));
+		return;
+	}
+
+	if (!GS->CanAfford(TotalPrice))
+	{
+		ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "InsufficientGold", "골드가 부족합니다."));
+		return;
+	}
+
+	if (!GS->SpendGold(TotalPrice))
+	{
+		ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "SpendFailed", "골드 차감에 실패했습니다."));
+		return;
+	}
+
+	UWarehouseDataSubsystem* Warehouse = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UWarehouseDataSubsystem>() : nullptr;
+
+	if (Warehouse)
+	{
+		for (const auto& Pair : ValidatedRows)
+		{
+			const FItemSpawnRow* Row = Pair.Key;
+			const int32 Qty = Pair.Value;
+			if (Row && Row->ItemClass)
+			{
+				Warehouse->AddPendingDeliveryItem(Row->ItemClass, Qty);
+			}
+		}
+	}
+
+	ClientTerminalPurchaseCompleted(true, NSLOCTEXT("TerminalShop", "PurchaseSuccess", "구매가 완료되었습니다."));
+}
+
+void ATeamProject_MOUPlayerController::ClientTerminalPurchaseCompleted_Implementation(bool bSucceeded, const FText& ErrorMessage)
+{
+	OnTerminalPurchaseCompleted.Broadcast(bSucceeded, ErrorMessage);
+}
+
 void ATeamProject_MOUPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
@@ -151,6 +266,27 @@ void ATeamProject_MOUPlayerController::EndPlay(const EEndPlayReason::Type EndPla
 	HideSpectatorOverlay();
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void ATeamProject_MOUPlayerController::PreClientTravel(const FString& PendingURL, ETravelType TravelType, bool bIsSeamlessTravel)
+{
+	Super::PreClientTravel(PendingURL, TravelType, bIsSeamlessTravel);
+
+	if (IsLocalPlayerController())
+	{
+		TArray<UUserWidget*> FoundWidgets;
+		UWidgetBlueprintLibrary::GetAllWidgetsOfClass(this, FoundWidgets, UTerminalShopWidget::StaticClass(), false);
+		for (UUserWidget* Widget : FoundWidgets)
+		{
+			if (UTerminalShopWidget* ShopWidget = Cast<UTerminalShopWidget>(Widget))
+			{
+				ShopWidget->ForceCloseShopImmediately();
+			}
+		}
+
+		SetInputMode(FInputModeGameOnly());
+		bShowMouseCursor = false;
+	}
 }
 
 void ATeamProject_MOUPlayerController::SetupInputComponent()

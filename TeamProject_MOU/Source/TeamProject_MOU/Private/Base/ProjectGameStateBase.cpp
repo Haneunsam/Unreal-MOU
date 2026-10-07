@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Base/ProjectGameStateBase.h"
@@ -7,6 +7,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Base/ProjectGameInstanceBase.h"
 #include "Subsystems/WarehouseDataSubsystem.h"
+#include "TeamProject_MOUPlayerController.h"
 
 AProjectGameStateBase::AProjectGameStateBase()
 {
@@ -96,12 +97,6 @@ void AProjectGameStateBase::AddGold(int32 Amount)
 
 bool AProjectGameStateBase::SpendGold(int32 Amount)
 {
-	// 서버에서만 골드 차감 처리
-	if (!HasAuthority())
-	{
-		return false;
-	}
-
 	// 0 이하 금액은 사용하지 않음
 	if (Amount <= 0)
 	{
@@ -114,12 +109,28 @@ bool AProjectGameStateBase::SpendGold(int32 Amount)
 		return false;
 	}
 
-	// 골드 차감 처리
+	// 클라이언트에서 호출된 경우: 로컬 플레이어 컨트롤러를 통해 서버에 차감 RPC 요청
+	if (!HasAuthority())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (ATeamProject_MOUPlayerController* PC = Cast<ATeamProject_MOUPlayerController>(World->GetFirstPlayerController()))
+			{
+				PC->ServerSpendGold(Amount);
+			}
+		}
+
+		// 클라이언트 측 로컬 예측 차감 및 즉시 UI 갱신
+		Gold = FMath::Max(0, Gold - Amount);
+		OnGoldUpdated(Gold);
+		return true;
+	}
+
+	// 서버에서 골드 차감 처리
 	Gold -= Amount;
 
 	// UI 등에 변경된 골드 전달
 	OnGoldUpdated(Gold);
-
 
 	return true;
 }
