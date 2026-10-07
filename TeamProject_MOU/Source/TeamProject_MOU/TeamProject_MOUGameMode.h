@@ -19,8 +19,12 @@ class ATeamProject_MOUGameMode : public AGameModeBase
 {
 	GENERATED_BODY()
     friend class FLateJoinRegressionTest;
+	friend class FLobbyEntryReadyRegressionTest;
 
 public:
+	// [LOBBYLOAD-006] 예상 참여자의 소유 Pawn과 준비 보고를 검증하고 전원 준비를 집계합니다.
+	void ReportLobbyEntryReady(class ATeamProject_MOUPlayerController* PC, int64 UserId);
+	TMap<int64, TWeakObjectPtr<class ATeamProject_MOUPlayerController>> LobbyEntryReadyMembers;
     // [LATEJOIN-005] 새 접속의 식별자로 안전구역 합류 여부를 결정합니다.
     virtual FString InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId, const FString& Options, const FString& Portal = TEXT("")) override;
     // [LATEJOIN-006] 일반 및 심리스 이동 후 관전 제한을 적용하거나 안전구역에서 해제합니다.

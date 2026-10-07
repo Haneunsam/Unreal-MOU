@@ -57,6 +57,12 @@ void AProjectGameStateBase::PublishWarehouseStorage()
 	}
 }
 
+// [LOBBYLOAD-005] 클라이언트가 초기 창고 스냅샷을 수신했는지 확인합니다.
+bool AProjectGameStateBase::HasLobbyEntryStorage() const
+{
+	return WarehouseStorage.Revision > 0;
+}
+
 void AProjectGameStateBase::OnRep_WarehouseStorage()
 {
 	if (WarehouseStorage.Revision <= 0) return;
@@ -353,6 +359,7 @@ void AProjectGameStateBase::OnRep_EconomyCurrentHalfDay()
 void AProjectGameStateBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AProjectGameStateBase, LobbyEntryPhase);
 	DOREPLIFETIME(AProjectGameStateBase, Gold);
 	DOREPLIFETIME(AProjectGameStateBase, WarehouseStorage);
 	DOREPLIFETIME(AProjectGameStateBase, Reputation);

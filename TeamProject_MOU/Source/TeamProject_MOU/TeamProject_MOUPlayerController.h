@@ -34,6 +34,18 @@ class ATeamProject_MOUPlayerController : public APlayerController
 	GENERATED_BODY()
 
 public:
+	// [LOBBYLOAD-007] 소유 클라이언트가 최초 로비 플레이 준비 완료를 서버에 보고합니다.
+	UFUNCTION(Server, Reliable)
+	void ServerReportLobbyEntryReady(int64 UserId);
+	// [LOBBYLOAD-008] 전원 준비 상태를 확인하여 로딩 표시와 로컬 조작 잠금을 갱신합니다.
+	void UpdateLobbyEntryWait();
+	// [LOBBYLOAD-009] 입장 대기 중 이동·점프·상호작용을 포함한 게임 입력을 차단합니다.
+	virtual void BuildInputStack(TArray<UInputComponent*>& InputStack) override;
+	// [LOBBYLOAD-010] 소유 Pawn과 필수 복제 데이터가 준비되었는지 검사합니다.
+	UFUNCTION(BlueprintNativeEvent, Category = "Loading|LobbyEntry")
+	bool IsLobbyEntryLocallyReady() const;
+	bool bLobbyEntryInputLocked = false;
+	double NextLobbyEntryReadyReport = 0.0;
     // [LATEJOIN-014] 호스트가 생존 관전 대상을 선택하여 먼 거리의 대상도 복제되게 합니다.
     UFUNCTION(Server, Reliable)
     void ServerCycleLateJoinTarget(int32 Direction);

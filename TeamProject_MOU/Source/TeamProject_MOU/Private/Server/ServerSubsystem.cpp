@@ -16,6 +16,7 @@
 //   여기서 다시 적으면 서버가 상한을 바꿨을 때 조용히 어긋난다.
 
 #include "Server/ServerSubsystem.h"
+#include "Base/ProjectGameInstanceBase.h"
 #include "Server/Lobby/HostDisconnectedWidget.h"
 #include "Data/CustomizationTypes.h"
 #include "Server/Net/CustomizationWire.h"
@@ -768,6 +769,8 @@ bool UServerSubsystem::IsSelfReady() const
 // [RTITLE-004] 방을 떠날 때 제목과 대기 중 요청을 포함한 방 상태를 비운다.
 void UServerSubsystem::ClearRoomState()
 {
+	if (UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance()))
+		Instance->FinishLobbyEntryWait();
     PlaySessionId.Reset();
     AdmittedPlaySessions.Reset();
 	++CustomizationRequestId; // Ignore replies from a previous room/session.
@@ -1033,6 +1036,13 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			{
 				RoomMembers      = Event.Members;
 				bAllMembersReady = Event.bAllReady;
+				// 백엔드가 퇴장을 확정한 참여자만 최초 입장 대기 명단에서 제외합니다.
+				if (IsRoomHost())
+					if (UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance());
+						Instance && Instance->bLobbyEntryWaiting)
+						for (auto It = Instance->LobbyEntryExpectedMembers.CreateIterator(); It; ++It)
+							if (!RoomMembers.ContainsByPredicate([Id = *It](const FMOURoomMember& Member) { return Member.UserId == Id; }))
+								It.RemoveCurrent();
 				UE_LOG(LogMOUServer, Verbose, TEXT("대기실 #%d 명단 %d명 (전원준비 %s)"),
 					Event.RoomId, RoomMembers.Num(), bAllMembersReady ? TEXT("O") : TEXT("X"));
 				OnRoomMembersChanged.Broadcast(Event.RoomId, RoomMembers, bAllMembersReady);
@@ -1114,6 +1124,12 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			// ★ UI 보다 먼저 브로드캐스트하지 않는다. 위젯이 안내 문구를 띄우고
 			//   BP 훅이 돌 기회를 준 뒤에 실제 행동을 한다 — OpenLevel 이 시작되면
 			//   위젯은 곧 파괴되므로 순서를 뒤집으면 안내가 화면에 안 뜬다.
+			if (UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance()))
+			{
+				TArray<int64> Members;
+				for (const FMOURoomMember& Member : RoomMembers) Members.Add(Member.UserId);
+				Instance->BeginLobbyEntryWait(Members);
+			}
 			OnRoomGameStarted.Broadcast(Event.Join, bIsHost);
 
 			if (bIsHost)

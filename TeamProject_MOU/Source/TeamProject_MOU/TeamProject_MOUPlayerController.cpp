@@ -15,6 +15,9 @@
 #include "Item/TerminalShopWidget.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Base/ProjectGameStateBase.h"
+#include "Base/ProjectGameInstanceBase.h"
+#include "AbilitySystemComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/DataTable.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
@@ -42,6 +45,72 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Camera/CameraComponent.h"
+
+// [LOBBYLOAD-007] 소유 클라이언트가 최초 로비 플레이 준비 완료를 서버에 보고합니다.
+void ATeamProject_MOUPlayerController::ServerReportLobbyEntryReady_Implementation(int64 UserId)
+{
+	if (ATeamProject_MOUGameMode* Mode = GetWorld()->GetAuthGameMode<ATeamProject_MOUGameMode>())
+		Mode->ReportLobbyEntryReady(this, UserId);
+}
+
+// [LOBBYLOAD-010] 소유 Pawn과 필수 복제 데이터가 준비되었는지 검사합니다.
+bool ATeamProject_MOUPlayerController::IsLobbyEntryLocallyReady_Implementation() const
+{
+	const UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance());
+	const AProjectGameStateBase* State = GetWorld()->GetGameState<AProjectGameStateBase>();
+	const AMainCharacter* ReadyCharacter = Cast<AMainCharacter>(GetPawn());
+	const UAbilitySystemComponent* ASC = ReadyCharacter ? ReadyCharacter->GetAbilitySystemComponent() : nullptr;
+	return Instance && Instance->MapLoaded && State && State->HasLobbyEntryStorage()
+		&& PlayerState && ReadyCharacter && ReadyCharacter->HasActorBegunPlay()
+		&& ReadyCharacter->IsLocallyControlled() && ReadyCharacter->GetPlayerState() == PlayerState
+		&& ASC && ASC->GetAvatarActor() == ReadyCharacter;
+}
+
+// [LOBBYLOAD-008] 전원 준비 상태를 확인하여 로딩 표시와 로컬 조작 잠금을 갱신합니다.
+void ATeamProject_MOUPlayerController::UpdateLobbyEntryWait()
+{
+	UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance());
+	AProjectGameStateBase* State = GetWorld()->GetGameState<AProjectGameStateBase>();
+	if (!Instance) return;
+	const bool bWaiting = (State && State->LobbyEntryPhase == 1)
+		|| (IsLocalController() && Instance->bLobbyEntryWaiting && (!State || State->LobbyEntryPhase != 2));
+	if (bWaiting != bLobbyEntryInputLocked)
+	{
+		SetIgnoreMoveInput(bWaiting);
+		SetIgnoreLookInput(bWaiting);
+		bLobbyEntryInputLocked = bWaiting;
+	}
+	if (bWaiting)
+	{
+		if (AMainCharacter* ReadyCharacter = Cast<AMainCharacter>(GetPawn()))
+			ReadyCharacter->GetCharacterMovement()->StopMovementImmediately();
+	}
+	if (!IsLocalController()) return;
+	if (State && State->LobbyEntryPhase == 2 && Instance->bLobbyEntryWaiting)
+	{
+		Instance->FinishLobbyEntryWait();
+		SetInputMode(FInputModeGameOnly());
+		bShowMouseCursor = false;
+		return;
+	}
+	if (!bWaiting || !Instance->bLobbyEntryWaiting) return;
+	Instance->ShowLobbyEntryLoading();
+	if (State && State->LobbyEntryPhase == 1 && IsLobbyEntryLocallyReady()
+		&& GetWorld()->GetTimeSeconds() >= NextLobbyEntryReadyReport)
+	{
+		NextLobbyEntryReadyReport = GetWorld()->GetTimeSeconds() + 1.0;
+		if (UServerSubsystem* Server = Instance->GetSubsystem<UServerSubsystem>())
+			ServerReportLobbyEntryReady(Server->GetLoginResult().UserId);
+	}
+}
+
+// [LOBBYLOAD-009] 입장 대기 중 이동·점프·상호작용을 포함한 게임 입력을 차단합니다.
+void ATeamProject_MOUPlayerController::BuildInputStack(TArray<UInputComponent*>& InputStack)
+{
+	Super::BuildInputStack(InputStack);
+	const UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance());
+	if (bLobbyEntryInputLocked || (Instance && Instance->bLobbyEntryWaiting)) InputStack.Reset();
+}
 
 ATeamProject_MOUPlayerController::ATeamProject_MOUPlayerController()
 {
@@ -443,6 +512,7 @@ bool ATeamProject_MOUPlayerController::ShouldUseTouchControls() const
 // [LATEJOIN-011] 복제된 합류 제한에 따라 관전을 시작하고 기존 카메라를 갱신합니다.
 void ATeamProject_MOUPlayerController::PlayerTick(float DeltaTime)
 {
+	UpdateLobbyEntryWait();
 	Super::PlayerTick(DeltaTime);
     if (HasAuthority() && bWaitForSafeLobby)
     {
