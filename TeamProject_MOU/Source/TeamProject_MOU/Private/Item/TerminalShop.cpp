@@ -65,7 +65,7 @@ void ATerminalShop::Interact_Implementation(AActor* Interactor)
 	}
 
 	Widget->InitializeShop(this);
-	Widget->AddToViewport(1000);
+	Widget->AddToViewport(10);
 	OpenWidget = Widget;
 	Widget->ActivateShopInput();
 }
@@ -84,3 +84,15 @@ void ATerminalShop::NotifyWidgetClosed(UTerminalShopWidget* ClosedWidget)
 		OpenWidget.Reset();
 	}
 }
+
+void ATerminalShop::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UTerminalShopWidget* Widget = OpenWidget.Get())
+	{
+		Widget->ForceCloseShopImmediately();
+		OpenWidget.Reset();
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+

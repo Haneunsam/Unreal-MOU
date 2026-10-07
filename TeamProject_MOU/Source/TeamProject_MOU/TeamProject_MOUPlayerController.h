@@ -5,8 +5,10 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "Item/DeliveryData.h"
+#include "Item/TerminalShopTypes.h"
 #include "TeamProject_MOUPlayerController.generated.h"
 
+class UDataTable;
 class UInputMappingContext;
 class UInputAction;
 class UUserWidget;
@@ -19,6 +21,7 @@ class USpectatorOverlayWidget;
 class UInGameMenuWidget;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWarehouseDeliverySaveCompleted, bool, bSucceeded);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTerminalPurchaseCompleted, bool, bSucceeded, const FText&, ErrorMessage);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnViewTargetActorChanged, AActor*, NewViewTarget, bool, bIsSelf);
 
 /**
@@ -66,6 +69,21 @@ public:
 
 	UFUNCTION(Client, Reliable)
 	void ClientWarehouseDeliverySaveCompleted(bool bSucceeded);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Economy")
+	void ServerSpendGold(int32 Amount);
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Terminal Shop")
+	void ServerRequestTerminalPurchase(const TArray<FTerminalCartItem>& Items);
+
+	UFUNCTION(Client, Reliable, Category = "Terminal Shop")
+	void ClientTerminalPurchaseCompleted(bool bSucceeded, const FText& ErrorMessage);
+
+	UPROPERTY(BlueprintAssignable, Category = "Terminal Shop")
+	FOnTerminalPurchaseCompleted OnTerminalPurchaseCompleted;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Terminal Shop")
+	TObjectPtr<UDataTable> TerminalShopItemTable;
 
 	// ---------------------------------------------------------
 	// [차량 탑승 입력 전환] - 차량(AVehicleBase)이 탑승/하차 시 호출한다.
@@ -266,6 +284,7 @@ protected:
 	/** Gameplay initialization */
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void PreClientTravel(const FString& PendingURL, ETravelType TravelType, bool bIsSeamlessTravel) override;
 
 	virtual void PlayerTick(float DeltaTime) override;
 

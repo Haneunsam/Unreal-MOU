@@ -32,7 +32,12 @@ public:
 	// [TSHOP-004] UI가 닫혔을 때 로컬 참조를 해제한다.
 	void NotifyWidgetClosed(UTerminalShopWidget* ClosedWidget);
 
+	UFUNCTION(BlueprintPure, Category="Terminal Shop")
+	float GetInteractionRadius() const { return InteractionRadius; }
+
 protected:
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Terminal Shop")
 	TObjectPtr<UBoxComponent> InteractionBox;
 

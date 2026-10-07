@@ -6,6 +6,7 @@
 #include "Engine/World.h"
 #include "Subsystems/WarehouseDataSubsystem.h"
 #include "UI/MOU_GameUserSettings.h"
+#include "TeamProject_MOUPlayerController.h"
 
 void UProjectGameInstanceBase::Init()
 {
@@ -83,6 +84,17 @@ void UProjectGameInstanceBase::SavePendingDeliveryData(const FDeliveryData& InDe
 	if (UWarehouseDataSubsystem* Warehouse = GetSubsystem<UWarehouseDataSubsystem>())
 	{
 		Warehouse->NotifyPendingDeliveryChanged();
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		if (World->GetNetMode() == NM_Client)
+		{
+			if (ATeamProject_MOUPlayerController* PC = Cast<ATeamProject_MOUPlayerController>(World->GetFirstPlayerController()))
+			{
+				PC->ServerSaveWarehouseDelivery(InDeliveryData.SelectedItems);
+			}
+		}
 	}
 }
 

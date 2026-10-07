@@ -27,7 +27,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Terminal Shop")
 	void CloseShop();
 
+	UFUNCTION(BlueprintCallable, Category="Terminal Shop")
+	void ForceCloseShopImmediately();
+
 protected:
+	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
+
 	// [TSHOP-008] Widget BP 콘텐츠를 기준 해상도에 맞춰 화면에 배치한다.
 	virtual void NativeOnInitialized() override;
 
@@ -43,6 +49,9 @@ private:
 
 	// [TSHOP-014] 닫기 애니메이션 종료 후 입력 모드와 위젯 참조를 정리한다.
 	void FinishCloseShop();
+
+	void HandlePreLoadMap(const FString& MapName);
+	FDelegateHandle PreLoadMapHandle;
 
 	TWeakObjectPtr<ATerminalShop> OwningShop;
 
