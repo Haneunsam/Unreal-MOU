@@ -24,8 +24,8 @@ ACannon::ACannon()
 {
 	PrimaryActorTick.bCanEverTick = true;
 
-	// 캐릭터 Tick에서 회전이 변경된 뒤
-	// 마지막에 Passenger 위치/회전을 다시 SeatPoint에 고정
+	// 캐릭터 Tick에서 위치/회전이 변경된 뒤
+	// 마지막에 Passenger와 Operator 위치/회전을 다시 고정
 	PrimaryActorTick.TickGroup = TG_PostPhysics;
 
 	// 네트워크 복제
@@ -89,6 +89,12 @@ ACannon::ACannon()
 	// =========================================================
 	SeatPoint = CreateDefaultSubobject<USceneComponent>(TEXT("SeatPoint"));
 	SeatPoint->SetupAttachment(PitchPivot);
+
+	// =========================================================
+	// Operator Seat
+	// =========================================================
+	OperatorPoint = CreateDefaultSubobject<USceneComponent>(TEXT("OperatorPoint"));
+	OperatorPoint->SetupAttachment(CannonRoot);
 
 	// =========================================================
 	// Exit Point
@@ -156,6 +162,14 @@ void ACannon::Tick(float DeltaTime)
 	if (Passenger)
 	{
 		LockPassengerToSeat();
+	}
+
+	// =========================================================
+	// Operator 위치 고정
+	// =========================================================
+	if (Operator)
+	{
+		LockOperatorToPoint();
 	}
 
 	// =========================================================
@@ -459,7 +473,26 @@ bool ACannon::TryStartOperating(AMainCharacter* Character)
 
 	// 대포를 어떤 플레이어가 조작 중인지 확인
 	Operator = Character;
-	
+
+	// =========================================================
+	// Operator 위치 고정
+	// =========================================================	
+	if (UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
+	{
+		Movement->StopMovementImmediately();
+		Movement->DisableMovement();
+	}
+
+	if (OperatorPoint)
+	{
+		Character->AttachToComponent(OperatorPoint, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+
+		if (USceneComponent* Root = Character->GetRootComponent())
+		{
+			Root->SetRelativeLocationAndRotation(FVector::ZeroVector, FRotator::ZeroRotator);
+		}
+	}
+
 	// =========================================================
 	// Cannon의 네트워크 Owner를 현재 Operator의 Controller로 설정
 	// Cannon은 원래 아무 플레이어 소유가 아니기 때문에
@@ -508,11 +541,31 @@ void ACannon::ReleaseOperator()
 		return;
 	}
 
+	AMainCharacter* OldOperator = Operator.Get();
+
 	// Listen Server 로컬 Operator 입력 제거
 	RestoreLocalOperatorInput();
 
 	// 대포 조작 권한 해제
 	Operator = nullptr;
+
+	if (IsValid(OldOperator))
+	{
+		// OperatorPoint에서 분리
+		OldOperator->DetachFromActor(
+			FDetachmentTransformRules::KeepWorldTransform
+		);
+
+		// 이동 복구
+		if (UCharacterMovementComponent* Movement =
+			OldOperator->GetCharacterMovement())
+		{
+			Movement->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	// Cannon 네트워크 Owner도 해제
+	SetOwner(nullptr);
 
 	ForceNetUpdate();
 
@@ -706,6 +759,7 @@ void ACannon::ApplyLocalOperatorInput(AMainCharacter* Character)
 
 	// Cannon을 해당 PlayerController 입력 스택에 추가
 	EnableInput(PC);
+	PC->SetIgnoreMoveInput(true);
 
 	// 한 번만 Binding 생성
 	if (InputComponent && !bFireInputBound)
@@ -737,6 +791,7 @@ void ACannon::RestoreLocalOperatorInput()
 		if (APlayerController* PC = Cast<APlayerController>(Character->GetController()))
 		{
 			DisableInput(PC);
+			PC->SetIgnoreMoveInput(false);
 		}
 	}
 	LocalOperatorInputCharacter = nullptr;
@@ -876,6 +931,29 @@ void ACannon::LockPassengerToSeat()
 		// SeatPoint 기준 위치 0, SeatPoint 기준 회전 0
 		// 즉 BP에서 설정한 SeatPoint Transform을 플레이어가 정확히 그대로 사용
 		Root->SetRelativeLocationAndRotation(FVector::ZeroVector, FRotator::ZeroRotator);
+	}
+}
+
+void ACannon::LockOperatorToPoint()
+{
+	if (!Operator || !OperatorPoint)
+	{
+		return;
+	}
+
+	USceneComponent* Root = Operator->GetRootComponent();
+
+	if (!Root)
+	{
+		return;
+	}
+
+	if (Root->GetAttachParent() == OperatorPoint)
+	{
+		Root->SetRelativeLocationAndRotation(
+			FVector::ZeroVector,
+			FRotator::ZeroRotator
+		);
 	}
 }
 
@@ -1209,25 +1287,12 @@ void ACannon::CleanupInvalidUsers()
 		if (!IsValid(Operator.Get()))
 		{
 			Operator = nullptr;
+			SetOwner(nullptr);
 			ForceNetUpdate();
 		}
 		else if (Operator->IsDead() || Operator->IsGroggy())
 		{
 			ReleaseOperator();
-		}
-		else
-		{
-			// 조작자는 대포에 붙어 있지 않으므로 너무 멀리 걸어가면 조작권을 자동으로 해제
-			const float Distance =
-				FVector::Dist(
-					Operator->GetActorLocation(),
-					GetActorLocation()
-				);
-
-			if (Distance > OperatorMaxDistance)
-			{
-				ReleaseOperator();
-			}
 		}
 	}
 }
