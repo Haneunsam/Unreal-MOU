@@ -13,6 +13,24 @@ class TEAMPROJECT_MOU_API UProjectGameInstanceBase : public UGameInstance
 	GENERATED_BODY()
 
 public:
+	// [LOBBYLOAD-001] 최초 로비 입장의 참여 예정 명단과 전용 로딩을 시작합니다.
+	void BeginLobbyEntryWait(const TArray<int64>& Members);
+	// [LOBBYLOAD-002] 현재 월드에 전용 로딩 위젯을 표시합니다.
+	void ShowLobbyEntryLoading();
+	// [LOBBYLOAD-003] 전원 준비 또는 접속 취소 시 전용 로딩을 정리합니다.
+	void FinishLobbyEntryWait();
+	// 최초 MainLobby 출발에만 설정되며 일반 맵 이동과 재참여에는 설정하지 않습니다.
+	UPROPERTY(BlueprintReadOnly, Category = "Loading|LobbyEntry")
+	bool bLobbyEntryWaiting = false;
+	TSet<int64> LobbyEntryExpectedMembers;
+	UPROPERTY(EditDefaultsOnly, Category = "Loading|LobbyEntry")
+	TSoftClassPtr<class UUserWidget> LobbyEntryLoadingClass = TSoftClassPtr<UUserWidget>(FSoftObjectPath(TEXT("/Game/02_JSY/MainLobby/LobbyLoading/WBP_LobbyLoading.WBP_LobbyLoading_C")));
+	UPROPERTY(Transient)
+	TObjectPtr<class UUserWidget> LobbyEntryLoadingWidget;
+	// 월드의 UMG 일괄 제거와 분리하여 맵 교체 중에도 전용 화면을 유지합니다.
+	TSharedPtr<class SWidget> LobbyEntryLoadingSlate;
+    // [HOSTLOST-009] 확인 후 복귀를 지원하는 네트워크 세션을 생성합니다.
+    virtual TSubclassOf<UOnlineSession> GetOnlineSessionClass() override;
 	// GameInstance가 생성될 때 맵 로딩 감지 델리게이트를 등록
 	virtual void Init() override;
 	// GameInstance 종료 시 등록했던 맵 로딩 델리게이트를 해제

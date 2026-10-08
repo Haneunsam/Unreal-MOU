@@ -38,6 +38,11 @@ class TEAMPROJECT_MOU_API AProjectGameStateBase : public AGameStateBase
 public:
 	AProjectGameStateBase();
 	virtual void BeginPlay() override;
+	// 0: 일반 플레이, 1: 최초 로비 입장 대기, 2: 전원 준비 완료.
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Loading|LobbyEntry")
+	uint8 LobbyEntryPhase = 0;
+	// [LOBBYLOAD-005] 클라이언트가 초기 창고 스냅샷을 수신했는지 확인합니다.
+	bool HasLobbyEntryStorage() const;
 
 	// Publish the server's persistent warehouse; late joiners receive the same snapshot.
 	void PublishWarehouseStorage();

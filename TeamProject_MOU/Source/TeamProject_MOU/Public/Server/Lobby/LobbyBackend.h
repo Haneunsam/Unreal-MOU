@@ -86,6 +86,7 @@ enum class EServerClientEventType : uint8
 	 * 참여자에게만 온다 — 호스트는 자기가 보낸 신호를 되받지 않는다.
 	 */
 	RoomHostReady,
+	RoomGuestConnectPrepare,
 	/** 연결이 끊겼다. 서버 종료, 강제 차단, 프레이밍 오류 등. */
 	Disconnected,
 
@@ -166,6 +167,8 @@ struct FServerClientEvent
 
 	/** Type == RoomStart 일 때만 유효. 방장 전용 relay host-facing 경로들 (v11). */
 	TArray<FMOUGameRelayRoute> HostRelayRoutes;
+    uint64 ConnectRequestId = 0;
+    int64 GuestUserId = 0;
 
 	/** Type == RoomHostReady 일 때만 유효. 이 참여자 전용 relay guest-facing 경로 (v11). */
 	FMOUGameRelayRoute GuestRelayRoute;
@@ -322,6 +325,8 @@ public:
 	 * 위젯이나 게임 로직이 직접 부를 일은 없다.
 	 */
 	virtual void NotifyHostReady() = 0;
+    // [REJOIN-005] 중도 입장 요청 번호와 호스트의 준비 결과를 서버에 전송한다.
+    virtual bool SendGuestConnectAck(int32 RoomId, int64 GuestUserId, uint64 ConnectRequestId, bool bReady) { return false; }
 
 	// ── 도달성 프로브 (v9) ────────────────────────────────────────────
 	//

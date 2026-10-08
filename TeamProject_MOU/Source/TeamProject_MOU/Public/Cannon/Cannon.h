@@ -66,6 +66,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cannon|Components")
 	TObjectPtr<USceneComponent> SeatPoint;
 
+	// 대포 조작자 고정 위치
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cannon|Components")
+	TObjectPtr<USceneComponent> OperatorPoint;
+
 	// 탑승 해제 후 이동시킬 위치
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cannon|Components")
 	TObjectPtr<USceneComponent> ExitPoint;
@@ -88,10 +92,6 @@ public:
 	// Passenger와 Operator가 같은 플레이어가 되지 않도록 TryStartOperating()에서 검사
 	UPROPERTY(ReplicatedUsing = OnRep_Operator,BlueprintReadOnly,Category = "Cannon|State")
 	TObjectPtr<AMainCharacter> Operator;
-
-	// 조작자가 대포에서 이 거리 이상 멀어지면 자동으로 조작 해제
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cannon|Operator")
-	float OperatorMaxDistance = 350.0f;
 
 	// 플레이어 카메라 ↔ 대포 카메라 전환 시간
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cannon|Camera")
@@ -286,6 +286,9 @@ protected:
 
 	// 탑승 중인 플레이어를 SeatPoint에 정확히 고정
 	void LockPassengerToSeat();
+
+	// 조작 중인 플레이어를 OperatorPoint에 정확히 고정
+	void LockOperatorToPoint();
 
 	// Operator의 시선을 이용해 대포 조준 갱신
 	void UpdateCannonAim(float DeltaTime);

@@ -130,6 +130,30 @@ bool UMOUIpNetDriver::InitBase(bool bInitAsClient, FNetworkNotify* InNotify, con
 	return true;
 }
 
+// [REJOIN-004] 실행 중인 리슨 소켓에서 중도 입장자의 릴레이 경로를 등록한다.
+bool UMOUIpNetDriver::RegisterLiveHostRelay(const FMOUPendingRelayRegistration& Registration)
+{
+    if (!GetSocket() || !Registration.IsPresent() || ServerConnection) return false;
+    SendRelayRegistration(GetSocket(), Registration, MOU::ERelayPeerRole::Host);
+    return true;
+}
+
+// [REJOIN-010] 실행 중인 리슨 소켓에서 참여자의 공인 엔드포인트로 홀펀칭한다.
+void UMOUIpNetDriver::PunchLivePeer(const FString& Address, int32 Port)
+{
+    ISocketSubsystem* Sockets = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+    if (!Sockets || !GetSocket() || ServerConnection || Port <= 0 || Port > 65535) return;
+    TSharedRef<FInternetAddr> Destination = Sockets->CreateInternetAddr();
+    bool bValid = false;
+    Destination->SetIp(*Address, bValid);
+    Destination->SetPort(Port);
+    if (!bValid) return;
+    const MOU::HostProbeDatagram Payload{MOU::kHostProbeMagic, 0};
+    int32 Sent = 0;
+    for (int32 Attempt = 0; Attempt < 3; ++Attempt)
+        GetSocket()->SendTo(reinterpret_cast<const uint8*>(&Payload), sizeof(Payload), Sent, *Destination);
+}
+
 bool UMOUIpNetDriver::InitListen(FNetworkNotify* InNotify, FURL& ListenURL,
 	bool bReuseAddressAndPort, FString& Error)
 {

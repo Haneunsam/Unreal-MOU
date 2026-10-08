@@ -8,6 +8,21 @@
 class AItemBase;
 class UDataTable;
 
+USTRUCT()
+struct FDeferredDeliveryItemSpawn
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<AItemBase> SpawnedItem;
+
+	UPROPERTY()
+	FStoredItemInstanceData SaveData;
+
+	UPROPERTY()
+	FTransform SpawnTransform;
+};
+
 /**
  * AItemSpawner
  * DataTable을 읽어 아이템을 월드에 스폰하는 "공장" 액터.
@@ -52,6 +67,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawner", meta = (ClampMin = "0.0", Units = "s"))
 	float AutoSpawnDelay = 0.5f;
 
+	// 배달품은 스트리밍 완료 후에도 물리 씬이 안정화될 시간을 확보한 다음 활성화합니다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawner|Delivery", meta = (ClampMin = "0.0", Units = "s"))
+	float DeliverySpawnDelay = 1.0f;
+
 	// 확률 스폰 슬롯: 배열 크기 = 슬롯 개수, 각 칸에 DT_Item 행 이름 지정.
 	// 스폰 시 이 중 한 칸을 균등 확률(1/N)로 뽑는다. 빈 칸(None)이 뽑히면 아무것도 안 나옴(꽝).
 	// 예) 5칸 중 4칸만 채우면 각 20%씩 아이템 + 20% 꽝.
@@ -74,8 +93,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Spawner")
 	AItemBase* SpawnItemAt(FName RowName, FVector Location, FRotator Rotation);
 
-	// 저장된 아이템 상태를 기반으로 지정 위치/회전에 스폰합니다.
+	// [SPAWNER-003] 저장된 배달품을 Deferred 상태로 만들고 맵 준비 완료 후 활성화합니다.
 	UFUNCTION(BlueprintCallable, Category = "Spawner")
 	AItemBase* SpawnItemFromSaveData(const FStoredItemInstanceData& ItemSaveData, FVector Location, FRotator Rotation);
 #pragma endregion
+
+private:
+	// [SPAWNER-004] 비동기 로딩과 스트리밍 레벨의 로드·가시성 처리가 끝났는지 검사합니다.
+	bool IsDeliverySpawnWorldReady() const;
+
+	// [SPAWNER-005] 준비 완료까지 대기한 배달품의 Construction과 BeginPlay를 실행합니다.
+	void FinishDeferredDeliverySpawns();
+
+	UPROPERTY(Transient)
+	TArray<FDeferredDeliveryItemSpawn> DeferredDeliverySpawns;
+
+	FTimerHandle DeferredDeliverySpawnTimerHandle;
+	float DeliverySpawnEarliestTime = 0.0f;
 };
