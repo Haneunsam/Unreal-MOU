@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "TeamProject_MOUGameMode.h"
+#include "TeamProject_MOUPlayerController.h"
+#include "Server/ServerSubsystem.h"
 
 #include "Base/ItemBase.h"
 #include "Base/ProjectGameInstanceBase.h"
@@ -21,6 +23,59 @@
 #include "Misc/PackageName.h"
 #include "TimerManager.h"
 
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+#include "Engine/Engine.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLobbyEntryReadyRegressionTest, "MOU.LobbyEntry.ReadyBarrier",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+// [LOBBYLOAD-011] 늦은 접속, 중복 보고, 명단 외 보고와 전원 준비 해제를 검증합니다.
+bool FLobbyEntryReadyRegressionTest::RunTest(const FString& Parameters)
+{
+	TGuardValue<bool> AllowActorEvents(GAllowActorScriptExecutionInEditor, true);
+	UProjectGameInstanceBase* Instance = NewObject<UProjectGameInstanceBase>(GEngine);
+	Instance->InitializeStandalone();
+	UWorld* World = Instance->GetWorld();
+	UClass* ModeClass = LoadClass<ATeamProject_MOUGameMode>(nullptr,
+		TEXT("/Game/01_LDJ/GameSystem/BP/BP_Gamemode.BP_Gamemode_C"));
+	if (!TestNotNull(TEXT("Production game mode"), ModeClass)) { Instance->Shutdown(); return false; }
+	auto* Mode = World->SpawnActor<ATeamProject_MOUGameMode>(ModeClass);
+	auto* State = World->SpawnActor<AProjectGameStateBase>();
+	World->SetGameState(State);
+	Mode->GameState = State;
+	if (!TestNotNull(TEXT("Production game state"), State)) { Instance->Shutdown(); return false; }
+	const FString Map = UGameplayStatics::GetCurrentLevelName(World, true);
+	Mode->LobbyMap = TSoftObjectPtr<UWorld>(FSoftObjectPath(TEXT("/Game/Test/") + Map + TEXT(".") + Map));
+	Instance->bLobbyEntryWaiting = true;
+	Instance->LobbyEntryExpectedMembers = { 101, 202 };
+	State->LobbyEntryPhase = 1;
+	auto* Host = World->SpawnActor<ATeamProject_MOUPlayerController>(Mode->PlayerControllerClass);
+	auto* Guest = World->SpawnActor<ATeamProject_MOUPlayerController>(Mode->PlayerControllerClass);
+	if (!Host->PlayerState) Host->PlayerState = World->SpawnActor<APlayerState>();
+	if (!Guest->PlayerState) Guest->PlayerState = World->SpawnActor<APlayerState>();
+	auto* HostPawn = World->SpawnActor<AMainCharacter>();
+	auto* GuestPawn = World->SpawnActor<AMainCharacter>();
+	Host->Possess(HostPawn);
+	Mode->ReportLobbyEntryReady(Host, 999);
+	TestEqual(TEXT("Unexpected member is ignored"), Mode->LobbyEntryReadyMembers.Num(), 0);
+	Mode->ReportLobbyEntryReady(Host, 101);
+	TestEqual(TEXT("Host alone cannot release pending guest"), State->LobbyEntryPhase, uint8(1));
+	Mode->ReportLobbyEntryReady(Host, 202);
+	TestEqual(TEXT("One controller cannot report as two members"), State->LobbyEntryPhase, uint8(1));
+	Mode->ReportLobbyEntryReady(Guest, 202);
+	TestEqual(TEXT("Guest without pawn cannot release barrier"), State->LobbyEntryPhase, uint8(1));
+	Guest->Possess(GuestPawn);
+	Mode->ReportLobbyEntryReady(Guest, 202);
+	TestEqual(TEXT("All expected members release barrier"), State->LobbyEntryPhase, uint8(2));
+	Instance->FinishLobbyEntryWait();
+	TestFalse(TEXT("Completion clears initial-entry flag"), Instance->bLobbyEntryWaiting);
+	TestTrue(TEXT("Completion clears expected roster"), Instance->LobbyEntryExpectedMembers.IsEmpty());
+	Host->Destroy(); Guest->Destroy(); HostPawn->Destroy(); GuestPawn->Destroy(); Mode->Destroy();
+	Instance->Shutdown();
+	return true;
+}
+#endif
+
 ATeamProject_MOUGameMode::ATeamProject_MOUGameMode()
 {
 }
@@ -28,6 +83,12 @@ ATeamProject_MOUGameMode::ATeamProject_MOUGameMode()
 void ATeamProject_MOUGameMode::InitGameState()
 {
 	Super::InitGameState();
+	if (const UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance()))
+	{
+		if (Instance->bLobbyEntryWaiting && IsLobbyLevel())
+			if (AProjectGameStateBase* State = GetGameState<AProjectGameStateBase>())
+				State->LobbyEntryPhase = 1;
+	}
 	RunState = GetWorld()->SpawnActor<ARunState>();
 	GameCycleState = GetWorld()->SpawnActor<AGameCycleState>();
 	LevelTimerState = GetWorld()->SpawnActor<ALevelTimerState>();
@@ -48,6 +109,8 @@ void ATeamProject_MOUGameMode::BeginPlay()
 // [SETTLEMENT-005] 접속 종료된 플레이어를 확인 대상에서 제거하고 남은 인원을 다시 검사합니다.
 void ATeamProject_MOUGameMode::Logout(AController* Exiting)
 {
+	for (auto It = LobbyEntryReadyMembers.CreateIterator(); It; ++It)
+		if (It.Value().Get() == Exiting) It.RemoveCurrent();
 	if (Exiting)
 	{
 		if (APlayerState* PlayerState = Exiting->GetPlayerState<APlayerState>())
@@ -60,9 +123,33 @@ void ATeamProject_MOUGameMode::Logout(AController* Exiting)
 	CheckAllPlayersConfirmedSettlement();
 }
 
+// [LOBBYLOAD-006] 예상 참여자의 소유 Pawn과 준비 보고를 검증하고 전원 준비를 집계합니다.
+void ATeamProject_MOUGameMode::ReportLobbyEntryReady(ATeamProject_MOUPlayerController* PC, int64 UserId)
+{
+	UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance());
+	AProjectGameStateBase* State = GetGameState<AProjectGameStateBase>();
+	if (!Instance || !State || State->LobbyEntryPhase != 1 || !IsLobbyLevel()
+		|| !IsValid(PC) || !PC->GetPawn() || !PC->PlayerState
+		|| !Instance->LobbyEntryExpectedMembers.Contains(UserId)) return;
+	for (const auto& Entry : LobbyEntryReadyMembers)
+		if (Entry.Value.Get() == PC && Entry.Key != UserId) return;
+	if (const auto* Existing = LobbyEntryReadyMembers.Find(UserId))
+		if (Existing->IsValid() && Existing->Get() != PC) return;
+	LobbyEntryReadyMembers.Add(UserId, PC);
+	for (int64 Expected : Instance->LobbyEntryExpectedMembers)
+	{
+		const auto* Ready = LobbyEntryReadyMembers.Find(Expected);
+		if (!Ready || !Ready->IsValid() || !Ready->Get()->GetPawn()) return;
+	}
+	State->LobbyEntryPhase = 2;
+	State->ForceNetUpdate();
+}
+
+// [LATEJOIN-012] 지정된 안전구역을 판별하며 미설정 시 LobbyLevel을 사용합니다.
 bool ATeamProject_MOUGameMode::IsLobbyLevel() const
 {
-	if (LobbyMap.IsNull() || !GetWorld()) return false;
+	if (!GetWorld()) return false;
+	if (LobbyMap.IsNull()) return UGameplayStatics::GetCurrentLevelName(this, true) == TEXT("LobbyLevel");
 	const FString LobbyPackage = LobbyMap.ToSoftObjectPath().GetLongPackageName();
 	return UGameplayStatics::GetCurrentLevelName(this, true) == FPackageName::GetShortName(LobbyPackage);
 }
@@ -516,4 +603,42 @@ void ATeamProject_MOUGameMode::TravelToLobbyAfterTimeout()
 
 	RunState->SetRunState(ERunPhase::Resetting, RunState->RunEndReason);
 	GetWorld()->ServerTravel(LobbyPackageName, false);
+}
+
+// [LATEJOIN-005] 새 접속의 식별자로 안전구역 합류 여부를 결정합니다.
+FString ATeamProject_MOUGameMode::InitNewPlayer(APlayerController* NewPlayerController,
+    const FUniqueNetIdRepl& UniqueId, const FString& Options, const FString& Portal)
+{
+    const FString Error = Super::InitNewPlayer(NewPlayerController, UniqueId, Options, Portal);
+    if (Error.IsEmpty())
+    {
+        if (ATeamProject_MOUPlayerController* PC = Cast<ATeamProject_MOUPlayerController>(NewPlayerController))
+        {
+            PC->PlaySessionId = UGameplayStatics::ParseOption(Options, TEXT("MOUPlaySession"));
+            if (UServerSubsystem* Server = GetGameInstance()->GetSubsystem<UServerSubsystem>())
+                PC->bWaitForSafeLobby = !PC->IsLocalController() && !Server->AdmitPlaySession(PC->PlaySessionId, IsLobbyLevel());
+        }
+    }
+    return Error;
+}
+
+// [LATEJOIN-006] 일반 및 심리스 이동 후 관전 제한을 적용하거나 안전구역에서 해제합니다.
+void ATeamProject_MOUGameMode::GenericPlayerInitialization(AController* C)
+{
+    if (ATeamProject_MOUPlayerController* PC = Cast<ATeamProject_MOUPlayerController>(C))
+    {
+        if (IsLobbyLevel())
+        {
+            PC->bWaitForSafeLobby = false;
+            if (UServerSubsystem* Server = GetGameInstance()->GetSubsystem<UServerSubsystem>())
+                Server->AdmitPlaySession(PC->PlaySessionId, true);
+        }
+        if (PC->PlayerState)
+        {
+            PC->PlayerState->SetIsOnlyASpectator(PC->bWaitForSafeLobby);
+            PC->PlayerState->SetIsSpectator(PC->bWaitForSafeLobby);
+        }
+        if (PC->bWaitForSafeLobby) PC->StartSpectatingOnly();
+    }
+    Super::GenericPlayerInitialization(C);
 }

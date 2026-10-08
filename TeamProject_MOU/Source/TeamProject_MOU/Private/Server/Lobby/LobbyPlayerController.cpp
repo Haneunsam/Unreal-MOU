@@ -2,6 +2,7 @@
 
 #include "Engine/GameInstance.h"
 #include "Server/Lobby/LoginWidgetBase.h"
+#include "Server/Lobby/LobbyWidgetBase.h"
 #include "Server/ServerSubsystem.h"
 #include "TeamProject_MOU.h"
 
@@ -11,6 +12,7 @@ void ALobbyPlayerController::BeginPlay()
 	ShowLoginWidgetIfNeeded();
 }
 
+// [LOBBYRETURN-002] 로그인 여부와 방 상태에 따라 로그인 화면 또는 메인로비 화면을 표시한다.
 void ALobbyPlayerController::ShowLoginWidgetIfNeeded()
 {
 	if (!bAutoShowLoginWidget || !IsLocalPlayerController())
@@ -26,11 +28,33 @@ void ALobbyPlayerController::ShowLoginWidgetIfNeeded()
 		return;
 	}
 
-	// 이미 로그인되어 있으면 다시 묻지 않는다.
-	// (방장이 방을 만들고 리슨서버로 여행해온 경우 ServerSubsystem 은 GameInstance 소유라
-	//  레벨을 넘어가도 로그인 상태가 그대로 살아있다.)
+	if (Chat->IsHostDisconnectPending()) return;
+
+	// 로그인된 사용자는 방에 속해 있지 않을 때 메인로비 화면을 연다.
 	if (Chat->GetConnectionState() == EChatConnectionState::LoggedIn)
 	{
+		// 방에 들어간 상태의 여행에서는 로비 화면을 추가로 열지 않는다.
+		if (Chat->GetCurrentRoomId() != 0)
+		{
+			return;
+		}
+
+		UClass* LobbyClass = LoadClass<ULobbyWidgetBase>(
+			nullptr,
+			TEXT("/Game/02_JSY/MainLobby/WBP_LobbyWidget.WBP_LobbyWidget_C"));
+
+		if (LobbyClass == nullptr)
+		{
+			UE_LOG(LogTeamProject_MOU, Error,
+				TEXT("메인로비 위젯 클래스를 불러오지 못했습니다."));
+			return;
+		}
+
+		if (ULobbyWidgetBase* LobbyWidget =
+			CreateWidget<ULobbyWidgetBase>(this, LobbyClass))
+		{
+			LobbyWidget->AddToViewport();
+		}
 		return;
 	}
 

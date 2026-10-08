@@ -103,6 +103,7 @@ private:
 	bool PumpRecv();
 
 	/** 완성된 패킷 하나를 처리한다. 여기서 FChatMessage / FServerClientEvent 로 변환된다. */
+	// [REJOIN-023] 중도 입장 준비를 포함한 서버 패킷을 게임 스레드 이벤트로 변환한다.
 	void HandlePacket(const MOU::PacketHeader& Header, const TArray<uint8>& Body);
 
 	void PushEvent(EServerClientEventType Type, const FString& Detail = FString());

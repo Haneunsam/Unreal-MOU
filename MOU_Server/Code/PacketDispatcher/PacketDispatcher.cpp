@@ -26,6 +26,7 @@
 namespace MOU::ServerRuntime
 {
 
+	// [REJOIN-017] 인증된 제어 요청과 중도 입장 준비 응답을 핸들러에 전달한다.
 	bool HandlePacket(const SessionPtr& Session, const PacketHeader& Header,
 	                  const std::vector<char>& Body)
 	{
@@ -45,6 +46,7 @@ namespace MOU::ServerRuntime
 		case EOpcode::RoomCustomizationReq: return HandleRoomCustomizationReq(Session, Data, Size);
 		case EOpcode::RoomReadyReq:    return HandleRoomReadyReq(Session, Data, Size);
 		case EOpcode::RoomStartReq:    return HandleRoomStartReq(Session, Data, Size);
+		case EOpcode::RoomGuestConnectAck: return HandleRoomGuestConnectAck(Session, Data, Size);
 		case EOpcode::RoomHostReadyReq: return HandleRoomHostReadyReq(Session, Data, Size);
 
 		// --- 도달성 프로브 (v9) ---

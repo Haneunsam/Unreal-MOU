@@ -53,6 +53,7 @@ namespace MOU::ServerRuntime
 	}
 
 
+	// [NETLIVE-003] 패킷을 처리하고 연결 종료 원인과 계정 해제 완료를 기록한다.
 	void ClientThread(SessionPtr Session)
 	{
 		char Temp[1024];
@@ -67,6 +68,9 @@ namespace MOU::ServerRuntime
 			// 에러(-1) 일 때 send(sock, buf, -1, 0) 이 호출됐다.
 			if (Received <= 0)
 			{
+				const int Error = Received < 0 ? LastNetError() : 0;
+				ServerLog::Print("[종료 감지] UserId=%llu, recv=%d, 오류=%d\n",
+				    static_cast<unsigned long long>(Session->UserId), Received, Error);
 				break;
 			}
 
@@ -125,9 +129,12 @@ namespace MOU::ServerRuntime
 		            static_cast<unsigned long long>(Session->UserId));
 
 		Context().Sessions.Remove(Session);
+		ServerLog::Print("[계정 해제 완료] UserId=%llu\n",
+		    static_cast<unsigned long long>(Session->UserId));
 		ServerLog::Print("       현재 접속자 %zu명\n", Context().Sessions.Count());
 	}
 
+// [NETLIVE-002] 서버를 초기화하고 종료 감지 설정을 적용한 연결을 세션으로 등록한다.
 int RunServer(int argc, char** argv)
 {
     ServerLog::Initialize();
@@ -359,6 +366,14 @@ int RunServer(int argc, char** argv)
 		if (ClientSock == kInvalidSocket)
 		{
 			ServerLog::Print("accept() 실패: %d\n", LastNetError());
+			continue;
+		}
+
+		if (!ConfigureSessionSocket(ClientSock))
+		{
+			const int Error = LastNetError();
+			ServerLog::Print("[접속 실패] TCP 생존 확인/송신 제한 설정 실패: 오류=%d\n", Error);
+			CloseSocket(ClientSock);
 			continue;
 		}
 

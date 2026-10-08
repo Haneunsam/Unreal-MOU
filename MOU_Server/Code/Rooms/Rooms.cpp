@@ -19,6 +19,7 @@ namespace
 		uint64_t    UserId = 0;
 		std::string Name;
 		bool        bReady = false;
+		uint64_t ConnectRequestId = 0;
 		uint8_t     SlotIndex = 0;
 		CharacterCustomization Customization;
 	};
@@ -54,6 +55,7 @@ namespace
 
 	std::mutex               GMutex;
 	std::map<uint32_t, Room> GRooms;       // RoomId -> Room. 번호순 정렬이 목록 순서로도 쓸 만하다
+	uint64_t GNextConnectRequestId = 1;
 	uint32_t                 GNextRoomId = 1;
 
 	// --- 아래 헬퍼들은 전부 GMutex 를 이미 잡은 상태에서만 부른다 ---
@@ -174,10 +176,13 @@ ERoomResult Create(uint64_t HostUserId, const std::string& HostName,
 	return ERoomResult::Success;
 }
 
+// [REJOIN-001] 방 상태와 입장 조건을 검사하고 참여자를 등록한다.
 ERoomResult Join(uint32_t RoomId, uint64_t UserId, const std::string& Name,
                  const std::string& Password,
-                 std::vector<HostCandidate>& OutCandidates, bool& bOutLanOnly)
+                 std::vector<HostCandidate>& OutCandidates, bool& bOutLanOnly,
+                 JoinContext* OutContext)
 {
+    if (OutContext) *OutContext = {};
 	std::lock_guard<std::mutex> Lock(GMutex);
 
 	auto It = GRooms.find(RoomId);
@@ -187,11 +192,9 @@ ERoomResult Join(uint32_t RoomId, uint64_t UserId, const std::string& Name,
 	}
 
 	Room& R = It->second;
+    if (R.State != ERoomState::Waiting && R.State != ERoomState::InGame)
+        return ERoomResult::InvalidRequest;
 
-	if (R.State != ERoomState::Waiting)
-	{
-		return ERoomResult::AlreadyStarted;
-	}
 	if (R.bHasPassword && Password != R.Password)
 	{
 		return ERoomResult::WrongPassword;
@@ -205,6 +208,7 @@ ERoomResult Join(uint32_t RoomId, uint64_t UserId, const std::string& Name,
 		{
 			OutCandidates = R.Candidates;
 			bOutLanOnly   = R.bLanOnly;
+            if (OutContext) *OutContext = {R.State, R.HostUserId, M.ConnectRequestId};
 			return ERoomResult::Success;
 		}
 	}
@@ -223,6 +227,8 @@ ERoomResult Join(uint32_t RoomId, uint64_t UserId, const std::string& Name,
 	Member NewMember;
 	NewMember.UserId = UserId;
 	NewMember.Name   = Name;
+    if (R.State == ERoomState::InGame) NewMember.ConnectRequestId = GNextConnectRequestId++;
+    if (OutContext) *OutContext = {R.State, R.HostUserId, NewMember.ConnectRequestId};
 	NewMember.bReady = false;   // 들어오면 준비 안 된 상태로 시작한다
 	for (uint8_t Slot = 0; Slot < R.MaxPlayers; ++Slot)
 	{
@@ -239,6 +245,29 @@ ERoomResult Join(uint32_t RoomId, uint64_t UserId, const std::string& Name,
 	bOutLanOnly   = R.bLanOnly;
 
 	return ERoomResult::Success;
+}
+
+// [REJOIN-007] 현재 방장과 입장 요청을 검증하고 중도 입장 준비를 완료한다.
+bool CompleteGuestConnect(uint64_t HostUserId, uint32_t RoomId,
+    uint64_t GuestUserId, uint64_t RequestId,
+    std::vector<HostCandidate>& OutCandidates, bool& bOutLanOnly)
+{
+    std::lock_guard<std::mutex> Lock(GMutex);
+    const auto It = GRooms.find(RoomId);
+    if (RequestId == 0 || It == GRooms.end()) return false;
+    Room& R = It->second;
+    if (R.HostUserId != HostUserId || R.State != ERoomState::InGame) return false;
+    for (Member& M : R.Members)
+    {
+        if (M.UserId == GuestUserId && M.UserId != HostUserId && M.ConnectRequestId == RequestId)
+        {
+            M.ConnectRequestId = 0;
+            OutCandidates = R.Candidates;
+            bOutLanOnly = R.bLanOnly;
+            return true;
+        }
+    }
+    return false;
 }
 
 void Leave(uint64_t UserId, uint32_t& OutRoomId, bool& bOutRoomClosed,
@@ -395,6 +424,7 @@ ERoomResult SetReachability(uint64_t HostUserId, bool bReachable, uint32_t& OutR
 	return ERoomResult::Success;
 }
 
+// [REJOIN-024] 최초 게임을 시작하고 방을 게임중 상태로 유지한다.
 ERoomResult StartGame(uint64_t HostUserId, uint32_t& OutRoomId,
                       std::vector<HostCandidate>& OutCandidates, bool& bOutLanOnly,
                       std::vector<uint64_t>& OutNotifyUserIds)
@@ -423,7 +453,7 @@ ERoomResult StartGame(uint64_t HostUserId, uint32_t& OutRoomId,
 		return ERoomResult::NotAllReady;
 	}
 
-	R->State = ERoomState::InGame;   // 목록에서 사라진다
+	R->State = ERoomState::InGame;   // 목록에 게임중으로 유지한다
 
 	OutRoomId      = R->RoomId;
 	OutCandidates = R->Candidates;
@@ -433,6 +463,7 @@ ERoomResult StartGame(uint64_t HostUserId, uint32_t& OutRoomId,
 	return ERoomResult::Success;
 }
 
+// [REJOIN-016] 중도 입장 준비 중인 참여자를 최초 출발 알림에서 제외한다.
 ERoomResult MarkHostReady(uint64_t HostUserId, uint32_t& OutRoomId,
                           std::vector<HostCandidate>& OutCandidates, bool& bOutLanOnly,
                           std::vector<uint64_t>& OutNotifyUserIds)
@@ -464,7 +495,11 @@ ERoomResult MarkHostReady(uint64_t HostUserId, uint32_t& OutRoomId,
 
 
 	// 방장은 뺀다. 이 신호를 보낸 당사자이고, 이미 자기 리슨서버 안에 있다.
-	CollectMemberIds(*R, /*Except=*/HostUserId, OutNotifyUserIds);
+	for (const Member& M : R->Members)
+    {
+        if (M.UserId != HostUserId && M.ConnectRequestId == 0)
+            OutNotifyUserIds.push_back(M.UserId);
+    }
 	return ERoomResult::Success;
 }
 
@@ -524,6 +559,7 @@ bool GetRoomStateOf(uint64_t UserId, ERoomState& OutState)
 	return true;
 }
 
+// [REJOIN-008] 대기중·게임중 방을 정원과 관계없이 최신순으로 반환한다.
 void ListWaiting(std::vector<RoomInfo>& Out, size_t MaxCount)
 {
 	std::lock_guard<std::mutex> Lock(GMutex);
@@ -535,11 +571,7 @@ void ListWaiting(std::vector<RoomInfo>& Out, size_t MaxCount)
 	{
 		const Room& R = It->second;
 
-		// 시작됐거나 꽉 찬 방은 들어갈 수 없으므로 목록에서 뺀다.
-		if (R.State != ERoomState::Waiting || R.Members.size() >= R.MaxPlayers)
-		{
-			continue;
-		}
+		// 게임중·정원 초과 방도 표시하며 입장은 Join에서 검사한다.
 
 		RoomInfo Info{};
 		Info.RoomId         = R.RoomId;

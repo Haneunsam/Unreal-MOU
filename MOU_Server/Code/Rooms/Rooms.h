@@ -76,9 +76,23 @@ namespace MOU
 		 *    목록을 거치지 않고 호스트 IP 로 직접 붙는 것은 막을 수 없으므로,
 		 *    호스트의 GameMode::PreLogin 에서도 반드시 다시 검사해야 한다.
 		 */
+        struct JoinContext
+        {
+            ERoomState State = ERoomState::Waiting;
+            uint64_t HostUserId = 0;
+            uint64_t ConnectRequestId = 0;
+        };
+
+        // [REJOIN-007] 현재 방장과 입장 요청을 검증하고 중도 입장 준비를 완료한다.
+        bool CompleteGuestConnect(uint64_t HostUserId, uint32_t RoomId,
+            uint64_t GuestUserId, uint64_t RequestId,
+            std::vector<HostCandidate>& OutCandidates, bool& bOutLanOnly);
+
+        // [REJOIN-001] 방 상태와 입장 조건을 검사하고 참여자를 등록한다.
 		ERoomResult Join(uint32_t RoomId, uint64_t UserId, const std::string& Name,
 		                 const std::string& Password,
-		                 std::vector<HostCandidate>& OutCandidates, bool& bOutLanOnly);
+		                 std::vector<HostCandidate>& OutCandidates, bool& bOutLanOnly,
+                         JoinContext* OutContext = nullptr);
 
 		/**
 		 * 방에서 나간다. 방장이 나가면 방이 통째로 사라진다.
@@ -104,13 +118,14 @@ namespace MOU
 
 		/**
 		 * 게임을 시작한다. 방장만, 그리고 전원이 준비했을 때만 성공한다.
-		 * 성공하면 방이 InGame 이 되어 목록에서 사라진다.
+		 * 성공하면 방이 InGame이 되며 목록에서 게임중으로 표시된다.
 		 *
 		 * [v6] 이 신호는 "게임이 시작됐다" 까지다. 참여자가 실제로 떠나는 시점은
 		 *      MarkHostReady 가 정한다 — 호스트의 리슨서버가 아직 안 열렸을 수 있다.
 		 *
 		 * @param OutNotifyUserIds 시작을 알려야 할 멤버 전원 (방장 포함)
 		 */
+		// [REJOIN-024] 최초 게임을 시작하고 방을 게임중 상태로 유지한다.
 		ERoomResult StartGame(uint64_t HostUserId, uint32_t& OutRoomId,
 		                      std::vector<HostCandidate>& OutCandidates,
 		                      bool& bOutLanOnly,
@@ -130,6 +145,7 @@ namespace MOU
 		 *         NotHost    방장이 아니다
 		 *         NotStarted 아직 StartGame 을 거치지 않은 방이다
 		 */
+		// [REJOIN-016] 중도 입장 준비 중인 참여자를 최초 출발 알림에서 제외한다.
 		ERoomResult MarkHostReady(uint64_t HostUserId, uint32_t& OutRoomId,
 		                          std::vector<HostCandidate>& OutCandidates,
 		                          bool& bOutLanOnly,
@@ -181,7 +197,7 @@ namespace MOU
 		 */
 		bool GetRoomStateOf(uint64_t UserId, ERoomState& OutState);
 
-		/** 대기 중인 방들을 최신순으로 담아준다. 꽉 찬 방과 시작된 방은 빼고 준다. */
+		// [REJOIN-008] 대기중·게임중 방을 정원과 관계없이 최신순으로 반환한다.
 		void ListWaiting(std::vector<RoomInfo>& Out, size_t MaxCount);
 
 		/**
