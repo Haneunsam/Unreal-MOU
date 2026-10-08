@@ -9,6 +9,7 @@
 #include "DrawDebugHelpers.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
+#include "GameFramework/Volume.h"
 
 ATrapSpawner::ATrapSpawner()
 {
@@ -147,18 +148,19 @@ void ATrapSpawner::SpawnTraps()
 			ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
 			ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
 
-			bool bHit = World->LineTraceSingleByObjectType(
-				HitResult,
+			TArray<FHitResult> HitResults;
+			bool bHit = World->LineTraceMultiByObjectType(
+				HitResults,
 				TraceStart,
 				TraceEnd,
 				ObjectQueryParams,
 				QueryParams
 			);
 
-			if (!bHit || !HitResult.bBlockingHit)
+			if (!bHit)
 			{
-				bHit = World->LineTraceSingleByChannel(
-					HitResult,
+				bHit = World->LineTraceMultiByChannel(
+					HitResults,
 					TraceStart,
 					TraceEnd,
 					ECC_Visibility,
@@ -166,13 +168,52 @@ void ATrapSpawner::SpawnTraps()
 				);
 			}
 
-			if (!bHit || !HitResult.bBlockingHit)
+			if (!bHit)
 			{
 				continue;
 			}
 
-			const FVector SurfaceNormal = HitResult.ImpactNormal;
-			const FVector CandidateLocation = HitResult.ImpactPoint + (SurfaceNormal * FloorClearanceOffset);
+			FHitResult ValidFloorHit;
+			bool bFoundValidFloor = false;
+
+			for (const FHitResult& Hit : HitResults)
+			{
+				if (!Hit.bBlockingHit)
+				{
+					continue;
+				}
+
+				AActor* HitActor = Hit.GetActor();
+				if (!HitActor || HitActor == this || HitActor->IsA<ATrapBase>() || HitActor->IsA<AVolume>())
+				{
+					continue;
+				}
+
+				if (Hit.ImpactNormal.Z < 0.65f)
+				{
+					continue;
+				}
+
+				if (UPrimitiveComponent* HitComp = Hit.GetComponent())
+				{
+					if (HitComp->CanCharacterStepUpOn == ECB_No)
+					{
+						continue;
+					}
+				}
+
+				ValidFloorHit = Hit;
+				bFoundValidFloor = true;
+				break;
+			}
+
+			if (!bFoundValidFloor)
+			{
+				continue;
+			}
+
+			const FVector SurfaceNormal = ValidFloorHit.ImpactNormal;
+			const FVector CandidateLocation = ValidFloorHit.ImpactPoint + (SurfaceNormal * FloorClearanceOffset);
 
 			if (!IsLocationFarEnoughFromExisting(CandidateLocation))
 			{
@@ -295,7 +336,17 @@ void ATrapSpawner::ClearSpawnedTraps()
 	{
 		if (IsValid(Trap))
 		{
-			Trap->Destroy();
+			Trap->SetActorEnableCollision(false);
+#if WITH_EDITOR
+			if (!World->IsGameWorld())
+			{
+				World->EditorDestroyActor(Trap, true);
+			}
+			else
+#endif
+			{
+				Trap->Destroy();
+			}
 		}
 	}
 	SpawnedTraps.Empty();

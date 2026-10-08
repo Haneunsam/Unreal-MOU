@@ -9,6 +9,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "Engine/World.h"
 #include "CollisionQueryParams.h"
+#include "GameFramework/Volume.h"
 
 ATrapBase::ATrapBase()
 {
@@ -43,7 +44,10 @@ void ATrapBase::OnConstruction(const FTransform& Transform)
 	UWorld* World = GetWorld();
 	if (World && !World->IsGameWorld() && bSnapToGroundInEditor)
 	{
-		SnapToGround();
+		if (GetOwner() == nullptr)
+		{
+			SnapToGround();
+		}
 	}
 }
 
@@ -59,7 +63,6 @@ bool ATrapBase::SnapToGround()
 	const FVector TraceStart = CurrentLocation + FVector(0.0f, 0.0f, GroundTraceUpOffset);
 	const FVector TraceEnd = CurrentLocation - FVector(0.0f, 0.0f, GroundTraceDownOffset);
 
-	FHitResult HitResult;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(TrapSnapToGround), false, this);
 	QueryParams.bTraceComplex = true;
 
@@ -67,18 +70,19 @@ bool ATrapBase::SnapToGround()
 	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
 	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
 
-	bool bHit = World->LineTraceSingleByObjectType(
-		HitResult,
+	TArray<FHitResult> HitResults;
+	bool bHit = World->LineTraceMultiByObjectType(
+		HitResults,
 		TraceStart,
 		TraceEnd,
 		ObjectQueryParams,
 		QueryParams
 	);
 
-	if (!bHit || !HitResult.bBlockingHit)
+	if (!bHit)
 	{
-		bHit = World->LineTraceSingleByChannel(
-			HitResult,
+		bHit = World->LineTraceMultiByChannel(
+			HitResults,
 			TraceStart,
 			TraceEnd,
 			ECC_Visibility,
@@ -86,7 +90,46 @@ bool ATrapBase::SnapToGround()
 		);
 	}
 
-	if (!bHit || !HitResult.bBlockingHit)
+	if (!bHit)
+	{
+		return false;
+	}
+
+	FHitResult ValidFloorHit;
+	bool bFoundValidFloor = false;
+
+	for (const FHitResult& Hit : HitResults)
+	{
+		if (!Hit.bBlockingHit)
+		{
+			continue;
+		}
+
+		AActor* HitActor = Hit.GetActor();
+		if (!HitActor || HitActor == this || HitActor->IsA<ATrapBase>() || HitActor->IsA<AVolume>())
+		{
+			continue;
+		}
+
+		if (Hit.ImpactNormal.Z < 0.65f)
+		{
+			continue;
+		}
+
+		if (UPrimitiveComponent* HitComp = Hit.GetComponent())
+		{
+			if (HitComp->CanCharacterStepUpOn == ECB_No)
+			{
+				continue;
+			}
+		}
+
+		ValidFloorHit = Hit;
+		bFoundValidFloor = true;
+		break;
+	}
+
+	if (!bFoundValidFloor)
 	{
 		return false;
 	}
@@ -96,8 +139,8 @@ bool ATrapBase::SnapToGround()
 		RootComponent->SetMobility(EComponentMobility::Movable);
 	}
 
-	const FVector SurfaceNormal = HitResult.ImpactNormal;
-	const FVector TargetLocation = HitResult.ImpactPoint + (SurfaceNormal * FloorClearanceOffset) + GroundPlacementOffset;
+	const FVector SurfaceNormal = ValidFloorHit.ImpactNormal;
+	const FVector TargetLocation = ValidFloorHit.ImpactPoint + (SurfaceNormal * FloorClearanceOffset) + GroundPlacementOffset;
 	SetActorLocation(TargetLocation);
 
 	if (bAlignToGroundNormal)
