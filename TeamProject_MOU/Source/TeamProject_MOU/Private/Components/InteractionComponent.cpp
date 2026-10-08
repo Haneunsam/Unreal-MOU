@@ -5,6 +5,8 @@
 #include "Item/ItemDrone.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
+#include "AIController.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "Engine/World.h"
 #include "Player/MainCharacter.h"
 #include "Kismet/KismetSystemLibrary.h"
@@ -89,6 +91,7 @@ void UInteractionComponent::PerformInteraction()
 		// C++의 불안전한 ProcessEvent 직접 호출을 제거하고,
 		// OnInteractExecuted를 통해 BP_EmoPlayer의 표준 BPI_Interaction으로 안전하게 1회 전달
 		OnInteractExecuted.Broadcast(FocusedActor);
+		SetNetworkedInteractionState(FocusedActor, true);
 	}
 }
 
@@ -107,6 +110,77 @@ void UInteractionComponent::ServerRunInteract_Implementation(AActor* TargetActor
 		{
 			IInteractableInterface::Execute_Interact(TargetActor, OwnerActor);
 		}
+	}
+}
+
+// [INTERACT-000] 서비스 NPC의 상호작용 상태를 서버 AI 블랙보드에 반영한다.
+void UInteractionComponent::SetNetworkedInteractionState(AActor* TargetActor, bool bIsInteracting)
+{
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor || !TargetActor)
+	{
+		return;
+	}
+
+	if (OwnerActor->HasAuthority())
+	{
+		ApplyNetworkedInteractionState(TargetActor, bIsInteracting);
+	}
+	else
+	{
+		ServerSetNetworkedInteractionState(TargetActor, bIsInteracting);
+	}
+}
+
+// [INTERACT-001] 시작 요청의 거리와 종료 대상을 검증한 뒤 서버 상태를 변경한다.
+void UInteractionComponent::ServerSetNetworkedInteractionState_Implementation(AActor* TargetActor, bool bIsInteracting)
+{
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor || !TargetActor)
+	{
+		return;
+	}
+
+	if (bIsInteracting)
+	{
+		const float AllowedDistance = FMath::Max(InteractionDistance, 350.0f) + 100.0f;
+		if (FVector::DistSquared(OwnerActor->GetActorLocation(), TargetActor->GetActorLocation()) >
+			FMath::Square(AllowedDistance))
+		{
+			return;
+		}
+	}
+	else if (ActiveNetworkedInteractionTarget != TargetActor)
+	{
+		return;
+	}
+
+	ApplyNetworkedInteractionState(TargetActor, bIsInteracting);
+}
+
+// [INTERACT-002] bIsInteracting 키를 가진 서버 AI에 상태를 적용한다.
+void UInteractionComponent::ApplyNetworkedInteractionState(AActor* TargetActor, bool bIsInteracting)
+{
+	APawn* TargetPawn = Cast<APawn>(TargetActor);
+	AAIController* AIController = TargetPawn ? Cast<AAIController>(TargetPawn->GetController()) : nullptr;
+	UBlackboardComponent* Blackboard = AIController ? AIController->GetBlackboardComponent() : nullptr;
+
+	static const FName InteractionKey(TEXT("bIsInteracting"));
+	if (!Blackboard || Blackboard->GetKeyID(InteractionKey) == FBlackboard::InvalidKey)
+	{
+		return;
+	}
+
+	Blackboard->SetValueAsBool(InteractionKey, bIsInteracting);
+
+	if (bIsInteracting)
+	{
+		ActiveNetworkedInteractionTarget = TargetActor;
+		AIController->StopMovement();
+	}
+	else
+	{
+		ActiveNetworkedInteractionTarget = nullptr;
 	}
 }
 

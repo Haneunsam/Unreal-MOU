@@ -30,6 +30,14 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRunInteract(AActor* TargetActor);
 
+	// [INTERACT-000] 서비스 NPC의 상호작용 상태를 서버 AI 블랙보드에 반영한다.
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	void SetNetworkedInteractionState(AActor* TargetActor, bool bIsInteracting);
+
+	// [INTERACT-001] 소유 클라이언트가 요청한 상호작용 상태를 서버에서 검증하고 적용한다.
+	UFUNCTION(Server, Reliable)
+	void ServerSetNetworkedInteractionState(AActor* TargetActor, bool bIsInteracting);
+
 	UFUNCTION(BlueprintCallable, Category = "Interaction")
 	AActor* GetFocusedInteractable() const { return FocusedActor; }
 
@@ -52,8 +60,14 @@ protected:
 private:
 	void UpdateFocusedInteractable();
 
+	// [INTERACT-002] bIsInteracting 키를 가진 서버 AI에 상태를 적용한다.
+	void ApplyNetworkedInteractionState(AActor* TargetActor, bool bIsInteracting);
+
 	UPROPERTY()
 	TObjectPtr<AActor> FocusedActor;
+
+	UPROPERTY()
+	TObjectPtr<AActor> ActiveNetworkedInteractionTarget;
 
 	// 블루프린트 상호작용 여부 판정 캐시 (매 틱 리플렉션/문자열 검색 방지)
 	TMap<TWeakObjectPtr<UClass>, bool> BPInteractableClassCache;
