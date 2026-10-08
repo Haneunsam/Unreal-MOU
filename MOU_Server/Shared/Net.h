@@ -11,6 +11,7 @@
 	#endif
 	#include <winsock2.h>
 	#include <ws2tcpip.h>
+	#include <mstcpip.h>
 	#pragma comment(lib, "ws2_32.lib")
 
 	namespace MOU
@@ -35,6 +36,25 @@
 			                    reinterpret_cast<const char*>(&Timeout), sizeof(Timeout)) == 0;
 		}
 
+		// [NETLIVE-001] TCP 생존 확인과 송신 대기 제한을 설정하여 종료 정리 지연을 줄인다.
+		inline bool ConfigureSessionSocket(SocketHandle Sock)
+		{
+			tcp_keepalive KeepAlive{};
+			KeepAlive.onoff = 1;
+			KeepAlive.keepalivetime = 15000;
+			KeepAlive.keepaliveinterval = 3000;
+			DWORD BytesReturned = 0;
+			if (::WSAIoctl(Sock, SIO_KEEPALIVE_VALS,
+			              &KeepAlive, sizeof(KeepAlive), nullptr, 0,
+			              &BytesReturned, nullptr, nullptr) != 0)
+			{
+				return false;
+			}
+			const DWORD SendTimeout = 3000;
+			return ::setsockopt(Sock, SOL_SOCKET, SO_SNDTIMEO,
+			                    reinterpret_cast<const char*>(&SendTimeout), sizeof(SendTimeout)) == 0;
+		}
+
 		inline bool IsRecvTimeout(int ErrorCode) { return ErrorCode == WSAETIMEDOUT; }
 	}
 
@@ -42,6 +62,7 @@
 
 	#include <sys/socket.h>
 	#include <netinet/in.h>
+	#include <netinet/tcp.h>
 	#include <arpa/inet.h>
 	#include <unistd.h>
 	#include <cerrno>
@@ -65,6 +86,25 @@
 			Timeout.tv_sec  = Milliseconds / 1000;
 			Timeout.tv_usec = (Milliseconds % 1000) * 1000;
 			return ::setsockopt(Sock, SOL_SOCKET, SO_RCVTIMEO, &Timeout, sizeof(Timeout)) == 0;
+		}
+
+		// [NETLIVE-001] TCP 생존 확인과 송신 대기 제한을 설정하여 종료 정리 지연을 줄인다.
+		inline bool ConfigureSessionSocket(SocketHandle Sock)
+		{
+			const int Enabled = 1;
+			const int IdleSeconds = 15;
+			const int IntervalSeconds = 3;
+			const int ProbeCount = 5;
+			if (::setsockopt(Sock, SOL_SOCKET, SO_KEEPALIVE, &Enabled, sizeof(Enabled)) != 0 ||
+			    ::setsockopt(Sock, IPPROTO_TCP, TCP_KEEPIDLE, &IdleSeconds, sizeof(IdleSeconds)) != 0 ||
+			    ::setsockopt(Sock, IPPROTO_TCP, TCP_KEEPINTVL, &IntervalSeconds, sizeof(IntervalSeconds)) != 0 ||
+			    ::setsockopt(Sock, IPPROTO_TCP, TCP_KEEPCNT, &ProbeCount, sizeof(ProbeCount)) != 0)
+			{
+				return false;
+			}
+			timeval SendTimeout{};
+			SendTimeout.tv_sec = 3;
+			return ::setsockopt(Sock, SOL_SOCKET, SO_SNDTIMEO, &SendTimeout, sizeof(SendTimeout)) == 0;
 		}
 
 		inline bool IsRecvTimeout(int ErrorCode)

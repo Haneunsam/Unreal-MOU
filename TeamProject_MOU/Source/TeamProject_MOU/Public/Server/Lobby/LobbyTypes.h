@@ -267,6 +267,10 @@ struct FMOURoomJoinResult
 {
 	GENERATED_BODY()
 
+    UPROPERTY(BlueprintReadOnly, Category = "MOU|Lobby")
+    EMOURoomStateBP State = EMOURoomStateBP::Waiting;
+    uint64 ConnectRequestId = 0;
+
 	UPROPERTY(BlueprintReadOnly, Category = "MOU|Lobby")
 	bool bSuccess = false;
 

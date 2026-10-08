@@ -211,6 +211,47 @@ namespace MOU::ServerRuntime
 		return true;
 	}
 
+    // [REJOIN-003] 기존 참여자의 릴레이 경로를 보존하고 입장자의 전용 경로를 확보한다.
+    bool EnsureRelayRouteForGuest(uint32_t RoomId, uint64_t GuestUserId,
+        RelayHostRoute& OutHost, RelayGuestRoute& OutGuest)
+    {
+        OutHost = {}; OutGuest = {};
+        if (!Context().Relay || !Context().Relay->IsRunning() || Context().RelayPublicIp.empty())
+            return false;
+        std::lock_guard<std::mutex> Lock(GRelayRoutesMutex);
+        auto& Routes = GRelayRoutesByRoom[RoomId];
+        for (const auto& Route : Routes)
+        {
+            if (Route.GuestUserId == GuestUserId)
+            {
+                OutHost = Route.Host; OutGuest = Route.Guest;
+                return true;
+            }
+        }
+        FUdpRelayToken HostToken{}, GuestToken{};
+        FUdpRelayPortPair Ports{};
+        const uint64_t RouteId = GNextRelayRouteId.fetch_add(1);
+        if (!RouteId || !MakeRelayToken(HostToken) || !MakeRelayToken(GuestToken) ||
+            HostToken == GuestToken || !Context().Relay->CreateRoute(RouteId, HostToken, GuestToken, RoomId, Ports))
+        {
+            if (Routes.empty()) GRelayRoutesByRoom.erase(RoomId);
+            return false;
+        }
+        FRelayRouteAssignment Assignment{};
+        Assignment.GuestUserId = GuestUserId;
+        CopyFixedString(Assignment.Host.Address, kMaxAddressLen, Context().RelayPublicIp);
+        Assignment.Host.HostPort = Ports.HostPort;
+        Assignment.Host.RouteId = RouteId;
+        std::copy(HostToken.begin(), HostToken.end(), Assignment.Host.HostToken);
+        CopyFixedString(Assignment.Guest.Address, kMaxAddressLen, Context().RelayPublicIp);
+        Assignment.Guest.GuestPort = Ports.GuestPort;
+        Assignment.Guest.RouteId = RouteId;
+        std::copy(GuestToken.begin(), GuestToken.end(), Assignment.Guest.GuestToken);
+        Routes.push_back(Assignment);
+        OutHost = Assignment.Host; OutGuest = Assignment.Guest;
+        return true;
+    }
+
 	void ClearRelayRoutes()
 	{
 		std::lock_guard<std::mutex> Lock(GRelayRoutesMutex);

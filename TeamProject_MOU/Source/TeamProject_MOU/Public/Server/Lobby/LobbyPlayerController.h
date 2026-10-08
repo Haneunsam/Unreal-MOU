@@ -44,5 +44,6 @@ protected:
 	int32 ServerPortOverride = 0;
 
 private:
+	// [LOBBYRETURN-002] 로그인 여부와 방 상태에 따라 로그인 화면 또는 메인로비 화면을 표시한다.
 	void ShowLoginWidgetIfNeeded();
 };

@@ -118,3 +118,17 @@ add_executable(AccountAvailabilityTest Tests/AccountAvailabilityTest.cpp Code/Ac
 target_include_directories(AccountAvailabilityTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Code)
 target_link_libraries(AccountAvailabilityTest PRIVATE mou_shared sqlite3)
 add_test(NAME AccountAvailabilityTest COMMAND AccountAvailabilityTest)
+
+add_executable(RoomRejoinTest Tests/RoomRejoinTest.cpp Code/Rooms/Rooms.cpp)
+target_include_directories(RoomRejoinTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Code)
+target_link_libraries(RoomRejoinTest PRIVATE mou_shared)
+add_test(NAME RoomRejoinTest COMMAND RoomRejoinTest)
+
+# 실제 서버의 ClientThread와 핸들러를 루프백 TCP/UDP로 검증한다.
+get_target_property(REJOIN_SERVER_SOURCES Server SOURCES)
+list(REMOVE_ITEM REJOIN_SERVER_SOURCES Code/Server/Server.cpp)
+add_executable(RoomRejoinIntegrationTest Tests/RoomRejoinIntegrationTest.cpp ${REJOIN_SERVER_SOURCES})
+target_include_directories(RoomRejoinIntegrationTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Code)
+target_link_libraries(RoomRejoinIntegrationTest PRIVATE mou_shared sqlite3)
+add_test(NAME RoomRejoinIntegrationTest COMMAND RoomRejoinIntegrationTest)
+set_tests_properties(RoomRejoinIntegrationTest PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)

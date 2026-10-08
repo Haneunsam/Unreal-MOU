@@ -137,6 +137,19 @@ class TEAMPROJECT_MOU_API UServerSubsystem : public UGameInstanceSubsystem
 	GENERATED_BODY()
 
 public:
+    // [LATEJOIN-001] 방을 떠날 때까지 유지하는 접속 식별자를 로그인 옵션에 제공합니다.
+    FString GetPlaySessionId();
+    // [LATEJOIN-002] 안전구역에서 승인된 접속만 활동을 허용합니다.
+    bool AdmitPlaySession(const FString& Session, bool bSafeLevel);
+    // [HOSTLOST-010] 실제 입장한 방의 종료만 확인 대기로 전환하고 최초 접속 실패는 기존 처리를 유지합니다.
+    bool DeferHostDisconnect(UWorld* World);
+    // [HOSTLOST-001] 호스트 종료 알림을 예약하고 방 상태를 정리합니다.
+    void NotifyHostDisconnected();
+    // [HOSTLOST-002] 확인 후 로그인 상태를 유지하여 메인로비로 이동합니다.
+    UFUNCTION()
+    void ConfirmHostDisconnected();
+    // [HOSTLOST-003] 호스트 종료 확인 대기 상태를 조회합니다.
+    bool IsHostDisconnectPending() const { return bHostDisconnectPending; }
 	// [PROFILE-003] 계정이 바뀌면 해당 계정 파일을 읽고 맵 이동 중에는 본인 외형을 유지한다.
 	UFUNCTION(BlueprintPure, Category = "MOU|Lobby|Customization")
 	FCharacterCustomizationData GetLocalCustomization();
@@ -724,6 +737,16 @@ public:
 	int32 GetTotalUnreadCount() const;
 
 private:
+    friend class FLateJoinRegressionTest;
+    // [HOSTLOST-007] 맵을 비우기 전에 알림의 이전 월드 참조를 해제합니다.
+    void ReleaseHostDisconnectedWidget(const FWorldContext& Context, const FString& MapName);
+    FString PlaySessionId;
+    TSet<FString> AdmittedPlaySessions;
+    bool bHostDisconnectPending = false;
+    UPROPERTY(Transient)
+    TObjectPtr<class UHostDisconnectedWidget> HostDisconnectedWidget;
+    // [HOSTLOST-004] 엔진의 실패 복귀 중에도 알림을 현재 화면에 유지합니다.
+    void UpdateHostDisconnectedWidget();
 	// [PROFILE-004] 백엔드 이벤트를 처리하고 외형 승인·게임 시작 시 본인 계정값을 보관한다.
 	bool Tick(float DeltaTime);
 
@@ -755,9 +778,11 @@ private:
 	 * 방장 쪽 PollListenServer 와 짝이다. 그쪽은 "내 서버가 떴는가" 를 보고,
 	 * 이쪽은 "방장이 끝내 못 열었는가" 를 본다. 둘 다 매 틱 돈다.
 	 */
+	// [REJOIN-018] 호스트 준비 제한 시간이 지나면 참여자의 방 상태를 정리한다.
 	void PollGuestHostReadyTimeout(float DeltaTime);
 
 	/** 직접/relay 접속이 엔진의 긴 타임아웃에 갇히지 않도록 별도 시간 제한을 적용한다. */
+	// [REJOIN-020] 직접·릴레이 접속을 감시하고 최종 실패 시 메인로비로 복귀한다.
 	void PollTravelConnection(float DeltaTime);
 
 	/** PendingNetGame 또는 현재 World의 서버 연결이 실제로 열린 상태인가. */
@@ -785,10 +810,12 @@ private:
 	 *   엔진은 이미 실패를 알고 있다(ENetworkFailure). 그걸 받아 사람이 읽을
 	 *   수 있는 문장으로 바꿔주기만 하면 된다.
 	 */
+	// [REJOIN-021] 현재 게임 인스턴스의 네트워크 실패를 처리하고 접속 경로를 재시도한다.
 	void HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver,
 	                          ENetworkFailure::Type FailureType, const FString& ErrorString);
 
 	/** 레벨 이동 자체가 실패한 경우(맵을 못 찾는 등). 위와 같은 이유로 필요하다. */
+	// [REJOIN-022] 현재 게임 인스턴스의 이동 실패를 정리하고 재참여 가능 상태로 되돌린다.
 	void HandleTravelFailure(UWorld* World, ETravelFailure::Type FailureType, const FString& ErrorString);
 
 	/** 참여자가 방금 어디로 떠났는지. 실패 메시지에 주소를 같이 적으려고 들고 있다. */
@@ -979,6 +1006,7 @@ private:
 	void RegisterRelayRouteFromGameSocket(const FMOUGameRelayRoute& Route, bool bHost);
 
 	/** 실제 UE client socket 등록을 예약하고 guest-facing relay 포트로 떠난다. */
+	// [REJOIN-019] 예약 소켓을 해제하고 참여자 전용 릴레이로 접속을 시도한다.
 	bool TryRelayFallback();
 
 	/** 프로브를 끝내고 결과를 알린다. 소켓을 닫는 유일한 경로다. */
@@ -1035,7 +1063,23 @@ private:
 
 
 	/** RoomStart 에서 받은 방장 전용 host-facing relay 경로들. */
-	TArray<FMOUGameRelayRoute> PendingHostRelayRoutes;
+    TArray<FMOUGameRelayRoute> PendingHostRelayRoutes;
+    struct FPendingGuestPreparation
+    {
+        FServerClientEvent Event;
+        float Elapsed = 0.f;
+        float LastSend = -1.f;
+        int32 RegistrationAttempts = 0;
+        bool bAckSent = false;
+    };
+    TArray<FPendingGuestPreparation> PendingGuestPreparations;
+    uint64 PendingGuestConnectRequestId = 0;
+    bool bReturnToLobbyAfterFailure = false;
+    // [REJOIN-011] 실행 중인 호스트의 중도 입장 경로를 재전송하고 준비 결과를 회신한다.
+    void PollGuestPreparations(float DeltaTime);
+    // [REJOIN-012] 참여자의 실패한 입장을 정리하고 다음 틱에 메인로비로 복귀한다.
+    void AbortGuestConnection(const FString& Reason);
+
 
 	/** RoomHostReady 에서 받은 이 참여자 전용 guest-facing relay 경로. */
 	FMOUGameRelayRoute PendingGuestRelayRoute;

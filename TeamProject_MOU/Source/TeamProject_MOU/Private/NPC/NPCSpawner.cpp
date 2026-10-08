@@ -181,6 +181,7 @@ ACharacterBase* ANPCSpawner::SpawnOneNPC()
 	return SpawnedNPC;
 }
 
+// [NPCSPAWN-012] 비어 있는 스폰 포인트를 재사용하여 MaxSpawnCount까지 NPC를 채운다.
 void ANPCSpawner::SpawnNPCsToLimit()
 {
 	if (!HasAuthority())
@@ -188,13 +189,19 @@ void ANPCSpawner::SpawnNPCsToLimit()
 		return;
 	}
 
-	const int32 TargetCount = FMath::Min(MaxSpawnCount, SpawnPoints.Num());
+	const int32 TargetCount = FMath::Max(0, MaxSpawnCount);
 	while (CurrentSpawnCount < TargetCount)
 	{
 		if (!SpawnOneNPC())
 		{
 			break;
 		}
+	}
+
+	// 모든 포인트가 사용 중이면 NPC가 포인트에서 벗어난 뒤 다시 채웁니다.
+	if (CurrentSpawnCount < TargetCount)
+	{
+		ScheduleRespawn();
 	}
 }
 
@@ -451,9 +458,10 @@ void ANPCSpawner::HandleSpawnedNPCDestroyed(AActor* DestroyedActor)
 	ScheduleRespawn();
 }
 
+// [NPCSPAWN-013] 살아 있는 NPC 수가 MaxSpawnCount보다 적으면 재시도 타이머를 예약한다.
 void ANPCSpawner::ScheduleRespawn()
 {
-	const int32 TargetCount = FMath::Min(MaxSpawnCount, SpawnPoints.Num());
+	const int32 TargetCount = FMath::Max(0, MaxSpawnCount);
 	if (!HasAuthority() || !bAutoRespawn || CurrentSpawnCount >= TargetCount
 		|| GetWorldTimerManager().IsTimerActive(RespawnTimerHandle))
 	{
@@ -466,6 +474,7 @@ void ANPCSpawner::ScheduleRespawn()
 		RespawnTimerHandle, this, &ANPCSpawner::RespawnMissingNPCs, SafeRespawnDelay, false);
 }
 
+// [NPCSPAWN-014] 비워진 스폰 포인트를 이용해 부족한 NPC를 다시 생성한다.
 void ANPCSpawner::RespawnMissingNPCs()
 {
 	if (!HasAuthority())
@@ -477,7 +486,7 @@ void ANPCSpawner::RespawnMissingNPCs()
 	SpawnNPCsToLimit();
 
 	// 일시적으로 모든 Spawn Point가 막혀 있었다면 다음 주기에 다시 시도합니다.
-	const int32 TargetCount = FMath::Min(MaxSpawnCount, SpawnPoints.Num());
+	const int32 TargetCount = FMath::Max(0, MaxSpawnCount);
 	if (CurrentSpawnCount < TargetCount)
 	{
 		ScheduleRespawn();

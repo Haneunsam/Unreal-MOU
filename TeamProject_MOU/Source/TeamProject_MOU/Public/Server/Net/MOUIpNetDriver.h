@@ -72,6 +72,11 @@ public:
 	/** 방을 나가거나 연결을 끊을 때 아직 소비되지 않은 capability 를 지운다. */
 	static void ClearPendingRelayRegistrations();
 
+    // [REJOIN-004] 실행 중인 리슨 소켓에서 중도 입장자의 릴레이 경로를 등록한다.
+    bool RegisterLiveHostRelay(const FMOUPendingRelayRegistration& Registration);
+    // [REJOIN-010] 실행 중인 리슨 소켓에서 참여자의 공인 엔드포인트로 홀펀칭한다.
+    void PunchLivePeer(const FString& Address, int32 Port);
+
 	//~ UIpNetDriver
 	virtual int GetClientPort() override;
 	virtual bool InitBase(bool bInitAsClient, FNetworkNotify* InNotify, const FURL& URL,

@@ -16,6 +16,8 @@
 //   여기서 다시 적으면 서버가 상한을 바꿨을 때 조용히 어긋난다.
 
 #include "Server/ServerSubsystem.h"
+#include "Base/ProjectGameInstanceBase.h"
+#include "Server/Lobby/HostDisconnectedWidget.h"
 #include "Data/CustomizationTypes.h"
 #include "Server/Net/CustomizationWire.h"
 
@@ -74,6 +76,7 @@ namespace
 void UServerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+    FCoreUObjectDelegates::PreLoadMapWithContext.AddUObject(this, &UServerSubsystem::ReleaseHostDisconnectedWidget);
 
 	// 여기서 자동 접속하지 않는다.
 	// 접속 시점(타이틀 화면인지, 인게임 진입 후인지)은 게임 흐름에 따라 달라야 하고,
@@ -97,6 +100,9 @@ void UServerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UServerSubsystem::Deinitialize()
 {
+    FCoreUObjectDelegates::PreLoadMapWithContext.RemoveAll(this);
+    if (HostDisconnectedWidget) HostDisconnectedWidget->RemoveFromParent();
+    HostDisconnectedWidget = nullptr;
 	// 순서가 중요하다.
 	// 틱을 먼저 끊어야 워커를 정리하는 도중에 Tick 이 죽은 큐를 읽는 일이 없다.
 	if (TickHandle.IsValid())
@@ -763,6 +769,10 @@ bool UServerSubsystem::IsSelfReady() const
 // [RTITLE-004] 방을 떠날 때 제목과 대기 중 요청을 포함한 방 상태를 비운다.
 void UServerSubsystem::ClearRoomState()
 {
+	if (UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance()))
+		Instance->FinishLobbyEntryWait();
+    PlaySessionId.Reset();
+    AdmittedPlaySessions.Reset();
 	++CustomizationRequestId; // Ignore replies from a previous room/session.
 	if (bCustomizationPending)
 	{
@@ -796,6 +806,9 @@ void UServerSubsystem::ClearRoomState()
 	TriedCandidateIndex = INDEX_NONE;
 	TriedCandidateIndices.Reset();
 	PendingHostRelayRoutes.Reset();
+    PendingGuestPreparations.Reset();
+    PendingGuestConnectRequestId = 0;
+    bReturnToLobbyAfterFailure = false;
 	PendingGuestRelayRoute = FMOUGameRelayRoute();
 	ActiveTravelTransport = EMOUTravelTransport::None;
 	bRelayFallbackTried = false;
@@ -828,6 +841,13 @@ void UServerSubsystem::Disconnect()
 // [PROFILE-004] 백엔드 이벤트를 처리하고 외형 승인·게임 시작 시 본인 계정값을 보관한다.
 bool UServerSubsystem::Tick(float DeltaTime)
 {
+    UpdateHostDisconnectedWidget();
+    if (bReturnToLobbyAfterFailure)
+    {
+        bReturnToLobbyAfterFailure = false;
+        UGameplayStatics::OpenLevel(GetGameInstance(), FName(TEXT("/Game/02_JSY/MainLobby/MainLobby")));
+        return true;
+    }
     if (PendingCheckRequestId && FPlatformTime::Seconds() - CheckRequestTime > 10.0) {
         const uint32 Id = PendingCheckRequestId; PendingCheckRequestId = 0;
         OnLoginIdChecked.Broadcast(Id, EChatLoginResultBP::ServerError);
@@ -851,6 +871,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 	// 0) 방장이면 내 리슨서버가 떴는지, 참여자면 너무 오래 기다리지 않는지 확인한다.
 	//    사건 처리보다 먼저 하는 이유는 없다. 서로 독립적이다.
 	PollListenServer(DeltaTime);
+    PollGuestPreparations(DeltaTime);
 	PollGuestHostReadyTimeout(DeltaTime);
 	PollReachabilityProbe(DeltaTime);
 	PollTravelConnection(DeltaTime);
@@ -984,7 +1005,8 @@ bool UServerSubsystem::Tick(float DeltaTime)
 		case EServerClientEventType::RoomJoinAck:
 			if (Event.Join.bSuccess)
 			{
-				CurrentRoomId = Event.Join.RoomId;   // 대기실 입장. 방장은 아니다
+				CurrentRoomId = Event.Join.RoomId;   // 입장. 방장은 아니다
+                PendingGuestConnectRequestId = Event.Join.ConnectRequestId;
 				CurrentRoomTitle = PendingJoinedRoomTitle;
 				SubmitCustomization(GetLocalCustomization());
 				UE_LOG(LogMOUServer, Log, TEXT("방 #%d 입장. 호스트 후보 %s"),
@@ -996,8 +1018,16 @@ bool UServerSubsystem::Tick(float DeltaTime)
 					*UServerSubsystem::GetRoomResultText(Event.Join.Result));
 			}
 			PendingJoinedRoomTitle.Empty();
-			OnRoomJoinCompleted.Broadcast(Event.Join);
-			break;
+            OnRoomJoinCompleted.Broadcast(Event.Join);
+            if (Event.Join.bSuccess && Event.Join.RoomId == CurrentRoomId &&
+                Event.Join.State == EMOURoomStateBP::InGame && Event.Join.ConnectRequestId != 0)
+            {
+                bGuestWaitingForHostReady = true;
+                GuestWaitSeconds = 0.f;
+                PendingHostReady = FMOURoomJoinResult();
+                OnRoomGameStarted.Broadcast(Event.Join, false);
+            }
+            break;
 
 		case EServerClientEventType::RoomMemberList:
 			// 늦게 도착한 이전 방의 명단이 현재 대기실을 덮어쓰지 않게 방 번호를 확인한다.
@@ -1006,6 +1036,13 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			{
 				RoomMembers      = Event.Members;
 				bAllMembersReady = Event.bAllReady;
+				// 백엔드가 퇴장을 확정한 참여자만 최초 입장 대기 명단에서 제외합니다.
+				if (IsRoomHost())
+					if (UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance());
+						Instance && Instance->bLobbyEntryWaiting)
+						for (auto It = Instance->LobbyEntryExpectedMembers.CreateIterator(); It; ++It)
+							if (!RoomMembers.ContainsByPredicate([Id = *It](const FMOURoomMember& Member) { return Member.UserId == Id; }))
+								It.RemoveCurrent();
 				UE_LOG(LogMOUServer, Verbose, TEXT("대기실 #%d 명단 %d명 (전원준비 %s)"),
 					Event.RoomId, RoomMembers.Num(), bAllMembersReady ? TEXT("O") : TEXT("X"));
 				OnRoomMembersChanged.Broadcast(Event.RoomId, RoomMembers, bAllMembersReady);
@@ -1026,8 +1063,10 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			}
 			break;
 		case EServerClientEventType::RoomClosed:
+            if (Event.RoomId == 0 || Event.RoomId != CurrentRoomId) break;
 			UE_LOG(LogMOUServer, Log, TEXT("방 #%d 이(가) 닫혔다. 방장이 나갔다."), Event.RoomId);
-			ClearRoomState();
+			if (MyRoomId == 0) NotifyHostDisconnected();
+            else ClearRoomState();
 			OnRoomClosed.Broadcast(Event.RoomId, Event.CloseReason);
 			break;
 
@@ -1074,6 +1113,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			else
 			{
 				// 참여자는 지금부터 출발 신호를 기다린다. 끝없이 기다리지는 않는다.
+				PendingGuestConnectRequestId = 0;
 				bGuestWaitingForHostReady = true;
 				GuestWaitSeconds          = 0.f;
 				PendingHostReady          = FMOURoomJoinResult();   // 지난 판의 값이 남아 있으면 안 된다
@@ -1084,6 +1124,12 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			// ★ UI 보다 먼저 브로드캐스트하지 않는다. 위젯이 안내 문구를 띄우고
 			//   BP 훅이 돌 기회를 준 뒤에 실제 행동을 한다 — OpenLevel 이 시작되면
 			//   위젯은 곧 파괴되므로 순서를 뒤집으면 안내가 화면에 안 뜬다.
+			if (UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance()))
+			{
+				TArray<int64> Members;
+				for (const FMOURoomMember& Member : RoomMembers) Members.Add(Member.UserId);
+				Instance->BeginLobbyEntryWait(Members);
+			}
 			OnRoomGameStarted.Broadcast(Event.Join, bIsHost);
 
 			if (bIsHost)
@@ -1099,9 +1145,25 @@ bool UServerSubsystem::Tick(float DeltaTime)
 			break;
 		}
 
+        case EServerClientEventType::RoomGuestConnectPrepare:
+        {
+            if (!Event.ConnectRequestId || Event.RoomId != MyRoomId || MyRoomId != CurrentRoomId) break;
+            PendingGuestPreparations.RemoveAll([&](const FPendingGuestPreparation& Pending)
+            {
+                return Pending.Event.GuestUserId == Event.GuestUserId;
+            });
+            FPendingGuestPreparation Pending;
+            Pending.Event = Event;
+            PendingGuestPreparations.Add(MoveTemp(Pending));
+            break;
+        }
+
 		case EServerClientEventType::RoomHostReady:
 		{
-			// 참여자에게만 온다. 이제 붙어도 된다.
+            if (!Event.RoomId || Event.RoomId != CurrentRoomId || MyRoomId != 0 ||
+                !bGuestWaitingForHostReady || Event.ConnectRequestId != PendingGuestConnectRequestId)
+                break;
+            // 참여자에게만 온다. 이제 붙어도 된다.
 			UE_LOG(LogMOUServer, Log, TEXT("방 #%d 호스트 준비 완료. 후보 %s 로 이동한다."),
 				Event.RoomId, *Event.Join.ToDisplayString());
 
@@ -1121,7 +1183,7 @@ bool UServerSubsystem::Tick(float DeltaTime)
 
 			if (bAutoTravelOnGameStart)
 			{
-				TravelToHost();
+				if (!TravelToHost()) AbortGuestConnection(TEXT("호스트 접속을 시작하지 못했습니다."));
 			}
 			break;
 		}
@@ -1406,6 +1468,68 @@ void UServerSubsystem::PollListenServer(float DeltaTime)
 }
 
 
+// [REJOIN-011] 실행 중인 호스트의 중도 입장 경로를 재전송하고 준비 결과를 회신한다.
+void UServerSubsystem::PollGuestPreparations(float DeltaTime)
+{
+    UWorld* World = GetWorld();
+    UMOUIpNetDriver* Driver = World ? Cast<UMOUIpNetDriver>(World->GetNetDriver()) : nullptr;
+    for (int32 Index = PendingGuestPreparations.Num() - 1; Index >= 0; --Index)
+    {
+        FPendingGuestPreparation& Pending = PendingGuestPreparations[Index];
+        Pending.Elapsed += FMath::Max(0.f, DeltaTime);
+        const bool bStillMember = RoomMembers.ContainsByPredicate([&](const FMOURoomMember& Member)
+        {
+            return Member.UserId == Pending.Event.GuestUserId;
+        });
+        if (Pending.Event.RoomId != MyRoomId || MyRoomId == 0 || !bStillMember ||
+            (Pending.bAckSent && Pending.Elapsed > 120.f))
+        {
+            PendingGuestPreparations.RemoveAt(Index);
+            continue;
+        }
+        // 직접 후보를 시도하는 동안에도 릴레이용 NAT 매핑을 유지한다.
+        const float RetryInterval = Pending.bAckSent ? 2.f : 0.25f;
+        if (Driver && IsListenServerUp() && Pending.Elapsed - Pending.LastSend >= RetryInterval)
+        {
+            bool bRegistered = true;
+            for (const FMOUGameRelayRoute& Route : Pending.Event.HostRelayRoutes)
+            {
+                FMOUPendingRelayRegistration Registration;
+                Registration.Address = Route.Address;
+                Registration.Port = Route.Port;
+                Registration.RouteId = Route.RouteId;
+                Registration.Token = Route.Token;
+                bRegistered &= Driver->RegisterLiveHostRelay(Registration);
+            }
+            if (!Pending.bAckSent)
+            {
+                for (const FMOUHostCandidate& Peer : Pending.Event.PunchTargets)
+                    Driver->PunchLivePeer(Peer.Address, Peer.Port);
+            }
+            Pending.LastSend = Pending.Elapsed;
+            if (bRegistered) ++Pending.RegistrationAttempts;
+        }
+        const bool bReady = Pending.RegistrationAttempts >= 3;
+        if (!Pending.bAckSent && (bReady || Pending.Elapsed > UMOUServerSettings::GetHostReadyTimeoutSeconds()))
+        {
+            Backend->SendGuestConnectAck(Pending.Event.RoomId, Pending.Event.GuestUserId,
+                Pending.Event.ConnectRequestId, bReady);
+            if (bReady) Pending.bAckSent = true;
+            else PendingGuestPreparations.RemoveAt(Index);
+        }
+    }
+}
+
+// [REJOIN-012] 참여자의 실패한 입장을 정리하고 다음 틱에 메인로비로 복귀한다.
+void UServerSubsystem::AbortGuestConnection(const FString& Reason)
+{
+    if (MyRoomId != 0 || CurrentRoomId == 0) return;
+    LeaveRoom();
+    bReturnToLobbyAfterFailure = true;
+    OnTravelFailed.Broadcast(Reason);
+}
+
+// [REJOIN-018] 호스트 준비 제한 시간이 지나면 참여자의 방 상태를 정리한다.
 void UServerSubsystem::PollGuestHostReadyTimeout(float DeltaTime)
 {
 	if (!bGuestWaitingForHostReady)
@@ -1432,11 +1556,11 @@ void UServerSubsystem::PollGuestHostReadyTimeout(float DeltaTime)
 	//   그 침묵이 참여자에게는 무한 로딩과 구분되지 않는다. 침묵도 결과다.
 	const FString Reason = FString::Printf(
 		TEXT("%.0f초 안에 방장의 서버가 열리지 않았습니다.\n")
-		TEXT("방장이 게임을 다시 시작하면 자동으로 이동합니다."),
+		TEXT("메인로비에서 다시 참여해 주세요."),
 		Timeout);
 
 	UE_LOG(LogMOUServer, Warning, TEXT("[참여자] %s"), *Reason);
-	OnTravelFailed.Broadcast(Reason);
+	AbortGuestConnection(Reason);
 }
 
 // ---------------------------------------------------------------------------
@@ -2091,6 +2215,7 @@ bool UServerSubsystem::TravelToHost()
 	const FMOUHostCandidate Chosen = ChooseHostCandidate(PendingHostReady.Candidates, PendingHostReady.bLanOnly, ChosenIndex);
 	if (!Chosen.IsValid())
 	{
+        if (TryRelayFallback()) return true;
 		UE_LOG(LogMOUServer, Error, TEXT("[참여자] 쓸 수 있는 호스트 주소가 없다: %s"),
 			*PendingHostReady.ToDisplayString());
 		OnTravelFailed.Broadcast(TEXT("방장의 접속 주소를 받지 못했습니다."));
@@ -2202,6 +2327,7 @@ bool UServerSubsystem::TryNextHostCandidate()
 	return false;
 }
 
+// [REJOIN-019] 예약 소켓을 해제하고 참여자 전용 릴레이로 접속을 시도한다.
 bool UServerSubsystem::TryRelayFallback()
 {
 	if (bRelayFallbackTried || !PendingGuestRelayRoute.IsValid())
@@ -2223,6 +2349,7 @@ bool UServerSubsystem::TryRelayFallback()
 	Registration.Token   = PendingGuestRelayRoute.Token;
 	UMOUIpNetDriver::SetPendingClientRelayRegistration(Registration);
 
+	CloseGameSocket();
 	bRelayFallbackTried = true;
 	ActiveTravelTransport = EMOUTravelTransport::Relay;
 	NotifyTravelingTo(PendingGuestRelayRoute.Address, PendingGuestRelayRoute.Port);
@@ -2350,6 +2477,7 @@ bool UServerSubsystem::IsTravelConnectionOpen() const
 	return false;
 }
 
+// [REJOIN-020] 직접·릴레이 접속을 감시하고 최종 실패 시 메인로비로 복귀한다.
 void UServerSubsystem::PollTravelConnection(float DeltaTime)
 {
 	if (ActiveTravelTransport == EMOUTravelTransport::None)
@@ -2400,13 +2528,21 @@ void UServerSubsystem::PollTravelConnection(float DeltaTime)
 	ActiveTravelTransport = EMOUTravelTransport::None;
 	TravelAttemptSeconds = 0.f;
 	UMOUIpNetDriver::ClearPendingRelayRegistrations();
-	OnTravelFailed.Broadcast(Reason);
+	if (MyRoomId == 0 && CurrentRoomId != 0) AbortGuestConnection(Reason);
+	else OnTravelFailed.Broadcast(Reason);
 }
 
-void UServerSubsystem::HandleNetworkFailure(UWorld* /*World*/, UNetDriver* /*NetDriver*/,
+// [REJOIN-021] 현재 게임 인스턴스의 네트워크 실패를 처리하고 접속 경로를 재시도한다.
+void UServerSubsystem::HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver,
                                             ENetworkFailure::Type FailureType,
                                             const FString& ErrorString)
 {
+	if (World && World->GetGameInstance() != GetGameInstance()) return;
+    if (bHostDisconnectPending) return;
+    if (NetDriver && NetDriver->NetDriverName != NAME_GameNetDriver && NetDriver->NetDriverName != NAME_PendingNetDriver) return;
+    // 접속 시도 실패는 기존 후보 재시도를 유지하고, 이미 입장한 연결의 종료만 알립니다.
+    if (DeferHostDisconnect(World)) return;
+
 	const FString Target = PendingTravelAddress.IsEmpty()
 		? TEXT("호스트") : PendingTravelAddress;
 
@@ -2460,13 +2596,17 @@ void UServerSubsystem::HandleNetworkFailure(UWorld* /*World*/, UNetDriver* /*Net
 	ActiveTravelTransport = EMOUTravelTransport::None;
 	TravelAttemptSeconds = 0.f;
 
-	OnTravelFailed.Broadcast(Reason);
+	if (MyRoomId == 0 && CurrentRoomId != 0) AbortGuestConnection(Reason);
+	else OnTravelFailed.Broadcast(Reason);
 }
 
-void UServerSubsystem::HandleTravelFailure(UWorld* /*World*/,
+// [REJOIN-022] 현재 게임 인스턴스의 이동 실패를 정리하고 재참여 가능 상태로 되돌린다.
+void UServerSubsystem::HandleTravelFailure(UWorld* World,
                                            ETravelFailure::Type FailureType,
                                            const FString& ErrorString)
 {
+	if (World && World->GetGameInstance() != GetGameInstance()) return;
+    if (bHostDisconnectPending) return;
 	// 여기까지 오는 것은 대개 맵 문제다(이름이 틀렸거나 쿠킹에서 빠졌거나).
 	// 네트워크 실패와 구분해서 말해야 엉뚱한 곳을 뒤지지 않는다.
 	const FString Reason = FString::Printf(
@@ -2476,7 +2616,8 @@ void UServerSubsystem::HandleTravelFailure(UWorld* /*World*/,
 	UE_LOG(LogMOUServer, Error, TEXT("[이동 실패] %s (사유 %d)"),
 		*Reason, static_cast<int32>(FailureType));
 
-	OnTravelFailed.Broadcast(Reason);
+	if (MyRoomId == 0 && CurrentRoomId != 0) AbortGuestConnection(Reason);
+	else OnTravelFailed.Broadcast(Reason);
 	PendingTravelAddress.Reset();
 	ActiveTravelTransport = EMOUTravelTransport::None;
 	TravelAttemptSeconds = 0.f;
@@ -2849,4 +2990,82 @@ namespace
 					Chat->Disconnect();
 				}
 			}));
+}
+
+// [LATEJOIN-001] 방을 떠날 때까지 유지하는 접속 식별자를 로그인 옵션에 제공합니다.
+FString UServerSubsystem::GetPlaySessionId()
+{
+    if (PlaySessionId.IsEmpty()) PlaySessionId = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+    return PlaySessionId;
+}
+// [LATEJOIN-002] 안전구역에서 승인된 접속만 활동을 허용합니다.
+bool UServerSubsystem::AdmitPlaySession(const FString& Session, bool bSafeLevel)
+{
+    if (Session.IsEmpty()) return bSafeLevel;
+    if (bSafeLevel) AdmittedPlaySessions.Add(Session);
+    return AdmittedPlaySessions.Contains(Session);
+}
+
+// [HOSTLOST-001] 호스트 종료 알림을 예약하고 방 상태를 정리합니다.
+void UServerSubsystem::NotifyHostDisconnected()
+{
+    if (bHostDisconnectPending) return;
+    if (Backend.IsValid()) Backend->LeaveRoom();
+    ClearRoomState();
+    bHostDisconnectPending = true;
+}
+// [HOSTLOST-002] 확인 후 로그인 상태를 유지하여 메인로비로 이동합니다.
+void UServerSubsystem::ConfirmHostDisconnected()
+{
+    if (!bHostDisconnectPending) return;
+    bHostDisconnectPending = false;
+    if (HostDisconnectedWidget) HostDisconnectedWidget->RemoveFromParent();
+    HostDisconnectedWidget = nullptr;
+    bReturnToLobbyAfterFailure = true;
+}
+// [HOSTLOST-004] 엔진의 실패 복귀 중에도 알림을 현재 화면에 유지합니다.
+void UServerSubsystem::UpdateHostDisconnectedWidget()
+{
+    if (!bHostDisconnectPending) return;
+    UWorld* World = GetGameInstance()->GetWorld();
+    APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+    if (!PC || !PC->IsLocalController()) return;
+    if (HostDisconnectedWidget && HostDisconnectedWidget->GetOwningPlayer() != PC)
+    {
+        HostDisconnectedWidget->RemoveFromParent();
+        HostDisconnectedWidget = nullptr;
+    }
+    if (!HostDisconnectedWidget)
+        HostDisconnectedWidget = CreateWidget<UHostDisconnectedWidget>(PC, UHostDisconnectedWidget::StaticClass());
+    if (HostDisconnectedWidget)
+    {
+        if (HostDisconnectedWidget->IsInViewport()) return;
+        HostDisconnectedWidget->AddToViewport(10000);
+        FInputModeUIOnly Input;
+        Input.SetWidgetToFocus(HostDisconnectedWidget->TakeWidget());
+        PC->SetInputMode(Input);
+        PC->SetShowMouseCursor(true);
+    }
+}
+
+// [HOSTLOST-007] 맵을 비우기 전에 알림의 이전 월드 참조를 해제합니다.
+void UServerSubsystem::ReleaseHostDisconnectedWidget(const FWorldContext& Context, const FString& MapName)
+{
+    if (Context.OwningGameInstance != GetGameInstance()) return;
+    if (HostDisconnectedWidget) HostDisconnectedWidget->RemoveFromParent();
+    HostDisconnectedWidget = nullptr;
+}
+
+// [HOSTLOST-010] 실제 입장한 방의 종료만 확인 대기로 전환하고 최초 접속 실패는 기존 처리를 유지합니다.
+bool UServerSubsystem::DeferHostDisconnect(UWorld* World)
+{
+    if (!World || World->GetGameInstance() != GetGameInstance()) return false;
+    if (bHostDisconnectPending) return true;
+    if (MyRoomId == 0 && CurrentRoomId != 0 && World->GetNetMode() == NM_Client
+        && ActiveTravelTransport == EMOUTravelTransport::None)
+    {
+        NotifyHostDisconnected();
+        return true;
+    }
+    return false;
 }

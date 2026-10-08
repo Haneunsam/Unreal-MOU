@@ -119,7 +119,9 @@ void URoomListEntryWidget::RefreshTexts()
 {
 	if (EntryTitleText != nullptr)
 	{
-		EntryTitleText->SetText(FText::FromString(FString::Printf(TEXT("#%d  %s"), RoomInfo.RoomId, *RoomInfo.Title)));
+        const TCHAR* StateText = RoomInfo.State == EMOURoomStateBP::InGame ? TEXT("게임중") : TEXT("대기중");
+        EntryTitleText->SetText(FText::FromString(FString::Printf(
+            TEXT("[%s] #%d  %s"), StateText, RoomInfo.RoomId, *RoomInfo.Title)));
 	}
 	if (EntryHostText != nullptr)
 	{
@@ -146,17 +148,18 @@ void URoomListEntryWidget::RefreshTexts()
 	}
 	if (EntryJoinButton)
 	{
-		const bool bBlocked = RoomInfo.bHasPassword && !bPasswordJoinAllowed;
+		const bool bFull = RoomInfo.CurrentPlayers >= RoomInfo.MaxPlayers;
+		const bool bBlocked = bFull || (RoomInfo.bHasPassword && !bPasswordJoinAllowed);
 		EntryJoinButton->SetIsEnabled(!bBlocked);
 		EntryJoinButton->SetToolTipText(FText::FromString(bBlocked
-			? TEXT("비밀번호 방 참여는 추후 지원합니다.") : TEXT("방 참여")));
+			? (bFull ? TEXT("정원이 찬 방입니다.") : TEXT("비밀번호 방 참여는 추후 지원합니다.")) : TEXT("방 참여")));
 	}
 }
 
 // [RLUI-011] 보류된 비밀번호방을 차단하고 공개방 선택을 목록에 전달한다.
 void URoomListEntryWidget::RequestJoin()
 {
-	if (RoomInfo.bHasPassword && !bPasswordJoinAllowed) return;
+	if (RoomInfo.CurrentPlayers >= RoomInfo.MaxPlayers || (RoomInfo.bHasPassword && !bPasswordJoinAllowed)) return;
 	OnJoinClicked.ExecuteIfBound(RoomInfo.RoomId);
 }
 

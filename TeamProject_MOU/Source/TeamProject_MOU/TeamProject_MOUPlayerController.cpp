@@ -2,6 +2,7 @@
 
 
 #include "TeamProject_MOUPlayerController.h"
+#include "Net/UnrealNetwork.h"
 #include "TeamProject_MOUGameMode.h"
 #include "Subsystems/WarehouseDataSubsystem.h"
 #include "EnhancedInputSubsystems.h"
@@ -14,10 +15,14 @@
 #include "Item/TerminalShopWidget.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Base/ProjectGameStateBase.h"
+#include "Base/ProjectGameInstanceBase.h"
+#include "AbilitySystemComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/DataTable.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
 #include "Engine/GameInstance.h"
+#include "Server/ServerSubsystem.h"
 
 // 음성 RPC 창구. 컨트롤러는 음성 시스템의 내부를 몰라도 되지만,
 // "모든 컨트롤러가 음성 창구를 하나씩 갖는다" 는 것은 컨트롤러의 책임이다
@@ -40,6 +45,72 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Camera/CameraComponent.h"
+
+// [LOBBYLOAD-007] 소유 클라이언트가 최초 로비 플레이 준비 완료를 서버에 보고합니다.
+void ATeamProject_MOUPlayerController::ServerReportLobbyEntryReady_Implementation(int64 UserId)
+{
+	if (ATeamProject_MOUGameMode* Mode = GetWorld()->GetAuthGameMode<ATeamProject_MOUGameMode>())
+		Mode->ReportLobbyEntryReady(this, UserId);
+}
+
+// [LOBBYLOAD-010] 소유 Pawn과 필수 복제 데이터가 준비되었는지 검사합니다.
+bool ATeamProject_MOUPlayerController::IsLobbyEntryLocallyReady_Implementation() const
+{
+	const UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance());
+	const AProjectGameStateBase* State = GetWorld()->GetGameState<AProjectGameStateBase>();
+	const AMainCharacter* ReadyCharacter = Cast<AMainCharacter>(GetPawn());
+	const UAbilitySystemComponent* ASC = ReadyCharacter ? ReadyCharacter->GetAbilitySystemComponent() : nullptr;
+	return Instance && Instance->MapLoaded && State && State->HasLobbyEntryStorage()
+		&& PlayerState && ReadyCharacter && ReadyCharacter->HasActorBegunPlay()
+		&& ReadyCharacter->IsLocallyControlled() && ReadyCharacter->GetPlayerState() == PlayerState
+		&& ASC && ASC->GetAvatarActor() == ReadyCharacter;
+}
+
+// [LOBBYLOAD-008] 전원 준비 상태를 확인하여 로딩 표시와 로컬 조작 잠금을 갱신합니다.
+void ATeamProject_MOUPlayerController::UpdateLobbyEntryWait()
+{
+	UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance());
+	AProjectGameStateBase* State = GetWorld()->GetGameState<AProjectGameStateBase>();
+	if (!Instance) return;
+	const bool bWaiting = (State && State->LobbyEntryPhase == 1)
+		|| (IsLocalController() && Instance->bLobbyEntryWaiting && (!State || State->LobbyEntryPhase != 2));
+	if (bWaiting != bLobbyEntryInputLocked)
+	{
+		SetIgnoreMoveInput(bWaiting);
+		SetIgnoreLookInput(bWaiting);
+		bLobbyEntryInputLocked = bWaiting;
+	}
+	if (bWaiting)
+	{
+		if (AMainCharacter* ReadyCharacter = Cast<AMainCharacter>(GetPawn()))
+			ReadyCharacter->GetCharacterMovement()->StopMovementImmediately();
+	}
+	if (!IsLocalController()) return;
+	if (State && State->LobbyEntryPhase == 2 && Instance->bLobbyEntryWaiting)
+	{
+		Instance->FinishLobbyEntryWait();
+		SetInputMode(FInputModeGameOnly());
+		bShowMouseCursor = false;
+		return;
+	}
+	if (!bWaiting || !Instance->bLobbyEntryWaiting) return;
+	Instance->ShowLobbyEntryLoading();
+	if (State && State->LobbyEntryPhase == 1 && IsLobbyEntryLocallyReady()
+		&& GetWorld()->GetTimeSeconds() >= NextLobbyEntryReadyReport)
+	{
+		NextLobbyEntryReadyReport = GetWorld()->GetTimeSeconds() + 1.0;
+		if (UServerSubsystem* Server = Instance->GetSubsystem<UServerSubsystem>())
+			ServerReportLobbyEntryReady(Server->GetLoginResult().UserId);
+	}
+}
+
+// [LOBBYLOAD-009] 입장 대기 중 이동·점프·상호작용을 포함한 게임 입력을 차단합니다.
+void ATeamProject_MOUPlayerController::BuildInputStack(TArray<UInputComponent*>& InputStack)
+{
+	Super::BuildInputStack(InputStack);
+	const UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance());
+	if (bLobbyEntryInputLocked || (Instance && Instance->bLobbyEntryWaiting)) InputStack.Reset();
+}
 
 ATeamProject_MOUPlayerController::ATeamProject_MOUPlayerController()
 {
@@ -438,9 +509,48 @@ bool ATeamProject_MOUPlayerController::ShouldUseTouchControls() const
 	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
 }
 
+// [LATEJOIN-011] 복제된 합류 제한에 따라 관전을 시작하고 기존 카메라를 갱신합니다.
 void ATeamProject_MOUPlayerController::PlayerTick(float DeltaTime)
 {
+	UpdateLobbyEntryWait();
 	Super::PlayerTick(DeltaTime);
+    if (HasAuthority() && bWaitForSafeLobby)
+    {
+        AMainCharacter* Target = Cast<AMainCharacter>(GetViewTarget());
+        if (!IsValid(Target) || Target->bIsDead || !Target->IsPlayerControlled())
+            ServerCycleLateJoinTarget(1);
+    }
+    if (IsLocalPlayerController())
+    {
+        if (bWaitForSafeLobby && !bIsSpectating) StartSpectating();
+        if (bWaitForSafeLobby && bIsSpectating)
+        {
+            AMainCharacter* Target = Cast<AMainCharacter>(GetViewTarget());
+            if (IsValid(Target) && !Target->bIsDead)
+            {
+                if (CurrentSpectateTarget.Get() != Target)
+                    SetSpectateTarget(Target, 0.f);
+
+                ShowSpectatorOverlay();
+            }
+            else
+            {
+                HideSpectatorOverlay();
+
+                const double Now = GetWorld()->GetTimeSeconds();
+                if (Now >= NextSpectateTargetRetryTime)
+                {
+                    NextSpectateTargetRetryTime = Now + 0.5;
+                    ServerCycleLateJoinTarget(0);
+                }
+            }
+        }
+        else if (!bWaitForSafeLobby && bIsSpectating)
+        {
+            if (AMainCharacter* OwnCharacter = Cast<AMainCharacter>(GetPawn()); OwnCharacter && !OwnCharacter->bIsDead)
+                StopSpectating();
+        }
+    }
 
 	if (!IsLocalPlayerController())
 	{
@@ -480,7 +590,7 @@ void ATeamProject_MOUPlayerController::PlayerTick(float DeltaTime)
 
 	if (bIsSpectating)
 	{
-		CheckSpectateTargetAlive();
+		if (!bWaitForSafeLobby) CheckSpectateTargetAlive();
 
 		if (CurrentSpectateTarget.IsValid() && IsLocalPlayerController())
 		{
@@ -540,12 +650,19 @@ TArray<AMainCharacter*> ATeamProject_MOUPlayerController::GetAliveTeammates() co
 	return AliveList;
 }
 
+// [LATEJOIN-009] 다음 생존자를 관전하며 도중 합류자는 대상이 없어도 대기합니다.
 void ATeamProject_MOUPlayerController::SpectateNextPlayer()
 {
 	if (!IsLocalPlayerController())
 	{
 		return;
 	}
+
+    if (bWaitForSafeLobby)
+    {
+        ServerCycleLateJoinTarget(1);
+        return;
+    }
 
 	TArray<AMainCharacter*> AliveList = GetAliveTeammates();
 	if (AliveList.Num() == 0)
@@ -563,12 +680,19 @@ void ATeamProject_MOUPlayerController::SpectateNextPlayer()
 	SetSpectateTarget(AliveList[CurrentSpectateIndex]);
 }
 
+// [LATEJOIN-010] 이전 생존자를 관전하며 도중 합류자는 대상이 없어도 대기합니다.
 void ATeamProject_MOUPlayerController::SpectatePrevPlayer()
 {
 	if (!IsLocalPlayerController())
 	{
 		return;
 	}
+
+    if (bWaitForSafeLobby)
+    {
+        ServerCycleLateJoinTarget(-1);
+        return;
+    }
 
 	TArray<AMainCharacter*> AliveList = GetAliveTeammates();
 	if (AliveList.Num() == 0)
@@ -617,6 +741,7 @@ void ATeamProject_MOUPlayerController::SetSpectateTarget(AMainCharacter* NewTarg
 	UpdateSpectatorOverlay();
 }
 
+// [LATEJOIN-008] 사망 또는 도중 합류 관전을 시작하고 대상 복제를 기다립니다.
 void ATeamProject_MOUPlayerController::StartSpectating()
 {
 	if (!IsLocalPlayerController() || bIsSpectating)
@@ -625,7 +750,7 @@ void ATeamProject_MOUPlayerController::StartSpectating()
 	}
 
 	AMainCharacter* MyChar = Cast<AMainCharacter>(GetPawn());
-	if (!MyChar || !MyChar->bIsDead)
+	if (!bWaitForSafeLobby && (!MyChar || !MyChar->bIsDead))
 	{
 		return;
 	}
@@ -644,7 +769,19 @@ void ATeamProject_MOUPlayerController::StartSpectating()
 		}
 	}
 
-	ShowSpectatorOverlay();
+	if (!bWaitForSafeLobby)
+		ShowSpectatorOverlay();
+
+    if (bWaitForSafeLobby)
+    {
+        NextSpectateTargetRetryTime = 0.0;
+        if (AMainCharacter* Target = Cast<AMainCharacter>(GetViewTarget()); IsValid(Target) && !Target->bIsDead)
+        {
+            SetSpectateTarget(Target, 0.f);
+            ShowSpectatorOverlay();
+        }
+        return;
+    }
 
 	TArray<AMainCharacter*> AliveList = GetAliveTeammates();
 	if (AliveList.Num() > 0)
@@ -652,7 +789,7 @@ void ATeamProject_MOUPlayerController::StartSpectating()
 		CurrentSpectateIndex = 0;
 		SetSpectateTarget(AliveList[0], 0.0f);
 	}
-	else
+	else if (!bWaitForSafeLobby)
 	{
 		StopSpectating();
 	}
@@ -992,14 +1129,35 @@ void ATeamProject_MOUPlayerController::CloseInGameMenu()
 	SetIgnoreLookInput(false);
 }
 
+// [LOBBYRETURN-001] 로그인 연결은 유지하고 방을 나간 뒤 메인로비 레벨로 이동한다.
 void ATeamProject_MOUPlayerController::ReturnToLobby()
 {
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UServerSubsystem* Server = GI->GetSubsystem<UServerSubsystem>())
+		{
+			Server->LeaveRoom();
+		}
+	}
+
 	CloseInGameMenu();
 	UGameplayStatics::OpenLevel(this, FName(TEXT("/Game/02_JSY/MainLobby/MainLobby")));
 }
 
+// [REJOIN-006] 서버 연결을 정리하여 퇴장 처리를 유도한 뒤 게임을 종료한다.
 void ATeamProject_MOUPlayerController::QuitToDesktop()
 {
+    if (!IsLocalPlayerController()) return;
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UServerSubsystem* Server = GI->GetSubsystem<UServerSubsystem>())
+            Server->Disconnect();
+    }
 	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
 }
 
@@ -1205,3 +1363,36 @@ void ATeamProject_MOUPlayerController::ApplyUserSettingsToPlayer()
 
 
 
+
+// [LATEJOIN-004] 도중 합류의 관전 제한을 소유 클라이언트로 복제합니다.
+void ATeamProject_MOUPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ATeamProject_MOUPlayerController, bWaitForSafeLobby);
+}
+
+// [LATEJOIN-007] 심리스 이동으로 컨트롤러가 교체되어도 합류 제한을 보존합니다.
+void ATeamProject_MOUPlayerController::SeamlessTravelTo(APlayerController* NewPC)
+{
+    Super::SeamlessTravelTo(NewPC);
+    if (ATeamProject_MOUPlayerController* Next = Cast<ATeamProject_MOUPlayerController>(NewPC))
+    {
+        Next->PlaySessionId = PlaySessionId;
+        Next->bWaitForSafeLobby = bWaitForSafeLobby;
+    }
+}
+
+// [LATEJOIN-014] 호스트가 생존 관전 대상을 선택하여 먼 거리의 대상도 복제되게 합니다.
+void ATeamProject_MOUPlayerController::ServerCycleLateJoinTarget_Implementation(int32 Direction)
+{
+    if (!bWaitForSafeLobby) return;
+    const TArray<AMainCharacter*> Alive = GetAliveTeammates();
+    if (Alive.IsEmpty()) return;
+    const int32 Previous = Alive.IndexOfByKey(Cast<AMainCharacter>(GetViewTarget()));
+    const int32 Index = Previous == INDEX_NONE ? 0
+        : Direction == 0 ? Previous
+        : (Previous + (Direction < 0 ? -1 : 1) + Alive.Num()) % Alive.Num();
+    // 서버의 ViewTarget도 갱신해야 관전 위치를 기준으로 네트워크 관련성을 판단합니다.
+    SetViewTarget(Alive[Index]);
+    ClientSetViewTarget(Alive[Index]);
+}

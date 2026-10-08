@@ -97,7 +97,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "NPC Spawner")
 	ACharacterBase* SpawnOneNPC();
 
-	/** 최대 소환 수까지 비어 있는 Spawn Point에 NPC를 생성합니다. */
+	// [NPCSPAWN-012] 비어 있는 스폰 포인트를 재사용하여 MaxSpawnCount까지 NPC를 채운다.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "NPC Spawner")
 	void SpawnNPCsToLimit();
 
@@ -199,7 +199,9 @@ private:
 
 	void RebuildSpawnPoints();
 	void RemoveInvalidSpawnedNPCs();
+	// [NPCSPAWN-013] 살아 있는 NPC 수가 MaxSpawnCount보다 적으면 재시도 타이머를 예약한다.
 	void ScheduleRespawn();
+	// [NPCSPAWN-014] 비워진 스폰 포인트를 이용해 부족한 NPC를 다시 생성한다.
 	void RespawnMissingNPCs();
 	bool IsSpawnPointOccupied(const USceneComponent* SpawnPoint) const;
 	void AssignPatrolActors(ACharacterBase* SpawnedNPC, const FNPCSpawnDefinition& SpawnDefinition) const;

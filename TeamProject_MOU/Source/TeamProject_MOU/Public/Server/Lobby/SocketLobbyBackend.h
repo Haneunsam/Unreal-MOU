@@ -61,6 +61,8 @@ public:
 	virtual void SetReady(bool bReady) override;
 	virtual void StartGame() override;
 	virtual void NotifyHostReady() override;
+    // [REJOIN-005] 중도 입장 요청 번호와 호스트의 준비 결과를 서버에 전송한다.
+    virtual bool SendGuestConnectAck(int32 RoomId, int64 GuestUserId, uint64 ConnectRequestId, bool bReady) override;
 	virtual void RequestHostProbe(int32 Port, uint32 Nonce) override;
 	virtual void ReportReachability(bool bReachable) override;
 	virtual void UpdateRoomState(int32 RoomId, int32 CurrentPlayers, bool bInGame) override;

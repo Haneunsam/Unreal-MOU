@@ -266,6 +266,7 @@ bool FServerClientRunnable::PumpRecv()
 	return true;
 }
 
+// [REJOIN-023] 중도 입장 준비를 포함한 서버 패킷을 게임 스레드 이벤트로 변환한다.
 void FServerClientRunnable::HandlePacket(const MOU::PacketHeader& Header, const TArray<uint8>& Body)
 {
 	switch (static_cast<MOU::EOpcode>(Header.Opcode))
@@ -423,6 +424,8 @@ void FServerClientRunnable::HandlePacket(const MOU::PacketHeader& Header, const 
 		FServerClientEvent Event;
 		Event.Type             = EServerClientEventType::RoomJoinAck;
 		Event.Join.bSuccess    = (Ack.bSuccess != 0);
+        Event.Join.State = static_cast<EMOURoomStateBP>(Ack.State);
+        Event.Join.ConnectRequestId = Ack.ConnectRequestId;
 		Event.Join.RoomId      = static_cast<int32>(Ack.RoomId);
 		Event.Join.Result      = static_cast<EMOURoomResultBP>(Ack.Result);
 		MOUChat::ReadHostCandidates(Ack.Candidates, Ack.CandidateCount, Event.Join.Candidates);
@@ -565,6 +568,26 @@ void FServerClientRunnable::HandlePacket(const MOU::PacketHeader& Header, const 
 		break;
 	}
 
+    case MOU::EOpcode::RoomGuestConnectPrepare:
+    {
+        if (Body.Num() != sizeof(MOU::RoomGuestConnectPrepareBody)) break;
+        MOU::RoomGuestConnectPrepareBody Prepare{};
+        FMemory::Memcpy(&Prepare, Body.GetData(), sizeof(Prepare));
+        FServerClientEvent Event;
+        Event.Type = EServerClientEventType::RoomGuestConnectPrepare;
+        Event.RoomId = Prepare.RoomId;
+        Event.GuestUserId = Prepare.GuestUserId;
+        Event.ConnectRequestId = Prepare.ConnectRequestId;
+        FMOUGameRelayRoute Route = MOUChat::ReadRelayHostRoute(Prepare.Relay);
+        if (Route.IsValid()) Event.HostRelayRoutes.Add(MoveTemp(Route));
+        FMOUHostCandidate Peer;
+        Peer.Address = MOUChat::ReadFixedString(Prepare.PunchTarget.Address, MOU::kMaxAddressLen);
+        Peer.Port = Prepare.PunchTarget.Port;
+        if (Peer.IsValid()) Event.PunchTargets.Add(MoveTemp(Peer));
+        InboundEvents.Enqueue(MoveTemp(Event));
+        break;
+    }
+
 	case MOU::EOpcode::RoomHostReady:
 	{
 		if (Body.Num() < static_cast<int32>(sizeof(MOU::RoomHostReadyBody)))
@@ -579,6 +602,7 @@ void FServerClientRunnable::HandlePacket(const MOU::PacketHeader& Header, const 
 		// RoomStart 와 같은 그릇에 담는다. 받는 쪽에서 MakeTravelURL() 을 그대로 쓴다.
 		FServerClientEvent Event;
 		Event.Type             = EServerClientEventType::RoomHostReady;
+        Event.ConnectRequestId = Ready.ConnectRequestId;
 		Event.RoomId           = static_cast<int32>(Ready.RoomId);
 		Event.Join.bSuccess    = true;
 		Event.Join.RoomId      = static_cast<int32>(Ready.RoomId);

@@ -2,9 +2,11 @@
 #include "Item/ItemSpawnRow.h"
 #include "Base/ItemBase.h"
 #include "Engine/DataTable.h"
+#include "Engine/LevelStreaming.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "TimerManager.h"
+#include "UObject/UObjectGlobals.h"
 
 AItemSpawner::AItemSpawner()
 {
@@ -14,6 +16,9 @@ AItemSpawner::AItemSpawner()
 void AItemSpawner::BeginPlay()
 {
 	Super::BeginPlay();
+	DeliverySpawnEarliestTime = GetWorld()
+		? GetWorld()->GetTimeSeconds() + FMath::Max(0.0f, DeliverySpawnDelay)
+		: 0.0f;
 
 	// 레벨 배치형: 서버 권한에서만 자동 스폰
 	if (!HasAuthority() || !bAutoSpawnOnBeginPlay)
@@ -135,6 +140,7 @@ AItemBase* AItemSpawner::SpawnItemAt(FName RowName, FVector Location, FRotator R
 	return SpawnedItem;
 }
 
+// [SPAWNER-003] 저장된 배달품을 Deferred 상태로 만들고 맵 준비 완료 후 활성화합니다.
 AItemBase* AItemSpawner::SpawnItemFromSaveData(const FStoredItemInstanceData& ItemSaveData, FVector Location, FRotator Rotation)
 {
 	// 스폰은 서버 권한에서만 (스폰된 액터는 클라로 복제됨)
@@ -158,6 +164,26 @@ AItemBase* AItemSpawner::SpawnItemFromSaveData(const FStoredItemInstanceData& It
 		return nullptr;
 	}
 
+	if (!IsDeliverySpawnWorldReady())
+	{
+		FDeferredDeliveryItemSpawn& DeferredSpawn = DeferredDeliverySpawns.AddDefaulted_GetRef();
+		DeferredSpawn.SpawnedItem = SpawnedItem;
+		DeferredSpawn.SaveData = ItemSaveData;
+		DeferredSpawn.SpawnTransform = SpawnTransform;
+
+		if (!GetWorldTimerManager().IsTimerActive(DeferredDeliverySpawnTimerHandle))
+		{
+			GetWorldTimerManager().SetTimer(
+				DeferredDeliverySpawnTimerHandle,
+				this,
+				&AItemSpawner::FinishDeferredDeliverySpawns,
+				0.1f,
+				true);
+		}
+
+		return SpawnedItem;
+	}
+
 	SpawnedItem->FinishSpawning(SpawnTransform);
 	SpawnedItem->LoadItemFromData(ItemSaveData);
 
@@ -165,4 +191,65 @@ AItemBase* AItemSpawner::SpawnItemFromSaveData(const FStoredItemInstanceData& It
 	SpawnedItem->SetActorLocationAndRotation(Location, Rotation);
 
 	return SpawnedItem;
+}
+
+// [SPAWNER-004] 비동기 로딩과 스트리밍 레벨의 로드·가시성 처리가 끝났는지 검사합니다.
+bool AItemSpawner::IsDeliverySpawnWorldReady() const
+{
+	const UWorld* World = GetWorld();
+	if (!World || !World->HasBegunPlay() || World->IsInSeamlessTravel() || IsAsyncLoading())
+	{
+		return false;
+	}
+
+	if (World->GetTimeSeconds() < DeliverySpawnEarliestTime || World->IsVisibilityRequestPending())
+	{
+		return false;
+	}
+
+	for (const ULevelStreaming* StreamingLevel : World->GetStreamingLevels())
+	{
+		if (!StreamingLevel)
+		{
+			continue;
+		}
+
+		if (StreamingLevel->ShouldBeLoaded() && !StreamingLevel->IsLevelLoaded())
+		{
+			return false;
+		}
+
+		if (StreamingLevel->ShouldBeVisible() && !StreamingLevel->IsLevelVisible())
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+// [SPAWNER-005] 준비 완료까지 대기한 배달품의 Construction과 BeginPlay를 실행합니다.
+void AItemSpawner::FinishDeferredDeliverySpawns()
+{
+	if (!HasAuthority() || !IsDeliverySpawnWorldReady())
+	{
+		return;
+	}
+
+	GetWorldTimerManager().ClearTimer(DeferredDeliverySpawnTimerHandle);
+
+	for (FDeferredDeliveryItemSpawn& DeferredSpawn : DeferredDeliverySpawns)
+	{
+		AItemBase* SpawnedItem = DeferredSpawn.SpawnedItem;
+		if (!IsValid(SpawnedItem))
+		{
+			continue;
+		}
+
+		SpawnedItem->FinishSpawning(DeferredSpawn.SpawnTransform);
+		SpawnedItem->LoadItemFromData(DeferredSpawn.SaveData);
+		SpawnedItem->SetActorTransform(DeferredSpawn.SpawnTransform);
+	}
+
+	DeferredDeliverySpawns.Reset();
 }

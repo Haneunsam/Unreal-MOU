@@ -26,6 +26,8 @@
 
 namespace MOU::ServerRuntime
 {
+    // 방 입장·퇴장·접속 승인과 릴레이 수명을 하나의 순서로 처리한다.
+    static std::recursive_mutex GRoomFlowMutex;
 
 	void BroadcastRoomMembers(uint32_t RoomId)
 	{
@@ -61,8 +63,10 @@ namespace MOU::ServerRuntime
 	}
 
 
+	// [REJOIN-013] 퇴장과 릴레이 해제를 중도 입장 준비 처리와 직렬화한다.
 	void LeaveRoomAndNotify(const SessionPtr& Session)
 	{
+        std::lock_guard<std::recursive_mutex> FlowLock(GRoomFlowMutex);
 		uint32_t RoomId = 0;
 		bool bRoomClosed = false;
 		std::vector<uint64_t> Recipients;
@@ -210,8 +214,10 @@ namespace MOU::ServerRuntime
 	}
 
 
+	// [REJOIN-009] 입장 응답 후 게임중인 방의 호스트에게 새 접속 경로를 준비시킨다.
 	bool HandleRoomJoinReq(const SessionPtr& Session, const char* Body, uint32_t BodySize)
 	{
+        std::lock_guard<std::recursive_mutex> FlowLock(GRoomFlowMutex);
 		RoomJoinAckBody Ack{};
 
 		auto Reply = [&](ERoomResult R)
@@ -237,10 +243,13 @@ namespace MOU::ServerRuntime
 
 		std::vector<HostCandidate> Candidates;
 		bool bLanOnly = false;
+		Rooms::JoinContext JoinContext;
 		const ERoomResult R = Rooms::Join(Req.RoomId, Session->UserId, Session->Name,
-		                                  Password, Candidates, bLanOnly);
+		                                  Password, Candidates, bLanOnly, &JoinContext);
 
 		Ack.RoomId = Req.RoomId;
+        Ack.State = static_cast<uint8_t>(JoinContext.State);
+        Ack.ConnectRequestId = JoinContext.ConnectRequestId;
 		if (R == ERoomResult::Success)
 		{
 			Ack.CandidateCount = FillCandidates(Ack.Candidates, Candidates);
@@ -262,11 +271,76 @@ namespace MOU::ServerRuntime
 		// Ack 다음에 보내야 새 참여자가 RoomId 를 안 상태로 명단을 받는다.
 		if (R == ERoomResult::Success)
 		{
-			BroadcastRoomMembers(Req.RoomId);
-		}
-		return bSent;
+            BroadcastRoomMembers(Req.RoomId);
+            if (bSent && JoinContext.State == ERoomState::InGame && JoinContext.ConnectRequestId != 0)
+            {
+                const SessionPtr Host = FindAuthedSession(JoinContext.HostUserId);
+                if (!Host)
+                {
+                    LeaveRoomAndNotify(Session);
+                    return false;
+                }
+                RoomGuestConnectPrepareBody Prepare{};
+                Prepare.RoomId = Req.RoomId;
+                Prepare.GuestUserId = Session->UserId;
+                Prepare.ConnectRequestId = JoinContext.ConnectRequestId;
+                CopyFixedString(Prepare.PunchTarget.Address, kMaxAddressLen, Session->GameEndpointAddress);
+                Prepare.PunchTarget.Port = Session->GameEndpointPort;
+                RelayGuestRoute GuestRoute{};
+                EnsureRelayRouteForGuest(Req.RoomId, Session->UserId, Prepare.Relay, GuestRoute);
+                if (!Context().RelayLanIp.empty() && IsPrivateAddress(Host->PeerAddress))
+                    SetRelayAddress(Prepare.Relay, Context().RelayLanIp);
+                if (!SendPacket(Host->Sock, EOpcode::RoomGuestConnectPrepare, &Prepare, sizeof(Prepare)))
+                {
+                    LeaveRoomAndNotify(Session);
+                    return false;
+                }
+                BroadcastPresence(Session, EPresence::InGame);
+            }
+        }
+        return bSent;
 	}
 
+
+    // [REJOIN-002] 호스트의 준비 결과를 검증하고 해당 참여자에게만 출발을 알린다.
+    bool HandleRoomGuestConnectAck(const SessionPtr& Session, const char* Body, uint32_t BodySize)
+    {
+        std::lock_guard<std::recursive_mutex> FlowLock(GRoomFlowMutex);
+        if (!Session->bAuthed || BodySize != sizeof(RoomGuestConnectAckBody)) return true;
+        RoomGuestConnectAckBody Ack{};
+        std::memcpy(&Ack, Body, sizeof(Ack));
+        std::vector<HostCandidate> Candidates;
+        bool LanOnly = false;
+        if (!Rooms::CompleteGuestConnect(Session->UserId, Ack.RoomId, Ack.GuestUserId,
+            Ack.ConnectRequestId, Candidates, LanOnly)) return true;
+        const SessionPtr Guest = FindAuthedSession(Ack.GuestUserId);
+        if (!Guest) { ReleaseRelayRouteForGuest(Ack.RoomId, Ack.GuestUserId); return true; }
+        if (!Ack.bReady)
+        {
+            LeaveRoomAndNotify(Guest);
+            BroadcastPresence(Guest, EPresence::Online);
+            // 빈 후보를 동일 요청 번호로 알려 클라이언트가 즉시 실패를 정리하게 한다.
+            RoomHostReadyBody Failed{};
+            Failed.RoomId = Ack.RoomId;
+            Failed.ConnectRequestId = Ack.ConnectRequestId;
+            SendPacket(Guest->Sock, EOpcode::RoomHostReady, &Failed, sizeof(Failed));
+            return true;
+        }
+        RoomHostReadyBody Ready{};
+        Ready.RoomId = Ack.RoomId;
+        Ready.ConnectRequestId = Ack.ConnectRequestId;
+        Ready.CandidateCount = FillCandidates(Ready.Candidates, Candidates);
+        Ready.bLanOnly = LanOnly ? 1 : 0;
+        GetGuestRelayRoute(Ack.RoomId, Ack.GuestUserId, Ready.Relay);
+        if (!Context().RelayLanIp.empty() && IsPrivateAddress(Guest->PeerAddress))
+            SetRelayAddress(Ready.Relay, Context().RelayLanIp);
+        ServerLog::Print("[중도 입장] #%u 참여자 %llu 접속 준비 완료\n",
+            Ack.RoomId, static_cast<unsigned long long>(Ack.GuestUserId));
+        // 참여자 송신 실패 때문에 이 요청을 보낸 호스트 연결을 종료하지 않는다.
+        if (!SendPacket(Guest->Sock, EOpcode::RoomHostReady, &Ready, sizeof(Ready)))
+            LeaveRoomAndNotify(Guest);
+        return true;
+    }
 
 	bool HandleRoomStateUpdate(const SessionPtr& Session, const char* Body, uint32_t BodySize)
 	{
@@ -348,8 +422,10 @@ namespace MOU::ServerRuntime
 	}
 
 
+	// [REJOIN-014] 최초 게임 시작과 중도 입장의 경로 할당 순서를 보장한다.
 	bool HandleRoomStartReq(const SessionPtr& Session, const char*, uint32_t)
 	{
+        std::lock_guard<std::recursive_mutex> FlowLock(GRoomFlowMutex);
 		if (!Session->bAuthed)
 		{
 			return true;
@@ -472,8 +548,10 @@ namespace MOU::ServerRuntime
 	}
 
 
+	// [REJOIN-015] 최초 참여자에게만 호스트의 최초 준비 신호를 전달한다.
 	bool HandleRoomHostReadyReq(const SessionPtr& Session, const char*, uint32_t)
 	{
+        std::lock_guard<std::recursive_mutex> FlowLock(GRoomFlowMutex);
 		if (!Session->bAuthed)
 		{
 			return true;
