@@ -6,6 +6,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Components/StaticMeshComponent.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "TimerManager.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -305,9 +306,15 @@ void AItemSpawner::FinalizeDeliverySpawn(
 	if (ItemMesh && GetWorld())
 	{
 		ItemMesh->UpdateBounds();
-		// 액터 피벗이 메시 중앙에 있다는 보장이 없으므로, 피벗에서 메시 최하단까지의 실제 오프셋을 사용합니다.
-		// BP_Map처럼 피벗/상대 위치가 치우친 메시에서 BoxExtent만 더하면 공중에 뜨는 현상이 발생합니다.
-		const float MeshBottomWorldZ = ItemMesh->Bounds.Origin.Z - ItemMesh->Bounds.BoxExtent.Z;
+		// Build Scale로 축소한 메시의 확장 경계는 원본 크기로 남을 수 있으므로,
+		// 실제 물리 바디의 단순 충돌 경계를 우선 사용해 바닥 배치 높이를 계산합니다.
+		const UBodySetup* BodySetup = ItemMesh->GetBodySetup();
+		const FBox CollisionBounds = BodySetup
+			? BodySetup->AggGeom.CalcAABB(ItemMesh->GetComponentTransform())
+			: FBox(ForceInit);
+		const float MeshBottomWorldZ = CollisionBounds.IsValid
+			? CollisionBounds.Min.Z
+			: ItemMesh->Bounds.Origin.Z - ItemMesh->Bounds.BoxExtent.Z;
 		const float ActorToMeshBottomOffset =
 			MeshBottomWorldZ - SpawnedItem->GetActorLocation().Z;
 
