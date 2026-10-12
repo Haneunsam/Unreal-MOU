@@ -313,6 +313,7 @@ protected:
 	FTimerHandle SpectatorTransitionTimerHandle;
 
 	/** Gameplay initialization */
+	// [BGMAUDIO-003] 로컬 플레이어 초기화 시 오디오 설정과 기존 조작 설정을 적용한다.
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void PreClientTravel(const FString& PendingURL, ETravelType TravelType, bool bIsSeamlessTravel) override;

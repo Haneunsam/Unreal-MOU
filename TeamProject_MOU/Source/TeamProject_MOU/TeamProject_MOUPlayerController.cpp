@@ -280,6 +280,7 @@ void ATeamProject_MOUPlayerController::ClientTerminalPurchaseCompleted_Implement
 	OnTerminalPurchaseCompleted.Broadcast(bSucceeded, ErrorMessage);
 }
 
+// [BGMAUDIO-003] 로컬 플레이어 초기화 시 오디오 설정과 기존 조작 설정을 적용한다.
 void ATeamProject_MOUPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
@@ -309,6 +310,7 @@ void ATeamProject_MOUPlayerController::BeginPlay()
 
 		if (UMOU_GameUserSettings* Settings = UMOU_GameUserSettings::GetMOUGameUserSettings())
 		{
+			Settings->ApplyAudioSettings(this);
 			Settings->OnControlSettingsChanged.AddUObject(this, &ATeamProject_MOUPlayerController::ApplyUserSettingsToPlayer);
 		}
 	}
