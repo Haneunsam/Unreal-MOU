@@ -35,6 +35,14 @@ public:
 	// [VUI-006] 매 프레임 마이크 상태를 확인하고 음량 바를 갱신한다.
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
+	// [VUI-015] 설정 화면 미리보기처럼 입력을 소유하지 않는 인스턴스의 음소거 키 바인딩을 해제한다.
+	UFUNCTION(BlueprintCallable, Category = "MOU|Voice|UI")
+	void SetMuteKeyBindingEnabled(bool bEnabled);
+
+	// [VUI-016] 이 위젯이 음소거 입력을 직접 소유하는지 조회한다.
+	UFUNCTION(BlueprintPure, Category = "MOU|Voice|UI")
+	bool IsMuteKeyBindingEnabled() const;
+
 	/** 별도 입력 액션에서 음소거를 처리한다면 false로 설정한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MOU|Voice")
 	bool bBindMuteKeyToOwningPlayer = true;
@@ -51,9 +59,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MOU|Voice|UI")
 	TObjectPtr<UTexture2D> MutedMicTexture;
 
-	/** 게이지 상한의 감도 배수. 발화 기준에서 0%, 기본값 3배에서 100%가 된다. */
+	/** 이전 WBP 저장 호환용. 현재 게이지는 전송 강도와 같은 정규화 범위를 사용한다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MOU|Voice|UI")
 	float LevelBarHeadroom = 3.f;
+
+	/** 게이지 100% 및 최대 소음 반경에 해당하는 원본 RMS 음량. 낮출수록 작은 목소리로 최대에 도달한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MOU|Voice|Intensity", meta = (ClampMin = "0.001", ClampMax = "1.0", UIMin = "0.001", UIMax = "0.25", DisplayName = "Maximum Voice RMS"))
+	float MaximumVoiceRms = 0.05f;
 
 	/** 마이크 이미지 안에서 차오르는 게이지 색상. 텍스처 색상에 곱해지므로 흰색 아이콘에서 그대로 보인다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MOU|Voice|UI")

@@ -9,6 +9,7 @@
 #include "Voice/RadioComponent.h"
 #include "Voice/VoiceCodec.h"
 #include "Voice/VoiceSynthComponent.h"
+#include "UI/MOU_GameUserSettings.h"
 
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
@@ -295,6 +296,7 @@ AActor* UVoicePlaybackComponent::ResolveSpeakerActor(const FVoiceStream& Stream,
 	return FindSpeakerPawn(SpeakerId);
 }
 
+// [VOICE-002] 수신 Synth를 준비하고 사용자 볼륨과 라우트별 출력 게인을 적용한다.
 UVoiceSynthComponent* UVoicePlaybackComponent::EnsureSynthForStream(
 	FVoiceStream& Stream, int32 SpeakerId, EVoiceMode Mode)
 {
@@ -381,6 +383,20 @@ UVoiceSynthComponent* UVoicePlaybackComponent::EnsureSynthForStream(
 		Synth->SetProximityMode(Mode, Stream.LastRadiusScale);
 	}
 
+	float PlaybackGain = Stream.Route == EVoiceRoute::Radio
+		? MOUVoice::RadioPlaybackGain : MOUVoice::ProximityPlaybackGain;
+	if (const UMOU_GameUserSettings* Settings = UMOU_GameUserSettings::GetMOUGameUserSettings())
+	{
+		PlaybackGain *= Settings->GetVoiceVolume();
+	}
+	if (Stream.Route == EVoiceRoute::Radio)
+	{
+		if (const URadioComponent* Radio = SpeakerActor->FindComponentByClass<URadioComponent>())
+		{
+			PlaybackGain *= FMath::Max(Radio->SpeakerVolume, 0.f);
+		}
+	}
+	Synth->SetVolumeMultiplier(PlaybackGain);
 	return Synth;
 }
 

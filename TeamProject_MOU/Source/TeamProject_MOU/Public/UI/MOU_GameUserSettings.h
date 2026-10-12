@@ -24,14 +24,17 @@ class TEAMPROJECT_MOU_API UMOU_GameUserSettings : public UGameUserSettings
 	GENERATED_BODY()
 
 public:
+	// [MIC-007] 음성 출력과 마이크 인식 임계값의 기본 설정을 초기화한다.
 	UMOU_GameUserSettings();
 
 	/** 싱글톤 인스턴스 헬퍼 */
 	UFUNCTION(BlueprintPure, Category = "Settings")
 	static UMOU_GameUserSettings* GetMOUGameUserSettings();
 
+	// [MIC-008] 기본 설정 및 음성 설정 버전을 복원한다.
 	virtual void SetToDefaults() override;
 	virtual void ApplyNonResolutionSettings() override;
+	// [MIC-002] 기존 설정을 읽고 구버전 음성 볼륨과 마이크 임계값을 한 번 보정한다.
 	virtual void LoadSettings(bool bForceReload = false) override;
 
 	// =========================================================================
@@ -66,6 +69,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Settings|Audio")
 	float GetMicSensitivity() const { return MicSensitivity; }
 
+	// [MIC-003] 수동 마이크 임계값을 0~0.01로 제한하고 캡처에 적용한다.
 	UFUNCTION(BlueprintCallable, Category = "Settings|Audio")
 	void SetMicSensitivity(float InSensitivity);
 
@@ -132,10 +136,10 @@ protected:
 	float SFXVolume = 0.5f;
 
 	UPROPERTY(Config)
-	float VoiceVolume = 0.5f;
+	float VoiceVolume = 1.0f;
 
 	UPROPERTY(Config)
-	float MicSensitivity = 0.05f;
+	float MicSensitivity = 0.005f;
 
 	// --- 조작 저장 변수 ---
 	UPROPERTY(Config)
