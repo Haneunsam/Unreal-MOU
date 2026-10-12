@@ -105,9 +105,11 @@ public:
 	 *
 	 * @return 마이크가 실제로 열렸으면 true. false 여도 게임은 정상 진행돼야 한다.
 	 */
+	// [MICCAP-001] 엔진 선행 게이트를 해제하고 원본 마이크 입력을 시작한다.
 	bool Start();
 
 	/** 마이크를 닫는다. 두 번 불러도 안전하다. */
+	// [MICCAP-002] 캡처 장치와 이전 발화 상태를 함께 초기화한다.
 	void Shutdown();
 
 	/**
@@ -135,7 +137,9 @@ public:
 	float GetLoudnessEnvelope() const { return LoudnessEnvelope; }
 
 private:
+	friend class FVoiceInputGateTest;
 	/** 누적 버퍼에서 20ms 씩 잘라낸다. */
+	// [MICCAP-003] 원본 RMS를 측정한 뒤 사용자 임계값과 말끝 유지 시간을 적용한다.
 	void DrainPendingSamples(TArray<FMOUVoiceFrame>& OutFrames);
 
 	/** 샘플 배열의 RMS 를 0~1 로 정규화해 돌려준다. */

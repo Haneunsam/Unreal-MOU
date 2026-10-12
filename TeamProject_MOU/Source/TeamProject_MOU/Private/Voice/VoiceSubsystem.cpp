@@ -7,6 +7,7 @@
 //   유일한 다른 스레드는 오디오 렌더 스레드이고 VoiceSynthComponent.cpp 가 담당한다.
 
 #include "Voice/VoiceSubsystem.h"
+#include "UI/MOU_GameUserSettings.h"
 
 #include "Voice/VoiceCaptureSource.h"
 #include "Voice/VoiceCodec.h"
@@ -14,6 +15,7 @@
 #include "Voice/VoicePlaybackComponent.h"
 #include "Voice/VoiceRouter.h"
 #include "Voice/VoiceSynthComponent.h"
+#include "Voice/VoiceStatusWidget.h"
 
 #include "AIController.h"
 #include "DrawDebugHelpers.h"
@@ -63,9 +65,16 @@ namespace
 	TWeakObjectPtr<UVoiceSubsystem> GVoiceCaptureOwner;
 }
 
+// [MIC-009] 저장된 감도를 캡처에 적용하고 설정 변경 알림을 구독한다.
 void UVoiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	// HUD가 아직 생성되지 않은 로비에서도 같은 블루프린트 기본 상한을 사용한다.
+	if (UClass* WidgetClass = LoadClass<UVoiceStatusWidget>(nullptr,
+		TEXT("/Game/02_JSY/AI_VoicePerception/Mic/WBP_VoiceStatusWidget.WBP_VoiceStatusWidget_C")))
+	{
+		SetMaximumVoiceRms(WidgetClass->GetDefaultObject<UVoiceStatusWidget>()->MaximumVoiceRms);
+	}
 
 	// ★ Voice 모듈을 여기(게임 스레드)에서 명시적으로 로드한다.
 	//
@@ -120,6 +129,12 @@ void UVoiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		Decoder->Initialize();
 	}
 
+	if (UMOU_GameUserSettings* Settings = UMOU_GameUserSettings::GetMOUGameUserSettings())
+	{
+		Settings->OnAudioSettingsChanged.AddUObject(this, &UVoiceSubsystem::ApplySavedMicSensitivity);
+		ApplySavedMicSensitivity();
+	}
+
 	TickHandle = FTSTicker::GetCoreTicker().AddTicker(
 		FTickerDelegate::CreateUObject(this, &UVoiceSubsystem::Tick));
 
@@ -128,8 +143,24 @@ void UVoiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		IsCaptureReady() ? TEXT("준비됨") : TEXT("없음"));
 }
 
+// [MIC-011] 월드 조회 없이 이 로컬 플레이어의 캡처에 변경된 저장 감도를 반영한다.
+void UVoiceSubsystem::ApplySavedMicSensitivity()
+{
+	const UMOU_GameUserSettings* Settings = UMOU_GameUserSettings::GetMOUGameUserSettings();
+	if (Settings && CaptureSource && LastSavedMicSensitivity != Settings->GetMicSensitivity())
+	{
+		LastSavedMicSensitivity = Settings->GetMicSensitivity();
+		SetMicSensitivity(LastSavedMicSensitivity);
+	}
+}
+
+// [MIC-010] 설정 변경 구독과 음성 자원을 해제한다.
 void UVoiceSubsystem::Deinitialize()
 {
+	if (UMOU_GameUserSettings* Settings = UMOU_GameUserSettings::GetMOUGameUserSettings())
+	{
+		Settings->OnAudioSettingsChanged.RemoveAll(this);
+	}
 	if (TickHandle.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(TickHandle);
@@ -302,8 +333,7 @@ bool UVoiceSubsystem::Tick(float DeltaTime)
 			//
 			//   엔벨로프를 통과한 값을 쓴다. 순간 RMS 를 보내면 받는 쪽 원이
 			//   음절마다 펄럭인다.
-			const float Intensity = MOUVoice::NormalizeLoudness(
-				Frame.LoudnessEnvelope, GetMicSensitivity());
+			const float Intensity = NormalizeVoiceIntensity(Frame.LoudnessEnvelope);
 
 			VoiceComp->SendVoiceFrame(EncodedScratch, Intensity, VoiceMode, RequestedRoute);
 			++FramesTransmitted;
@@ -481,7 +511,7 @@ void UVoiceSubsystem::DrawRadiusDebug()
 			MOUVoice::GetHearRadius(VoiceMode) / 100.f,
 			MOUVoice::GetNoiseRange(VoiceMode) / 100.f,
 			GetCurrentLoudness(), Envelope, Intensity, Scale,
-			GetMicSensitivity(), MOUVoice::LoudnessCeiling),
+			GetMicSensitivity(), MaximumVoiceRms),
 		nullptr, FColor::White, 0.f /*이번 프레임만*/);
 #endif
 }
@@ -794,7 +824,19 @@ float UVoiceSubsystem::GetCurrentIntensity() const
 	// ★ 정규화가 일어나는 곳은 여기 하나다(전송 경로는 프레임별 엔벨로프를
 	//   써야 해서 예외지만, 부르는 함수는 같다). 지름길을 만들면 화면의 원과
 	//   남에게 들리는 거리가 어긋난다.
-	return MOUVoice::NormalizeLoudness(GetLoudnessEnvelope(), GetMicSensitivity());
+	return NormalizeVoiceIntensity(GetLoudnessEnvelope());
+}
+
+// [VOICELEVEL-001] 로컬 플레이어의 게이지와 전송 강도가 공유하는 최대 RMS를 설정한다.
+void UVoiceSubsystem::SetMaximumVoiceRms(float InMaximum)
+{
+	MaximumVoiceRms = FMath::IsFinite(InMaximum) ? FMath::Clamp(InMaximum, 0.001f, 1.f) : 0.05f;
+}
+
+// [VOICELEVEL-002] 현재 감도와 개발자 상한으로 원본 음량을 정규화한다.
+float UVoiceSubsystem::NormalizeVoiceIntensity(float Envelope) const
+{
+	return MOUVoice::NormalizeLoudnessWithCeiling(Envelope, GetMicSensitivity(), MaximumVoiceRms);
 }
 
 float UVoiceSubsystem::GetCurrentRadiusScale() const
@@ -811,25 +853,12 @@ void UVoiceSubsystem::SetMicSensitivity(float InThreshold)
 
 	CaptureSource->SetVadThreshold(InThreshold);
 
-	// ★ 감도를 바꾸면 음량->반경 조절 구간의 **시작점**이 같이 움직인다.
-	//   상한이 그 아래로 내려가면 조절 구간이 사라져 모든 발화가 최대 반경이
-	//   된다 - 조용히 죽는 종류의 버그라 여기서 막는다(VoiceTypes.h 의
-	//   MinLoudnessSpan 주석). 감도를 바꾸는 경로는 자동 보정과 이 함수뿐이고,
-	//   자동 보정도 결국 여기를 지나므로 한 곳에서 막으면 충분하다.
+	// 상한은 개발자 설정을 보존하고, 감도가 상한 이상인 경우 정규화 함수에서 유효 폭을 확보한다.
 	const float Applied = CaptureSource->GetVadThreshold();
 
-	if (MOUVoice::EnsureUsableLoudnessSpan(Applied))
-	{
-		UE_LOG(LogMOUVoice, Warning,
-			TEXT("★ 감도(%.4f)가 음량 상한에 너무 가까워 반경 조절 구간이 없어질 뻔했다. ")
-			TEXT("상한을 %.4f 로 올렸다. 속삭임/외침의 반경 차이가 좁게 느껴지면 ")
-			TEXT("MOU.Voice.LoudnessCurve 로 상한을 더 올릴 것."),
-			Applied, MOUVoice::LoudnessCeiling);
-	}
-
 	UE_LOG(LogMOUVoice, Log,
-		TEXT("마이크 감도(VAD 임계값) = %.4f (조절 구간 %.4f ~ %.4f)"),
-		Applied, Applied, MOUVoice::LoudnessCeiling);
+		TEXT("마이크 감도(VAD 임계값) = %.4f (개발자 최대 RMS %.4f)"),
+		Applied, MaximumVoiceRms);
 }
 
 float UVoiceSubsystem::GetMicSensitivity() const
@@ -935,6 +964,7 @@ void UVoiceSubsystem::FinishCalibration()
 // 마이크 다시 열기
 // ---------------------------------------------------------------------------
 
+// [MIC-012] 마이크를 다시 열고 새 캡처라면 저장된 감도를 복원한다.
 bool UVoiceSubsystem::ReopenCapture()
 {
 	// 다른 창이 마이크를 잡고 있으면 뺏지 않는다. 뺏으면 그 창이 조용히 죽는다.
@@ -970,6 +1000,7 @@ bool UVoiceSubsystem::ReopenCapture()
 	GVoiceCaptureOwner = this;
 
 	const bool bOpened = CaptureSource->Start();
+	ApplySavedMicSensitivity();
 
 	// 코덱이 아직 없으면 지금 만든다(이 창이 처음 캡처를 잡는 경우).
 	if (!Encoder)
