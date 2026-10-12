@@ -5,6 +5,8 @@
 #include "Engine/LevelStreaming.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Components/StaticMeshComponent.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "TimerManager.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -155,10 +157,14 @@ AItemBase* AItemSpawner::SpawnItemFromSaveData(const FStoredItemInstanceData& It
 		return nullptr;
 	}
 
-	const FTransform SpawnTransform(Rotation, Location);
+	// BP_DeliverItemSpawner는 배열의 모든 아이템에 같은 GetActorLocation을 넘긴다.
+	// 그대로 활성화하면 물리 바디가 한 점에 겹쳐 작은 아이템이 튕기거나 바닥을 관통하므로
+	// 요청 순서에 따라 스포너 주변으로 분산하고 약간 위에서 떨어뜨린다.
+	const FVector SafeSpawnLocation = CalculateDeliverySpawnLocation(Location, Rotation);
+	const FTransform SpawnTransform(Rotation, SafeSpawnLocation);
 	AItemBase* SpawnedItem = GetWorld()->SpawnActorDeferred<AItemBase>(
 		ItemSaveData.ItemClass, SpawnTransform, nullptr, nullptr,
-		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 	if (!SpawnedItem)
 	{
 		return nullptr;
@@ -184,13 +190,23 @@ AItemBase* AItemSpawner::SpawnItemFromSaveData(const FStoredItemInstanceData& It
 		return SpawnedItem;
 	}
 
-	SpawnedItem->FinishSpawning(SpawnTransform);
-	SpawnedItem->LoadItemFromData(ItemSaveData);
-
-	// 배달맵에서는 창고에서 저장된 위치가 아니라 스포너가 지정한 위치에 배치합니다.
-	SpawnedItem->SetActorLocationAndRotation(Location, Rotation);
+	FinalizeDeliverySpawn(SpawnedItem, ItemSaveData, SpawnTransform);
 
 	return SpawnedItem;
+}
+
+// [SPAWNER-006] 황금각 나선 배치로 개수와 무관하게 각 아이템 사이의 물리 겹침을 줄입니다.
+FVector AItemSpawner::CalculateDeliverySpawnLocation(const FVector& RequestedLocation, const FRotator& Rotation)
+{
+	const int32 SpawnIndex = DeliverySpawnSequence++;
+	const float Radius = DeliverySpawnSpacing * FMath::Sqrt(static_cast<float>(SpawnIndex));
+	const float AngleRadians = static_cast<float>(SpawnIndex) * 2.39996323f;
+	const FVector LocalOffset(
+		FMath::Cos(AngleRadians) * Radius,
+		FMath::Sin(AngleRadians) * Radius,
+		FMath::Max(0.0f, DeliverySpawnHeightOffset));
+	const FRotator YawOnlyRotation(0.0f, Rotation.Yaw, 0.0f);
+	return RequestedLocation + YawOnlyRotation.RotateVector(LocalOffset);
 }
 
 // [SPAWNER-004] 비동기 로딩과 스트리밍 레벨의 로드·가시성 처리가 끝났는지 검사합니다.
@@ -246,10 +262,99 @@ void AItemSpawner::FinishDeferredDeliverySpawns()
 			continue;
 		}
 
-		SpawnedItem->FinishSpawning(DeferredSpawn.SpawnTransform);
-		SpawnedItem->LoadItemFromData(DeferredSpawn.SaveData);
-		SpawnedItem->SetActorTransform(DeferredSpawn.SpawnTransform);
+		FinalizeDeliverySpawn(SpawnedItem, DeferredSpawn.SaveData, DeferredSpawn.SpawnTransform);
 	}
 
 	DeferredDeliverySpawns.Reset();
+}
+
+// [SPAWNER-007] 저장 데이터 복원 중 물리를 정지하고 실제 바닥 높이에 안전하게 배치한 뒤 물리를 활성화합니다.
+void AItemSpawner::FinalizeDeliverySpawn(
+	AItemBase* SpawnedItem,
+	const FStoredItemInstanceData& SaveData,
+	const FTransform& RequestedTransform)
+{
+	if (!IsValid(SpawnedItem))
+	{
+		return;
+	}
+
+	SpawnedItem->FinishSpawning(RequestedTransform);
+
+	UStaticMeshComponent* ItemMesh = SpawnedItem->MeshComponent;
+	if (ItemMesh)
+	{
+		// BeginPlay에서 켜진 물리가 저장 Transform을 적용하는 순간 계산되지 않도록 즉시 정지합니다.
+		ItemMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		ItemMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		ItemMesh->SetSimulatePhysics(false);
+		ItemMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+
+	// 사용 횟수와 내구도 등 저장 상태를 먼저 복원합니다. 여기서 저장 당시 Transform도 잠시 적용됩니다.
+	SpawnedItem->LoadItemFromData(SaveData);
+
+	// 배달맵에서는 저장 위치를 사용하지 않고, 스포너가 계산한 XY/회전으로 되돌립니다.
+	SpawnedItem->SetActorLocationAndRotation(
+		RequestedTransform.GetLocation(),
+		RequestedTransform.Rotator(),
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+
+	FVector FinalLocation = RequestedTransform.GetLocation();
+	if (ItemMesh && GetWorld())
+	{
+		ItemMesh->UpdateBounds();
+		// Build Scale로 축소한 메시의 확장 경계는 원본 크기로 남을 수 있으므로,
+		// 실제 물리 바디의 단순 충돌 경계를 우선 사용해 바닥 배치 높이를 계산합니다.
+		const UBodySetup* BodySetup = ItemMesh->GetBodySetup();
+		const FBox CollisionBounds = BodySetup
+			? BodySetup->AggGeom.CalcAABB(ItemMesh->GetComponentTransform())
+			: FBox(ForceInit);
+		const float MeshBottomWorldZ = CollisionBounds.IsValid
+			? CollisionBounds.Min.Z
+			: ItemMesh->Bounds.Origin.Z - ItemMesh->Bounds.BoxExtent.Z;
+		const float ActorToMeshBottomOffset =
+			MeshBottomWorldZ - SpawnedItem->GetActorLocation().Z;
+
+		// 스포너가 바닥과 조금 겹쳐 있거나 위에 떠 있어도 실제 WorldStatic 표면을 찾아 배치합니다.
+		const FVector TraceStart = FinalLocation + FVector(0.0f, 0.0f, 300.0f);
+		const FVector TraceEnd = FinalLocation - FVector(0.0f, 0.0f, 2000.0f);
+		FCollisionObjectQueryParams ObjectQueryParams;
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(DeliveryItemGroundTrace), false, SpawnedItem);
+		QueryParams.AddIgnoredActor(this);
+
+		FHitResult GroundHit;
+		if (GetWorld()->LineTraceSingleByObjectType(
+			GroundHit,
+			TraceStart,
+			TraceEnd,
+			ObjectQueryParams,
+			QueryParams))
+		{
+			constexpr float GroundClearance = 3.0f;
+			FinalLocation.Z = GroundHit.ImpactPoint.Z + GroundClearance - ActorToMeshBottomOffset;
+		}
+	}
+
+	SpawnedItem->SetActorLocationAndRotation(
+		FinalLocation,
+		RequestedTransform.Rotator(),
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
+
+	if (ItemMesh)
+	{
+		ItemMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+		ItemMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		ItemMesh->SetSimulatePhysics(true);
+		ItemMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		ItemMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		ItemMesh->WakeRigidBody();
+	}
+
+	SpawnedItem->ForceNetUpdate();
 }
