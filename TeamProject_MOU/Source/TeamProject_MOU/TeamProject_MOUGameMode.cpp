@@ -8,6 +8,7 @@
 #include "Base/ProjectGameInstanceBase.h"
 #include "Base/ProjectGameStateBase.h"
 #include "EngineUtils.h"
+#include "Engine/World.h"
 #include "Game/RunState.h"
 #include "Game/GameCycleState.h"
 #include "Game/LevelTimerConfigDataAsset.h"
@@ -616,7 +617,20 @@ FString ATeamProject_MOUGameMode::InitNewPlayer(APlayerController* NewPlayerCont
         {
             PC->PlaySessionId = UGameplayStatics::ParseOption(Options, TEXT("MOUPlaySession"));
             if (UServerSubsystem* Server = GetGameInstance()->GetSubsystem<UServerSubsystem>())
-                PC->bWaitForSafeLobby = !PC->IsLocalController() && !Server->AdmitPlaySession(PC->PlaySessionId, IsLobbyLevel());
+            {
+                bool bAllowDirectEditorPlay = false;
+#if WITH_EDITOR
+                // 로비 방에 참가하지 않고 PIE로 직접 실행한 경우에만 참가를 허용합니다.
+                bAllowDirectEditorPlay = GetWorld()
+                    && GetWorld()->WorldType == EWorldType::PIE
+                    && Server->GetCurrentRoomId() == 0;
+#endif
+
+                PC->bWaitForSafeLobby = !PC->IsLocalController()
+                    && !Server->AdmitPlaySession(
+                        PC->PlaySessionId,
+                        IsLobbyLevel() || bAllowDirectEditorPlay);
+            }
         }
     }
     return Error;
