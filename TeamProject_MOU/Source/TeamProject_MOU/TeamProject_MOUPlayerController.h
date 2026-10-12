@@ -96,6 +96,7 @@ public:
 	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Economy")
 	void ServerSpendGold(int32 Amount);
 
+	// [TSHOP-015] 서버에서 상품과 결제를 검증한 뒤 창고 재고와 개별 상태를 추가하고 동기화한다.
 	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Terminal Shop")
 	void ServerRequestTerminalPurchase(const TArray<FTerminalCartItem>& Items);
 

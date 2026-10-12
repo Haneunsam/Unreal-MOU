@@ -183,6 +183,7 @@ void ATeamProject_MOUPlayerController::ServerSpendGold_Implementation(int32 Amou
 	}
 }
 
+// [TSHOP-015] 서버에서 상품과 결제를 검증한 뒤 창고 재고와 개별 상태를 추가하고 동기화한다.
 void ATeamProject_MOUPlayerController::ServerRequestTerminalPurchase_Implementation(const TArray<FTerminalCartItem>& Items)
 {
 	if (!HasAuthority())
@@ -208,14 +209,15 @@ void ATeamProject_MOUPlayerController::ServerRequestTerminalPurchase_Implementat
 		return;
 	}
 
-	int32 TotalPrice = 0;
+	int64 TotalPrice = 0;
 	TArray<TPair<const FItemSpawnRow*, int32>> ValidatedRows;
 
 	for (const FTerminalCartItem& CartItem : Items)
 	{
 		if (CartItem.Quantity <= 0)
 		{
-			continue;
+			ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "InvalidQuantity", "구매 수량이 올바르지 않습니다."));
+			return;
 		}
 
 		const FItemSpawnRow* Row = Table->FindRow<FItemSpawnRow>(CartItem.RowName, TEXT("TerminalShopPurchase"));
@@ -227,7 +229,18 @@ void ATeamProject_MOUPlayerController::ServerRequestTerminalPurchase_Implementat
 			return;
 		}
 
-		TotalPrice += (Row->Price * CartItem.Quantity);
+		if (!Row->ItemClass || Row->Price < 0)
+		{
+			ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "InvalidProduct", "상품 데이터가 올바르지 않습니다."));
+			return;
+		}
+
+		TotalPrice += static_cast<int64>(Row->Price) * CartItem.Quantity;
+		if (TotalPrice > MAX_int32)
+		{
+			ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "PriceOverflow", "구매 금액 한도를 초과했습니다."));
+			return;
+		}
 		ValidatedRows.Emplace(Row, CartItem.Quantity);
 	}
 
@@ -244,33 +257,69 @@ void ATeamProject_MOUPlayerController::ServerRequestTerminalPurchase_Implementat
 		return;
 	}
 
-	if (!GS->CanAfford(TotalPrice))
+	const int32 PaymentAmount = static_cast<int32>(TotalPrice);
+	if (!GS->CanAfford(PaymentAmount))
 	{
 		ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "InsufficientGold", "골드가 부족합니다."));
 		return;
 	}
 
-	if (!GS->SpendGold(TotalPrice))
+	UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance());
+	UWarehouseDataSubsystem* Warehouse = Instance
+		? Instance->GetSubsystem<UWarehouseDataSubsystem>() : nullptr;
+	if (!Warehouse)
+	{
+		ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "NoWarehouse", "창고 데이터를 확인할 수 없습니다."));
+		return;
+	}
+
+	// 결제 전에 변경할 데이터를 준비하여 검증 실패 시 기존 재고와 골드를 유지한다.
+	TArray<FStoredItemData> UpdatedItems = Warehouse->GetStoredItemsCopy();
+	TArray<FStoredItemInstanceData> UpdatedInstances = Warehouse->GetStoredItemInstancesCopy();
+	for (const auto& Pair : ValidatedRows)
+	{
+		const FItemSpawnRow* Row = Pair.Key;
+		const int32 Quantity = Pair.Value;
+		FStoredItemData* Existing = UpdatedItems.FindByPredicate(
+			[Row](const FStoredItemData& Item) { return Item.ItemClass == Row->ItemClass; });
+		if (Existing && Existing->Quantity > MAX_int32 - Quantity)
+		{
+			ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "StockOverflow", "창고 수량 한도를 초과했습니다."));
+			return;
+		}
+		if (Existing)
+		{
+			Existing->Quantity += Quantity;
+		}
+		else
+		{
+			FStoredItemData Added;
+			Added.ItemClass = Row->ItemClass;
+			Added.Quantity = Quantity;
+			UpdatedItems.Add(Added);
+		}
+
+		for (int32 Index = 0; Index < Quantity; ++Index)
+		{
+			FStoredItemInstanceData Added;
+			Added.ItemClass = Row->ItemClass;
+			Added.CurrentUseCount = Row->MaxUseCount;
+			Added.CurrentDurability = Row->MaxDurability;
+			UpdatedInstances.Add(MoveTemp(Added));
+		}
+	}
+
+	if (!GS->SpendGold(PaymentAmount))
 	{
 		ClientTerminalPurchaseCompleted(false, NSLOCTEXT("TerminalShop", "SpendFailed", "골드 차감에 실패했습니다."));
 		return;
 	}
 
-	UWarehouseDataSubsystem* Warehouse = GetGameInstance()
-		? GetGameInstance()->GetSubsystem<UWarehouseDataSubsystem>() : nullptr;
-
-	if (Warehouse)
-	{
-		for (const auto& Pair : ValidatedRows)
-		{
-			const FItemSpawnRow* Row = Pair.Key;
-			const int32 Qty = Pair.Value;
-			if (Row && Row->ItemClass)
-			{
-				Warehouse->AddPendingDeliveryItem(Row->ItemClass, Qty);
-			}
-		}
-	}
+	// 요약과 개별 상태를 함께 반영한 뒤 한 번만 알림을 보내 서버와 클라이언트를 갱신한다.
+	Instance->SavedStoredItems = MoveTemp(UpdatedItems);
+	Instance->SavedStoredItemInstances = MoveTemp(UpdatedInstances);
+	Instance->bWarehouseInitialized = true;
+	Warehouse->NotifyStoredWarehouseChanged();
 
 	ClientTerminalPurchaseCompleted(true, NSLOCTEXT("TerminalShop", "PurchaseSuccess", "구매가 완료되었습니다."));
 }
