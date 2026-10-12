@@ -9,6 +9,9 @@
 #include "AbilitySystemBlueprintLibrary.h" // SendGameplayEventToActor
 #include "DrawDebugHelpers.h" // [DEBUG-TASER] 확인용 임시
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 #include "Sound/SoundBase.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -29,6 +32,75 @@ ATaserGun::ATaserGun()
 	{
 		FireSound = FireSoundFinder.Object;
 	}
+
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> FireEffectFinder(
+		TEXT("/Game/04_JJO/NIagara/TagerBeam.TagerBeam"));
+	if (FireEffectFinder.Succeeded())
+	{
+		FireEffect = FireEffectFinder.Object;
+	}
+}
+
+// [TASER-012] 발사한 클라이언트의 실제 카메라 위치와 방향을 서버에 전달한다.
+void ATaserGun::OnUse_Implementation()
+{
+	FVector ViewLocation = GetActorLocation();
+	FRotator ViewRotation = GetActorRotation();
+
+	if (APawn* OwnerPawn = GetOwningPawn())
+	{
+		if (AController* OwnerController = OwnerPawn->GetController())
+		{
+			OwnerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+		}
+		else
+		{
+			OwnerPawn->GetActorEyesViewPoint(ViewLocation, ViewRotation);
+		}
+	}
+
+	const FVector ViewDirection = ViewRotation.Vector().GetSafeNormal();
+	if (HasAuthority())
+	{
+		ValidatedViewLocation = ViewLocation;
+		ValidatedViewDirection = ViewDirection;
+		bHasValidatedView = true;
+		AWeaponItemBase::OnUse_Implementation();
+		bHasValidatedView = false;
+		return;
+	}
+
+	ServerFireFromView(ViewLocation, ViewDirection);
+}
+
+// [TASER-013] 클라이언트 카메라 기준의 발사 시점을 서버에서 검증한 후 발사한다.
+void ATaserGun::ServerFireFromView_Implementation(FVector_NetQuantize ViewLocation,
+	FVector_NetQuantizeNormal ViewDirection)
+{
+	APawn* OwnerPawn = GetOwningPawn();
+	if (!OwnerPawn)
+	{
+		return;
+	}
+
+	FVector ServerEyeLocation;
+	FRotator ServerEyeRotation;
+	OwnerPawn->GetActorEyesViewPoint(ServerEyeLocation, ServerEyeRotation);
+
+	// 3인칭 스프링암 카메라는 머리에서 수백 cm 떨어질 수 있다.
+	// 실제 카메라 위치는 허용하되 비정상적으로 먼 RPC 위치만 서버 눈 위치로 보정한다.
+	constexpr float MaxViewOriginError = 1000.0f;
+	const bool bValidLocation = !ViewLocation.ContainsNaN()
+		&& FVector::DistSquared(ViewLocation, ServerEyeLocation) <= FMath::Square(MaxViewOriginError);
+	const FVector SafeDirection = ViewDirection.ContainsNaN()
+		? ServerEyeRotation.Vector()
+		: ViewDirection.GetSafeNormal();
+
+	ValidatedViewLocation = bValidLocation ? FVector(ViewLocation) : ServerEyeLocation;
+	ValidatedViewDirection = SafeDirection.IsNearlyZero() ? ServerEyeRotation.Vector() : SafeDirection;
+	bHasValidatedView = true;
+	AWeaponItemBase::OnUse_Implementation();
+	bHasValidatedView = false;
 }
 
 // TASER-001 발사 override: 카메라 조준 방향으로 피아식별 트레이스 + VFX
@@ -36,35 +108,40 @@ ATaserGun::ATaserGun()
 // [TASER-001] 서버에서 무기 사용과 발사 처리
 void ATaserGun::Fire()
 {
-	// 트레이스는 든 플레이어의 카메라 시점(화면 정중앙) 기준으로 발사한다.
-	// 총구 방향이 아니라 조준 방향이므로 메시 회전과 무관하게 정확히 조준된다.
-	FVector ViewLocation = GetActorLocation();
-	FRotator ViewRotation = GetActorRotation();
+	// 원격 플레이어는 서버의 시점이 아닌, 발사 순간에 클라이언트가 전달한 실제 카메라 시점을 사용한다.
+	FVector ViewLocation = bHasValidatedView ? ValidatedViewLocation : GetActorLocation();
+	FVector ViewDirection = bHasValidatedView ? ValidatedViewDirection : GetActorForwardVector();
 
-	// LastOwner 유실(레벨 이동 등) 대비: attach 부모까지 찾아 현재 든 Pawn을 얻는다. WEAPON-018
-	APawn* OwnerPawn = GetOwningPawn();
-	if (OwnerPawn && OwnerPawn->GetController())
+	if (!bHasValidatedView)
 	{
-		OwnerPawn->GetController()->GetPlayerViewPoint(ViewLocation, ViewRotation);
-	}
-	else if (OwnerPawn)
-	{
-		// 컨트롤러가 없으면 폰 시점으로 폴백
-		OwnerPawn->GetActorEyesViewPoint(ViewLocation, ViewRotation);
+		if (APawn* OwnerPawn = GetOwningPawn())
+		{
+			FRotator ViewRotation;
+			if (AController* OwnerController = OwnerPawn->GetController())
+			{
+				OwnerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+			}
+			else
+			{
+				OwnerPawn->GetActorEyesViewPoint(ViewLocation, ViewRotation);
+			}
+			ViewDirection = ViewRotation.Vector();
+		}
 	}
 
 	const FVector TraceStart = ViewLocation;
-	const FVector TraceEnd = TraceStart + ViewRotation.Vector() * TraceDistance;
+	const FVector TraceEnd = TraceStart + ViewDirection.GetSafeNormal() * TraceDistance;
 
 	// 피아식별 트레이스는 부모(WeaponItemBase)에 위임.
 	// TargetTeam 채널로만 트레이스하고, 맞으면 ApplyWeaponHit(=기절)을 내부에서 호출.
 	FHitResult Hit;
 	// 총구가 벽 뒤에 있는 경우에는 카메라에서 보이는 대상에게도 효과를 적용하지 않는다.
 	bool bHit = FireHitscan(TraceStart, TraceEnd, Hit, false);
-	const FVector AimEnd = Hit.GetActor() ? Hit.ImpactPoint : TraceEnd;
+	const FVector AimEnd = Hit.bBlockingHit ? Hit.ImpactPoint : TraceEnd;
 	FHitResult MuzzleWall;
 	const FVector MuzzleStart = MuzzlePoint ? MuzzlePoint->GetComponentLocation() : TraceStart;
-	if (TraceWeaponObstacle(MuzzleStart, AimEnd, 0.1f, MuzzleWall))
+	const bool bMuzzleBlocked = TraceWeaponObstacle(MuzzleStart, AimEnd, 0.1f, MuzzleWall);
+	if (bMuzzleBlocked)
 	{
 		Hit = MuzzleWall;
 		bHit = false;
@@ -88,7 +165,8 @@ void ATaserGun::Fire()
 
 	// VFX 시작점은 총구(MuzzlePoint), 끝점은 트레이스 도착지점(히트면 히트, 아니면 최대거리)
 	const FVector FxStart = MuzzlePoint ? MuzzlePoint->GetComponentLocation() : TraceStart;
-	const FVector FxEnd = Hit.GetActor() ? Hit.ImpactPoint : TraceEnd;
+	const FVector FxEnd = Hit.bBlockingHit ? Hit.ImpactPoint : TraceEnd;
+
 	MulticastPlayFireSound();
 	MulticastPlayFireEffect(FxStart, FxEnd, bHit);
 
@@ -150,7 +228,32 @@ void ATaserGun::ApplyWeaponHit_Implementation(AActor* HitActor, const FHitResult
 // [TASER-005] 발사 이펙트 훅 (전기 줄기 등). 시작/끝 지점 전달, 모든 클라 재생
 void ATaserGun::MulticastPlayFireEffect_Implementation(FVector Start, FVector End, bool bHit)
 {
-	OnFireEffect(Start, End, bHit);
+	if (!FireEffect)
+	{
+		OnFireEffect(Start, End, bHit);
+		return;
+	}
+
+	// Beam End를 생성 후에 넣으면 Niagara가 기본 도착점으로 먼저 한 프레임 재생될 수 있다.
+	// 비활성 상태로 생성 → 월드 도착점 설정 → 활성화 순서를 보장한다.
+	UNiagaraComponent* BeamComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		this,
+		FireEffect,
+		Start,
+		FRotator(0.0f, 0.0f, 90.0f),
+		FVector::OneVector,
+		true,
+		false,
+		ENCPoolMethod::AutoRelease,
+		false);
+
+	if (BeamComponent)
+	{
+		// Niagara 에셋에 등록된 정확한 User Position 변수명과 타입을 사용한다.
+		// 에셋에 노출된 Position 사용자 파라미터 이름은 "Beam End"이다.
+		BeamComponent->SetVariablePosition(TEXT("Beam End"), End);
+		BeamComponent->Activate(true);
+	}
 }
 
 // [TASER-011] 서버의 발사 판정을 모든 클라이언트에 전달해 총구 위치에서 효과음을 재생한다.

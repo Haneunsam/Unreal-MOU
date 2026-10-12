@@ -6,6 +6,7 @@
 
 class USceneComponent;
 class USoundBase;
+class UNiagaraSystem;
 
 /**
  * ATaserGun
@@ -46,9 +47,16 @@ public:
 	// 테이저 발사음 볼륨
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Taser|Audio", meta = (ClampMin = "0.0"))
 	float FireSoundVolume = 1.0f;
+
+	// 총구에서 도착점까지 표시할 Niagara 빔 이펙트
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Taser|FX")
+	TObjectPtr<UNiagaraSystem> FireEffect;
 #pragma endregion
 
 #pragma region [TASER] 사용/발사
+	// [TASER-012] 발사한 클라이언트의 실제 카메라 위치와 방향을 서버에 전달한다.
+	virtual void OnUse_Implementation() override;
+
 	// TASER-001 발사 override: 카메라 조준 방향으로 피아식별 트레이스 + VFX
 	// (좌클릭→횟수차감→서버권한 분기는 부모 WeaponItemBase가 처리)
 	// [TASER-001] 서버에서 무기 사용과 발사 처리
@@ -67,6 +75,15 @@ public:
 	float FireCooldown = 0.5f;
 
 private:
+	// [TASER-013] 클라이언트 카메라 기준의 발사 시점을 서버에서 검증한 후 발사한다.
+	UFUNCTION(Server, Reliable)
+	void ServerFireFromView(FVector_NetQuantize ViewLocation, FVector_NetQuantizeNormal ViewDirection);
+
+	// 현재 발사 1회에만 사용할, 서버가 검증한 조준 정보.
+	FVector ValidatedViewLocation = FVector::ZeroVector;
+	FVector ValidatedViewDirection = FVector::ForwardVector;
+	bool bHasValidatedView = false;
+
 	// 발사 쿨다운 타이머 핸들
 	FTimerHandle FireCooldownTimer;
 protected:

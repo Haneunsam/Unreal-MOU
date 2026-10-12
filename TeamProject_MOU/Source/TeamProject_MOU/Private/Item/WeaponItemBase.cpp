@@ -6,13 +6,20 @@
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "EngineUtils.h"
+#include "Engine/TriggerBase.h"
 #include "Engine/World.h"
 
 // [WEAPON-026] 이동 구간에서 캐릭터를 제외한 벽 차단 여부 검사
 bool AWeaponItemBase::TraceWeaponObstacle(const FVector& Start, const FVector& End, float Radius, FHitResult& Hit) const
 {
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(WeaponObstacle), false, this);
-	if (LastOwner) Params.AddIgnoredActor(LastOwner);
+	if (APawn* OwningPawn = GetOwningPawn())
+	{
+		Params.AddIgnoredActor(OwningPawn);
+		TArray<AActor*> AttachedActors;
+		OwningPawn->GetAttachedActors(AttachedActors, true, true);
+		Params.AddIgnoredActors(AttachedActors);
+	}
 	for (TActorIterator<APawn> It(GetWorld()); It; ++It) Params.AddIgnoredActor(*It);
 	return GetWorld()->SweepSingleByChannel(Hit, Start, End, FQuat::Identity,
 		ECC_Visibility, FCollisionShape::MakeSphere(FMath::Max(Radius, 0.1f)), Params);
@@ -272,9 +279,12 @@ bool AWeaponItemBase::FireHitscan(const FVector& Start, const FVector& End, FHit
 {
 	FCollisionQueryParams Params;
 	Params.AddIgnoredActor(this);
-	if (LastOwner)
+	if (APawn* OwningPawn = GetOwningPawn())
 	{
-		Params.AddIgnoredActor(LastOwner);
+		Params.AddIgnoredActor(OwningPawn);
+		TArray<AActor*> AttachedActors;
+		OwningPawn->GetAttachedActors(AttachedActors, true, true);
+		Params.AddIgnoredActors(AttachedActors);
 	}
 
 	// 벽/바닥 + 모든 Pawn을 함께 감지 (Visibility=지형, Pawn=캐릭터)
@@ -304,6 +314,16 @@ bool AWeaponItemBase::FireHitscan(const FVector& Start, const FVector& End, FHit
 		// 캐릭터가 아닌 지형(벽/바닥)을 먼저 만나면 탄이 막힘 → 종료
 		if (!Cast<ACharacterBase>(HitActor))
 		{
+			// 트리거 볼륨과 Visibility를 막지 않는 감지용 컴포넌트는 탄도를 차단하지 않는다.
+			// 카메라가 큰 TriggerBox 내부에 있을 때 시작점에서 즉시 명중하는 문제를 방지한다.
+			const UPrimitiveComponent* HitComponent = Hit.GetComponent();
+			if (Cast<ATriggerBase>(HitActor)
+				|| !HitComponent
+				|| HitComponent->GetCollisionResponseToChannel(ECC_Visibility) != ECR_Block)
+			{
+				continue;
+			}
+
 			// 상점은 관통시킨다: 상점의 상호작용용 투명 콜라이더가 트레이스를 막아
 			// 근처 대상을 못 맞히는 문제 방지. (뒤의 대상 계속 검사)
 			if (Cast<AShopBase>(HitActor))
