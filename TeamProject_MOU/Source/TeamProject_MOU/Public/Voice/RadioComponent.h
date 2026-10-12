@@ -161,6 +161,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Radio|Sound", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float StowedRadiusScale = 0.5f;
 
+	/** 인벤토리 보관 시 실제 스피커 출력 배율. 손에 들거나 바닥에 놓으면 적용하지 않는다. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Radio|Sound", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float StowedVolumeScale = 0.5f;
+
+	// [RADIOVOL-001] 기본 스피커 음량에 인벤토리 보관 감쇠를 적용한다.
+	UFUNCTION(BlueprintPure, Category = "Radio|Sound")
+	float GetEffectiveSpeakerVolume() const;
+
 	// --- 실효값 (라우터는 반드시 이쪽을 쓴다) --------------------------------
 	//
 	// ★ 라우터가 SpeakerHearRadius 를 직접 읽으면 인벤토리 감소가 적용되지 않는다.

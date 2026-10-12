@@ -349,9 +349,7 @@ UVoiceSynthComponent* UVoicePlaybackComponent::EnsureSynthForStream(
 			//   "닿는 사람은 줄었는데 들리는 크기는 똑같은" 어긋난 상태가 된다.
 			//   bInHand 가 복제되므로 클라도 같은 값을 계산할 수 있다.
 			//
-			//   ※ 공간화 설정은 생성 시점에 한 번만 읽힌다(위 ★★). 송신 도중에
-			//     무전기를 집어넣으면 그 스트림은 옛 반경으로 끝난다 - 한 번의
-			//     송신 안에서 일어나는 일이라 무시할 수 있는 차이다.
+			// 생성 후에도 아래 재생 갱신 경로에서 보관 상태에 맞춰 감쇠를 갱신한다.
 			float RadioRadius = MOUVoice::DefaultSpeakerHearRadius;
 
 			if (const URadioComponent* Radio = SpeakerActor->FindComponentByClass<URadioComponent>())
@@ -393,7 +391,9 @@ UVoiceSynthComponent* UVoicePlaybackComponent::EnsureSynthForStream(
 	{
 		if (const URadioComponent* Radio = SpeakerActor->FindComponentByClass<URadioComponent>())
 		{
-			PlaybackGain *= FMath::Max(Radio->SpeakerVolume, 0.f);
+			PlaybackGain *= Radio->GetEffectiveSpeakerVolume();
+			// 수신 도중 보관 상태가 바뀌어도 현재 가청 반경을 즉시 적용한다.
+			Synth->SetRadioMode(Radio->GetEffectiveHearRadius());
 		}
 	}
 	Synth->SetVolumeMultiplier(PlaybackGain);

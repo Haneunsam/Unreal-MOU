@@ -36,8 +36,8 @@ bool FVoiceInputGateTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Left endpoint disables gate"), MOUVoice::MicSliderToRms(0.f), 0.f);
 	TestEqual(TEXT("Below threshold has no normalized intensity"), MOUVoice::NormalizeLoudness(.001f, .005f), 0.f);
 	TestTrue(TEXT("Louder speech increases transmitted intensity"), MOUVoice::NormalizeLoudness(.02f, .005f) < MOUVoice::NormalizeLoudness(.1f, .005f));
-	TestEqual(TEXT("Proximity receive boost retained"), MOUVoice::ProximityPlaybackGain, 2.f);
-	TestEqual(TEXT("Radio receive boost retained"), MOUVoice::RadioPlaybackGain, 2.5f);
+	TestEqual(TEXT("Proximity receive boost tripled"), MOUVoice::ProximityPlaybackGain, 6.f);
+	TestEqual(TEXT("Radio receive boost doubled"), MOUVoice::RadioPlaybackGain, 5.f);
 	const float Half = MOUVoice::NormalizeLoudnessWithCeiling(.03f, .01f, .05f);
 	TestTrue(TEXT("Developer ceiling: halfway input is 50 percent"), FMath::IsNearlyEqual(Half, .5f));
 	TestEqual(TEXT("Developer ceiling: full input is 100 percent"), MOUVoice::NormalizeLoudnessWithCeiling(.05f, .01f, .05f), 1.f);

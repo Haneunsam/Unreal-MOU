@@ -49,6 +49,10 @@ def tick(delta):
             state['lobby'] = create('/Game/02_JSY/MainLobby/WBP_LobbySettingsWidget')
         elif phase == 1:
             lobby = state['lobby']
+            check('lobby voice slider allows 200 percent', lobby.get_editor_property('slider_voice_volume').get_editor_property('max_value') == 2.)
+            lobby.call_method('OnVoiceVolumeChanged', (1.03,))
+            check('voice percentage format retained', '103' in str(lobby.get_editor_property('text_voice_volume').get_text()))
+            lobby.call_method('OnVoiceVolumeChanged', (2.,))
             check('lobby uses input meter', isinstance(lobby.get_editor_property('slider_mic_sensitivity'), unreal.MicSensitivitySlider))
             check('lobby has no mic icon preview', lobby.get_editor_property('mic_preview') is None)
             lobby.call_method('OnMicSensitivityChanged', (0.,))
@@ -58,6 +62,8 @@ def tick(delta):
             state['game'] = create('/Game/05_JYH/MainMenuUI/WBP_SettingsMenuWidget')
         elif phase == 2:
             game = state['game']
+            check('game voice slider allows 200 percent', game.get_editor_property('slider_voice_volume').get_editor_property('max_value') == 2.)
+            check('game restores 200 percent from lobby', game.get_editor_property('slider_voice_volume').get_value() == 2.)
             slider = game.get_editor_property('slider_mic_sensitivity')
             check('game uses input meter', isinstance(slider, unreal.MicSensitivitySlider))
             check('game has no mic icon preview', game.get_editor_property('mic_preview') is None)

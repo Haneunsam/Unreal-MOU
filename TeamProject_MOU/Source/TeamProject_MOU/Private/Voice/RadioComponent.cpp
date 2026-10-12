@@ -152,6 +152,13 @@ void URadioComponent::SetInHand(bool bNowInHand)
 		bNowInHand ? TEXT("손에 듦 (송신 가능)") : TEXT("인벤토리 (수신만)"));
 }
 
+// [RADIOVOL-001] 기본 스피커 음량에 인벤토리 보관 감쇠를 적용한다.
+float URadioComponent::GetEffectiveSpeakerVolume() const
+{
+	const bool bStowed = !bInHand && GetHolder() != nullptr;
+	return FMath::Max(SpeakerVolume, 0.f) * (bStowed ? FMath::Clamp(StowedVolumeScale, 0.f, 1.f) : 1.f);
+}
+
 float URadioComponent::GetEffectiveHearRadius() const
 {
 	// 인벤토리에 있으면 가방 안에서 웅얼거리는 소리라 덜 퍼진다.

@@ -421,6 +421,9 @@ void USettingsMenuWidget::RefreshUIFromSettings()
 
 	if (Slider_VoiceVolume)
 	{
+		Slider_VoiceVolume->SetMinValue(0.f);
+		Slider_VoiceVolume->SetMaxValue(2.f);
+		Slider_VoiceVolume->SetStepSize(0.01f);
 		Slider_VoiceVolume->SetValue(UserSettings->GetVoiceVolume());
 	}
 	if (Text_VoiceVolume)
