@@ -211,6 +211,26 @@ protected:
 	 */
 	virtual void OnUnequipped_Implementation(AActor* Equipper) override;
 
+	// [RGRIP-000] 무전기에 공통 바운딩박스 중심 자동 보정을 적용하지 않는다.
+	virtual bool ShouldCenterOnCarrySocket() const override;
+
+	// [RGRIP-001] 무전기의 잡는 지점을 스케일과 회전을 반영하여 손 소켓에 맞춘다.
+	virtual FVector GetCarryLocationOffset() const override;
+
+	// [RGRIP-002] 손 소켓 기준 무전기 방향을 반환한다.
+	virtual FRotator GetCarryRotationOffset() const override;
+
+	// 스케일 적용 전 무전기 메시 중심에서 잡는 지점까지의 로컬 이동량.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Radio|Grip", meta = (Units = "cm"))
+	FVector GripPointOffset = FVector::ZeroVector;
+
+	// 손 소켓 좌표 기준의 추가 위치 보정. 아이템 스케일을 곱하지 않는다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Radio|Grip", meta = (Units = "cm"))
+	FVector HandLocationOffset = FVector::ZeroVector;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Radio|Grip")
+	FRotator HandRotationOffset = FRotator::ZeroRotator;
+
 	// --- 컴포넌트 -----------------------------------------------------------
 
 	/** 무전 기능의 전부. 이 액터는 이걸 들고 다니는 껍데기다. */

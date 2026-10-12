@@ -9,8 +9,11 @@
 #include "Voice/VoiceSubsystem.h"
 #include "Voice/VoiceTypes.h"
 
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
+#include "StaticMeshResources.h"
 #include "TimerManager.h"
 
 namespace
@@ -30,6 +33,39 @@ ARadio::ARadio()
 	RadioComponent = CreateDefaultSubobject<URadioComponent>(TEXT("RadioComponent"));
 
 	ItemName = NSLOCTEXT("Item", "RadioName", "무전기");
+}
+
+// [RGRIP-000] 무전기에 공통 바운딩박스 중심 자동 보정을 적용하지 않는다.
+bool ARadio::ShouldCenterOnCarrySocket() const
+{
+	return false;
+}
+
+// [RGRIP-001] 무전기의 잡는 지점을 스케일과 회전을 반영하여 손 소켓에 맞춘다.
+FVector ARadio::GetCarryLocationOffset() const
+{
+	if (!MeshComponent || !MeshComponent->GetStaticMesh())
+	{
+		return HandLocationOffset;
+	}
+
+	const UStaticMesh* RadioMesh = MeshComponent->GetStaticMesh();
+	// 에디터의 확장 경계는 원본 MeshDescription 캐시를 참조할 수 있다.
+	// Build Scale이 반영된 실제 렌더 메시의 중심을 우선 사용한다.
+	const FStaticMeshRenderData* RenderData = RadioMesh->GetRenderData();
+	const FVector RadioCenter = RenderData
+		? FVector(RenderData->Bounds.Origin)
+		: FVector(RadioMesh->GetBounds().Origin);
+	const FVector GripPoint = RadioCenter + GripPointOffset;
+	// 호출 시 손 소켓에 이미 부착되어 있으므로 상대 스케일에 부모 스케일 보정도 포함된다.
+	const FVector ScaledGripPoint = GripPoint * MeshComponent->GetRelativeScale3D();
+	return HandLocationOffset - HandRotationOffset.RotateVector(ScaledGripPoint);
+}
+
+// [RGRIP-002] 손 소켓 기준 무전기 방향을 반환한다.
+FRotator ARadio::GetCarryRotationOffset() const
+{
+	return HandRotationOffset;
 }
 
 void ARadio::BeginPlay()
