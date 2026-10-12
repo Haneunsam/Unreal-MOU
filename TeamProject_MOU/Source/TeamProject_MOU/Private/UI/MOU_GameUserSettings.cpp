@@ -1,8 +1,10 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/MOU_GameUserSettings.h"
+#include "Sound/SoundClass.h"
 #include "AudioDevice.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Voice/VoiceSubsystem.h"
 
 UMOU_GameUserSettings::UMOU_GameUserSettings()
@@ -87,9 +89,11 @@ void UMOU_GameUserSettings::SetMasterVolume(float InVolume)
 	OnAudioSettingsChanged.Broadcast();
 }
 
+// [BGMAUDIO-001] 배경음악 볼륨을 저장하고 공통 BGM 사운드 클래스에 즉시 반영한다.
 void UMOU_GameUserSettings::SetBGMVolume(float InVolume)
 {
 	BGMVolume = FMath::Clamp(InVolume, 0.0f, 1.0f);
+	ApplyAudioSettings(GEngine ? GEngine->GetWorld() : nullptr);
 	OnAudioSettingsChanged.Broadcast();
 }
 
@@ -118,17 +122,40 @@ void UMOU_GameUserSettings::SetMicSensitivity(float InSensitivity)
 	OnAudioSettingsChanged.Broadcast();
 }
 
+// [BGMAUDIO-002] 마스터 볼륨, 공통 BGM 볼륨과 마이크 감도를 적용한다.
 void UMOU_GameUserSettings::ApplyAudioSettings(UObject* WorldContextObject)
 {
-	// 1. 엔진 메인 오디오 디바이스 마스터 볼륨 반영
+	if (!BGMSoundClass)
+	{
+		BGMSoundClass = LoadObject<USoundClass>(
+			nullptr,
+			TEXT("/Game/02_JSY/BGM/SC_BGM.SC_BGM"));
+	}
+
+	if (BGMSoundClass)
+	{
+		BGMSoundClass->Properties.Volume = BGMVolume;
+	}
+
+	// 1. 게임 월드의 오디오 장치에 마스터 볼륨을 적용하고, 월드가 없으면 활성 장치를 사용한다.
 	if (GEngine)
 	{
-		if (FAudioDeviceManager* DeviceManager = GEngine->GetAudioDeviceManager())
+		UWorld* World = GEngine->GetWorldFromContextObject(
+			WorldContextObject, EGetWorldErrorMode::ReturnNull);
+		FAudioDeviceHandle Device = World
+			? World->GetAudioDevice() : FAudioDeviceHandle();
+
+		if (!Device.IsValid())
 		{
-			if (FAudioDevice* AudioDevice = DeviceManager->GetActiveAudioDevice().GetAudioDevice())
+			if (FAudioDeviceManager* Manager = GEngine->GetAudioDeviceManager())
 			{
-				AudioDevice->SetTransientPrimaryVolume(MasterVolume);
+				Device = Manager->GetActiveAudioDevice();
 			}
+		}
+
+		if (FAudioDevice* AudioDevice = Device.GetAudioDevice())
+		{
+			AudioDevice->SetTransientPrimaryVolume(MasterVolume);
 		}
 	}
 

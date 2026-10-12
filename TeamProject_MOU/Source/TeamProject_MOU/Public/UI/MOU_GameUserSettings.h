@@ -7,6 +7,8 @@
 #include "InputCoreTypes.h"
 #include "MOU_GameUserSettings.generated.h"
 
+class USoundClass;
+
 DECLARE_MULTICAST_DELEGATE(FOnMOUAudioSettingsChanged);
 DECLARE_MULTICAST_DELEGATE(FOnMOUControlSettingsChanged);
 
@@ -45,6 +47,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Settings|Audio")
 	float GetBGMVolume() const { return BGMVolume; }
 
+	// [BGMAUDIO-001] 배경음악 볼륨을 저장하고 공통 BGM 사운드 클래스에 즉시 반영한다.
 	UFUNCTION(BlueprintCallable, Category = "Settings|Audio")
 	void SetBGMVolume(float InVolume);
 
@@ -67,6 +70,7 @@ public:
 	void SetMicSensitivity(float InSensitivity);
 
 	/** 오디오 시스템 및 서브시스템에 볼륨 설정 적용 */
+	// [BGMAUDIO-002] 마스터 볼륨, 공통 BGM 볼륨과 마이크 감도를 적용한다.
 	UFUNCTION(BlueprintCallable, Category = "Settings|Audio", meta = (WorldContext = "WorldContextObject"))
 	void ApplyAudioSettings(UObject* WorldContextObject);
 
@@ -113,6 +117,10 @@ public:
 	void ClearAllCustomKeyBindings();
 
 protected:
+	// 실행 중 사용하는 공통 BGM 사운드 클래스 참조
+	UPROPERTY(Transient)
+	TObjectPtr<USoundClass> BGMSoundClass;
+
 	// --- 오디오 저장 변수 ---
 	UPROPERTY(Config)
 	float MasterVolume = 0.5f;
