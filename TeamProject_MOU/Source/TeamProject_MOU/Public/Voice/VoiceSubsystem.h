@@ -59,7 +59,9 @@ class TEAMPROJECT_MOU_API UVoiceSubsystem : public ULocalPlayerSubsystem
 
 public:
 	// --- ULocalPlayerSubsystem --------------------------------------------
+	// [MIC-009] 저장된 감도를 캡처에 적용하고 설정 변경 알림을 구독한다.
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	// [MIC-010] 설정 변경 구독과 음성 자원을 해제한다.
 	virtual void Deinitialize() override;
 
 	/** 아무 데서나 서브시스템을 얻는 헬퍼. WorldContextObject 는 위젯/액터의 self. */
@@ -299,6 +301,7 @@ public:
 	 * @return 마이크가 실제로 열렸으면 true.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MOU|Voice")
+	// [MIC-012] 마이크를 다시 열고 새 캡처라면 저장된 감도를 복원한다.
 	bool ReopenCapture();
 
 	/** 진단용 통계를 한 줄 문자열로. MOU.Voice.Stat 이 쓴다. */
@@ -311,6 +314,20 @@ public:
 	 * (레벨 이동, 재접속) 캐시가 자동으로 풀리도록 약참조로 들고 있는다.
 	 */
 	UVoiceComponent* GetVoiceComponent();
+
+private:
+	// [MIC-011] 월드 조회 없이 이 로컬 플레이어의 캡처에 변경된 저장 감도를 반영한다.
+	void ApplySavedMicSensitivity();
+	// 다른 오디오 설정 변경이 자동 보정값을 덮어쓰지 않도록 마지막 저장값을 기억한다.
+	float LastSavedMicSensitivity = -1.f;
+	float MaximumVoiceRms = 0.05f;
+
+public:
+	// [VOICELEVEL-001] 로컬 플레이어의 게이지와 전송 강도가 공유하는 최대 RMS를 설정한다.
+	UFUNCTION(BlueprintCallable, Category = "MOU|Voice")
+	void SetMaximumVoiceRms(float InMaximum);
+	// [VOICELEVEL-002] 현재 감도와 개발자 상한으로 원본 음량을 정규화한다.
+	float NormalizeVoiceIntensity(float Envelope) const;
 
 private:
 	/** 게임 스레드 틱. 마이크를 폴링해 재생 버퍼로 넘긴다. */

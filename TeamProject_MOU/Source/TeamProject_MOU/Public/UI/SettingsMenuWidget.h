@@ -12,6 +12,7 @@ class USlider;
 class UCheckBox;
 class UComboBoxString;
 class UProgressBar;
+class UVoiceStatusWidget;
 class UTextBlock;
 class UWidgetSwitcher;
 class UInputKeySelector;
@@ -32,12 +33,15 @@ class TEAMPROJECT_MOU_API USettingsMenuWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	// [MIC-014] Slate 생성 전에 두 설정 화면의 감도 슬라이더를 원본 입력 게이지로 교체한다.
+	virtual void NativeOnInitialized() override;
+	// [MIC-013] 설정 화면의 입력 이벤트와 저장된 설정값을 연결한다.
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
-	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 	/** UI 컨트롤에 현재 설정값을 불러와 동기화 */
+	// [MIC-000] 저장된 설정을 표시하고 마이크 임계값을 0~1 슬라이더에 매핑한다.
 	UFUNCTION(BlueprintCallable, Category = "Settings")
 	void RefreshUIFromSettings();
 
@@ -162,9 +166,13 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "UI|Audio")
 	TObjectPtr<UTextBlock> Text_MicSensitivity;
 
-	/** 실시간 마이크 입력 레벨 게이지 */
+	/** 이전 위젯과의 바인딩 호환용. 실제 미리보기는 MicPreview를 사용한다. */
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "UI|Audio")
 	TObjectPtr<UProgressBar> ProgressBar_MicLevel;
+
+	/** HUD와 같은 아이콘/발화 기준/보간을 사용하는 인게임 설정 미리보기. */
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "UI|Audio")
+	TObjectPtr<UVoiceStatusWidget> MicPreview;
 
 	// =========================================================================
 	// [바인드 위젯: 조작 및 화면 탭]
@@ -306,8 +314,16 @@ private:
 	UFUNCTION()
 	void OnVoiceVolumeChanged(float Value);
 
+	// [MIC-001] 로그 음량 슬라이더 값을 실제 RMS 임계값으로 변환해 적용한다.
 	UFUNCTION()
 	void OnMicSensitivityChanged(float Value);
+
+	// [MIC-004] 실제 마이크 임계값을 슬라이더의 0~1 좌표로 변환한다.
+	static float MicThresholdToSlider(float Threshold);
+	// [MIC-005] 슬라이더의 0~1 좌표를 실제 마이크 임계값으로 변환한다.
+	static float MicSliderToThreshold(float SliderValue);
+	// [MIC-006] 실제 마이크 임계값을 dB 또는 차단 없음으로 표시한다.
+	static FText FormatMicSensitivity(float Threshold);
 
 	UFUNCTION()
 	void OnMouseSensitivityChanged(float Value);

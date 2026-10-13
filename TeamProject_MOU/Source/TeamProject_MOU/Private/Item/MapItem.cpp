@@ -1,16 +1,21 @@
 #include "Item/MapItem.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Kismet/GameplayStatics.h"
 #include "Blueprint/UserWidget.h"
+#include "Components/BorderSlot.h"
+#include "Components/Image.h"
+#include "Components/WidgetComponent.h"
 #include "TimerManager.h"
 #include "Net/UnrealNetwork.h"
 
 AMapItem::AMapItem()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	// 지도에 부착되는 top-down 캡처 카메라 (직교 투영, 아래를 향함)
 	CaptureCamera = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("CaptureCamera"));
@@ -26,6 +31,15 @@ AMapItem::AMapItem()
 
 	// 지도 캡처에서 그림자 제거 (평면적인 지형만)
 	CaptureCamera->ShowFlags.SetDynamicShadows(false);
+
+	// WBP_Map을 화면 UI가 아닌 월드 공간 홀로그램으로 표시합니다.
+	HologramWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("HologramWidgetComponent"));
+	HologramWidgetComponent->SetupAttachment(RootComponent);
+	HologramWidgetComponent->SetWidgetSpace(EWidgetSpace::World);
+	HologramWidgetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	HologramWidgetComponent->SetGenerateOverlapEvents(false);
+	HologramWidgetComponent->SetTwoSided(true);
+	HologramWidgetComponent->SetVisibility(false);
 }
 
 void AMapItem::BeginPlay()
@@ -38,7 +52,7 @@ void AMapItem::BeginPlay()
 		InitialMeshScale = MeshComponent->GetRelativeScale3D();
 	}
 
-	// [MAP-007] 이 지도 인스턴스 전용 렌더타깃 3개 생성 (공유 애셋 대신 → 2인 깜빡임 해결)
+	// [MAP-007] 이 지도 인스턴스 전용 캡처 RT와 WBP_Map 호환용 흰색 마스크 RT를 생성합니다.
 	CreatePerInstanceRenderTargets();
 
 	// 레벨 경계 볼륨(MapBounds 태그)에서 지도 범위 자동 설정
@@ -51,10 +65,13 @@ void AMapItem::BeginPlay()
 		CaptureCamera->TextureTarget = CaptureRT;
 	}
 
-	// Fog 브러시 동적 머티리얼 인스턴스 생성 (밝힘 원을 그릴 때 사용)
-	if (FogBrushMaterial)
+	if (HologramWidgetComponent)
 	{
-		FogBrushMID = UMaterialInstanceDynamic::Create(FogBrushMaterial, this);
+		HologramWidgetComponent->SetWidgetClass(MapWidgetClass);
+		HologramWidgetComponent->SetDrawSize(FVector2D(
+			FMath::Max(1.0f, HologramDrawSize.X),
+			FMath::Max(1.0f, HologramDrawSize.Y)));
+		HologramWidgetComponent->SetRelativeScale3D(HologramRelativeScale);
 	}
 
 	if (UWorld* World = GetWorld())
@@ -63,11 +80,6 @@ void AMapItem::BeginPlay()
 		World->GetTimerManager().SetTimer(
 			CaptureDelayTimerHandle, this, &AMapItem::CaptureMapOnce,
 			0.5f, false);   // false = 반복 안 함, 0.5초 후 딱 1번
-
-		// [MAP-002] Fog 갱신은 손에 안 들어도(바닥에서도) 항상 가동
-		World->GetTimerManager().SetTimer(
-			FogUpdateTimerHandle, this, &AMapItem::UpdateFogMask,
-			FogUpdateInterval, true);
 	}
 }
 
@@ -80,14 +92,222 @@ void AMapItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 
 void AMapItem::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	CloseHologram();
+
 	// 타이머 정리 (댕글링 방지)
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(FogUpdateTimerHandle);
 		World->GetTimerManager().ClearTimer(CaptureDelayTimerHandle);
 	}
 
 	Super::EndPlay(EndPlayReason);
+}
+
+// [MAP-017] 홀로그램이 열린 동안 관람자와의 거리 및 홀로그램 방향을 갱신합니다.
+void AMapItem::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (!bHologramOpen)
+	{
+		return;
+	}
+
+	AActor* Viewer = HologramViewer.Get();
+	if (!IsValid(Viewer))
+	{
+		CloseHologram();
+		return;
+	}
+
+	const float CloseDistanceSquared = FMath::Square(FMath::Max(0.0f, HologramAutoCloseDistance));
+	if (FVector::DistSquared(Viewer->GetActorLocation(), GetActorLocation()) > CloseDistanceSquared)
+	{
+		CloseHologram();
+		return;
+	}
+
+	if (HologramWidgetComponent)
+	{
+		FVector ViewerLocation;
+		FRotator ViewerRotation;
+		Viewer->GetActorEyesViewPoint(ViewerLocation, ViewerRotation);
+		const FVector ToViewer = ViewerLocation - HologramWidgetComponent->GetComponentLocation();
+		if (!ToViewer.IsNearlyZero())
+		{
+			// 홀로그램 컴포넌트의 표시 면이 관람자를 향하도록 현재 뒷면 방향에서 180도 반전합니다.
+			HologramWidgetComponent->SetWorldRotation(FRotator(0.0f, ToViewer.Rotation().Yaw, 0.0f));
+		}
+	}
+}
+
+// [MAP-016] F키 상호작용 가능 여부를 확인합니다. 지도는 줍지 않고 홀로그램을 여닫습니다.
+bool AMapItem::CanInteract_Implementation(AActor* Interactor) const
+{
+	return IsValid(Interactor) && MapWidgetClass != nullptr;
+}
+
+// [MAP-018] F키 상호작용 시 해당 플레이어 로컬 화면에서 월드 홀로그램을 토글합니다.
+void AMapItem::Interact_Implementation(AActor* Interactor)
+{
+	if (!CanInteract_Implementation(Interactor))
+	{
+		return;
+	}
+
+	if (bHologramOpen)
+	{
+		CloseHologram();
+	}
+	else
+	{
+		OpenHologram(Interactor);
+	}
+}
+
+// [MAP-019] 현재 홀로그램 상태에 맞는 F키 안내 문구를 반환합니다.
+FText AMapItem::GetInteractPrompt_Implementation() const
+{
+	return bHologramOpen
+		? NSLOCTEXT("Interaction", "CloseMapHologramPrompt", "지도 홀로그램 닫기")
+		: NSLOCTEXT("Interaction", "OpenMapHologramPrompt", "지도 홀로그램 열기");
+}
+
+// [MAP-022] 지도 장치는 고정형 오브젝트이므로 플레이어·NPC·창고의 모든 집기 경로를 차단합니다.
+bool AMapItem::CanBePickedUpBy(AActor* PotentialPicker) const
+{
+	return false;
+}
+
+// [MAP-020] WBP_Map을 월드 위젯에 연결하고 관람자 앞에 홀로그램을 엽니다.
+void AMapItem::OpenHologram(AActor* Interactor)
+{
+	if (!HologramWidgetComponent || !MapWidgetClass || !IsValid(Interactor))
+	{
+		return;
+	}
+
+	if (HologramWidgetComponent->GetWidgetClass() != MapWidgetClass)
+	{
+		HologramWidgetComponent->SetWidgetClass(MapWidgetClass);
+	}
+
+	// 아이템의 방향이나 배치 위치가 아니라, 상호작용한 플레이어의 실제 시선 앞에 홀로그램을 생성합니다.
+	FVector ViewerLocation;
+	FRotator ViewerRotation;
+	Interactor->GetActorEyesViewPoint(ViewerLocation, ViewerRotation);
+	constexpr float HologramViewDistance = 150.0f;
+	// 시선을 아래로 내려도 홀로그램이 땅속으로 내려가지 않도록 피치는 제외하고 수평 앞 방향만 사용합니다.
+	const FVector HorizontalViewDirection = FRotator(0.0f, ViewerRotation.Yaw, 0.0f).Vector();
+	const FVector HologramLocation = ViewerLocation
+		+ HorizontalViewDirection * HologramViewDistance
+		+ FVector::UpVector * HologramHeightOffset;
+	HologramWidgetComponent->SetWorldLocation(HologramLocation);
+
+	const FVector ToViewer = ViewerLocation - HologramLocation;
+	if (!ToViewer.IsNearlyZero())
+	{
+		HologramWidgetComponent->SetWorldRotation(FRotator(0.0f, ToViewer.Rotation().Yaw, 0.0f));
+	}
+
+	// BeginPlay 직후 캡처가 스트리밍 전의 검은 장면을 담았을 수 있으므로 실제로 열 때 한 번 더 갱신합니다.
+	if (CaptureCamera && CaptureRT)
+	{
+		UpdateCaptureTransform();
+		CaptureCamera->TextureTarget = CaptureRT;
+		CaptureCamera->CaptureScene();
+		bMapCaptured = true;
+	}
+	HologramViewer = Interactor;
+	bHologramOpen = true;
+	HologramWidgetComponent->SetVisibility(true);
+	SetActorTickEnabled(true);
+
+	RefreshHologramContent();
+
+	// WidgetComponent의 Slate 리소스가 첫 표시 프레임에 만들어지는 경우를 위해 다음 틱에 다시 연결합니다.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimerForNextTick([this]()
+		{
+			if (IsValid(this) && bHologramOpen)
+			{
+				RefreshHologramContent();
+			}
+		});
+	}
+}
+
+// [MAP-021] 월드 홀로그램을 닫고 거리 감시를 중지합니다.
+void AMapItem::CloseHologram()
+{
+	if (HologramWidgetComponent)
+	{
+		HologramWidgetComponent->SetVisibility(false);
+	}
+
+	HologramViewer.Reset();
+	bHologramOpen = false;
+	SetActorTickEnabled(false);
+}
+
+// [MAP-023] Img_Map 표시 머티리얼을 C++에서 한 번 생성하고 캡처 RT와 흰색 호환 마스크를 연결합니다.
+void AMapItem::RefreshHologramContent()
+{
+	if (!HologramWidgetComponent)
+	{
+		return;
+	}
+
+	HologramWidgetComponent->InitWidget();
+	UUserWidget* MapWidget = HologramWidgetComponent->GetUserWidgetObject();
+	if (!MapWidget)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MapItem] 홀로그램 WBP_Map 인스턴스를 만들지 못했습니다."));
+		return;
+	}
+
+	if (UImage* MapImage = Cast<UImage>(MapWidget->GetWidgetFromName(TEXT("Img_Map"))))
+	{
+		// WBP_Map의 Img_Map은 BorderSlot에서 Center 정렬이라 큰 홀로그램 영역 안에 1100x1100으로만 표시됩니다.
+		// 홀로그램에서는 슬롯 전체를 채우도록 늘려 파란 배경 영역과 동일한 크기로 표시합니다.
+		if (UBorderSlot* MapBorderSlot = Cast<UBorderSlot>(MapImage->Slot))
+		{
+			MapBorderSlot->SetHorizontalAlignment(HAlign_Fill);
+			MapBorderSlot->SetVerticalAlignment(VAlign_Fill);
+			MapBorderSlot->SetPadding(FMargin(0.0f));
+		}
+
+		if (!HologramMapMID)
+		{
+			UMaterialInterface* MapDisplayMaterial = Cast<UMaterialInterface>(MapImage->GetBrush().GetResourceObject());
+			if (!MapDisplayMaterial)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[MapItem] Img_Map 브러시에서 지도 표시 머티리얼을 찾지 못했습니다."));
+				return;
+			}
+
+			HologramMapMID = UMaterialInstanceDynamic::Create(MapDisplayMaterial, this);
+		}
+
+		// SceneCapture RT를 텍스처로 직접 그리면 알파 채널 때문에 월드 위젯이 검게 보일 수 있습니다.
+		// 기존 지도 표시 머티리얼을 거쳐 RGB를 출력하되 두 마스크는 흰색이라 Fog 구분은 적용되지 않습니다.
+		HologramMapMID->SetTextureParameterValue(TEXT("CaptureTex"), CaptureRT);
+		HologramMapMID->SetTextureParameterValue(TEXT("FogMaskTex"), FogMaskRT);
+		HologramMapMID->SetTextureParameterValue(TEXT("FogRevealTex"), FogRevealRT);
+
+		FSlateBrush MapBrush = MapImage->GetBrush();
+		MapBrush.SetResourceObject(HologramMapMID);
+		MapImage->SetBrush(MapBrush);
+		MapImage->SetColorAndOpacity(FLinearColor::White);
+		UE_LOG(LogTemp, Log, TEXT("[MapItem] 홀로그램 지도 표시 MID에 CaptureRT를 연결했습니다."));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MapItem] WBP_Map에서 Img_Map 이미지를 찾지 못했습니다."));
+	}
+
+	HologramWidgetComponent->RequestRedraw();
 }
 
 // [MAP-001] 좌클릭: 전체 지도 오버레이 켜기/끄기 토글
@@ -129,8 +349,7 @@ void AMapItem::OnUse_Implementation()
 	}
 }
 
-// [MAP-002] 손에 들었을 때: 소지자 세팅 (위젯 토글용).
-//   Fog 갱신은 BeginPlay부터 항상 돌므로 여기서 타이머는 안 건드림.
+// [MAP-002] 레거시 장착 경로에서 소지자 상태와 메시 위치를 갱신
 void AMapItem::OnEquipped_Implementation(AActor* Equipper)
 {
 	Super::OnEquipped_Implementation(Equipper);
@@ -141,7 +360,7 @@ void AMapItem::OnEquipped_Implementation(AActor* Equipper)
 	RestoreMeshScale();
 }
 
-// [MAP-003] 손에서 해제될 때: 소지자 해제. Fog 타이머는 계속 유지(바닥에서도 밝힘).
+// [MAP-003] 레거시 장착 해제 경로에서 소지자 상태와 열린 지도를 정리
 void AMapItem::OnUnequipped_Implementation(AActor* Equipper)
 {
 	HoldingPlayer = nullptr;
@@ -153,17 +372,10 @@ void AMapItem::OnUnequipped_Implementation(AActor* Equipper)
 	Super::OnUnequipped_Implementation(Equipper);
 }
 
-// [MAP-011] 바닥에서 처음 집을 때(PickUp): OnEquipped가 안 불리므로 소지자를 여기서 세팅.
-//   이게 없으면 주운 지도는 손에 들려 있어도 좌클릭 사용(OnUse)이 HoldingPlayer=null이라 실패한다.
+// [MAP-011] 직접 PickUp 호출이 들어와도 고정형 지도 장치가 집히지 않도록 차단합니다.
 void AMapItem::PickUp_Implementation(AActor* Picker)
 {
-	Super::PickUp_Implementation(Picker);
-
-	// PickUp은 서버에서 실행되지만 HoldingPlayer는 위젯 생성(로컬)에도 쓰이므로 모두 세팅
-	HoldingPlayer = Picker;
-
-	// [MAP-014] 바닥에서 집어 손 소켓에 붙일 때 스케일이 튀는 것을 시작값으로 복원
-	RestoreMeshScale();
+	// 의도적으로 비워 둡니다. CarryingComponent를 우회한 직접 호출도 집기 상태를 만들지 않습니다.
 }
 
 // [MAP-012] 놓기: 소지자 해제 + 열려 있던 지도 UI 강제 닫기(전 클라)
@@ -285,41 +497,6 @@ void AMapItem::UpdateCaptureTransform()
 	CaptureCamera->SetWorldScale3D(FVector(1.0f));
 }
 
-// [FOG-001] 현재 위치=밝음(1.0), 지나간 곳=회색(0.5) 누적
-//   시야 기준: 손에 들면 플레이어 몸 중심(회전 튐 방지), 바닥이면 지도 자신 위치.
-void AMapItem::UpdateFogMask()
-{
-	// (지형 캡처는 CaptureMapOnce에서 1회만 하므로 여기선 캡처하지 않음)
-
-	if (!FogBrushMID)
-	{
-		return;
-	}
-
-	// 시야 기준 위치 → UV, 반경 계산 (두 마스크 공통)
-	const FVector RevealLoc = HoldingPlayer ? HoldingPlayer->GetActorLocation() : GetActorLocation();
-	const FVector2D MapUV = WorldToMapUV(RevealLoc);
-	const float RadiusUV = (MapWorldSize.X != 0.0f) ? (RevealRadius / MapWorldSize.X) : 0.0f;
-	FogBrushMID->SetVectorParameterValue(
-		TEXT("BrushCenter"), FLinearColor(MapUV.X, MapUV.Y, 0.0f, 0.0f));
-	FogBrushMID->SetScalarParameterValue(TEXT("BrushRadius"), RadiusUV);
-
-	// 1) 방문 마스크: 회색(VisitedIntensity)으로 누적 (지우지 않음)
-	if (FogMaskRT)
-	{
-		FogBrushMID->SetScalarParameterValue(TEXT("BrushIntensity"), VisitedIntensity);
-		UKismetRenderingLibrary::DrawMaterialToRenderTarget(this, FogMaskRT, FogBrushMID);
-	}
-
-	// 2) 현재 마스크: 매번 지우고 현재 위치만 밝게(1.0)
-	if (FogRevealRT)
-	{
-		UKismetRenderingLibrary::ClearRenderTarget2D(this, FogRevealRT, FLinearColor::Black);
-		FogBrushMID->SetScalarParameterValue(TEXT("BrushIntensity"), 1.0f);
-		UKismetRenderingLibrary::DrawMaterialToRenderTarget(this, FogRevealRT, FogBrushMID);
-	}
-}
-
 // [MAP-014] 부착으로 튄 메시 스케일·위치를 손 소켓 기준으로 복원.
 //   ① SnapToTargetNotIncludingScale 부착이 RelativeScale을 재계산해 크기가 튀는 것 복원.
 //   ② CarryingComponent의 GetComponentsBoundingBox 위치보정이 캡처카메라(맵 상공 3000)까지
@@ -361,9 +538,7 @@ bool AMapItem::IsAttachedToPlayer() const
 	return GetAttachParentActor() != nullptr;
 }
 
-// [MAP-007] 이 지도 인스턴스 전용 렌더타깃 3개 생성 (공유 애셋 대신 → 2인 깜빡임 해결)
-//   ⚠️ 위젯(WBP_Map)은 이 인스턴스의 CaptureRT/FogMaskRT/FogRevealRT 필드를 Get해서 써야 한다.
-//      공유 RT 애셋을 직접 참조하면 검은 화면이 된다.
+// [MAP-007] 캡처 RT와 기존 WBP_Map 호환용 흰색 마스크 RT를 런타임 생성합니다.
 void AMapItem::CreatePerInstanceRenderTargets()
 {
 	UWorld* World = GetWorld();
@@ -379,14 +554,14 @@ void AMapItem::CreatePerInstanceRenderTargets()
 	FogMaskRT   = UKismetRenderingLibrary::CreateRenderTarget2D(World, Size, Size, RTF_R8);
 	FogRevealRT = UKismetRenderingLibrary::CreateRenderTarget2D(World, Size, Size, RTF_R8);
 
-	// 마스크는 검정(안 밝힘)에서 시작
+	// 탐험 구역을 구분하지 않으므로 두 마스크 모두 전체 공개(흰색)로 시작한다.
 	if (FogMaskRT)
 	{
-		UKismetRenderingLibrary::ClearRenderTarget2D(this, FogMaskRT, FLinearColor::Black);
+		UKismetRenderingLibrary::ClearRenderTarget2D(this, FogMaskRT, FLinearColor::White);
 	}
 	if (FogRevealRT)
 	{
-		UKismetRenderingLibrary::ClearRenderTarget2D(this, FogRevealRT, FLinearColor::Black);
+		UKismetRenderingLibrary::ClearRenderTarget2D(this, FogRevealRT, FLinearColor::White);
 	}
 
 	// 캡처 카메라 출력 대상을 이 인스턴스 RT로 연결
@@ -396,19 +571,19 @@ void AMapItem::CreatePerInstanceRenderTargets()
 	}
 }
 
-// [MAP-008] 레벨 이동/재시작 시 Fog·지형 초기화 (RT 클리어 + 지형 재캡처).
+// [MAP-008] 레벨 이동/재시작 시 호환 마스크 초기화 및 지형 재캡처.
 //   일반 레벨 이동(액터 재생성)이면 BeginPlay가 자동 초기화하므로 불필요.
 //   Seamless Travel 등 아이템이 유지되는 경우 BP에서 이 함수를 호출한다.
 void AMapItem::ResetMapForNewLevel()
 {
-	// Fog 기록 리셋 (탐험 처음부터)
+	// 구역 분류를 사용하지 않으므로 새 레벨에서도 전체 공개 상태로 초기화한다.
 	if (FogMaskRT)
 	{
-		UKismetRenderingLibrary::ClearRenderTarget2D(this, FogMaskRT, FLinearColor::Black);
+		UKismetRenderingLibrary::ClearRenderTarget2D(this, FogMaskRT, FLinearColor::White);
 	}
 	if (FogRevealRT)
 	{
-		UKismetRenderingLibrary::ClearRenderTarget2D(this, FogRevealRT, FLinearColor::Black);
+		UKismetRenderingLibrary::ClearRenderTarget2D(this, FogRevealRT, FLinearColor::White);
 	}
 
 	// 새 레벨 경계 재인식

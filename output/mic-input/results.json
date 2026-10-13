@@ -1,0 +1,61 @@
+{
+  "checks": [
+    {
+      "name": "engine silence gate disabled",
+      "passed": true
+    },
+    {
+      "name": "engine noise gate disabled",
+      "passed": true
+    },
+    {
+      "name": "lobby voice slider allows 200 percent",
+      "passed": true
+    },
+    {
+      "name": "voice percentage format retained",
+      "passed": true
+    },
+    {
+      "name": "lobby uses input meter",
+      "passed": true
+    },
+    {
+      "name": "lobby has no mic icon preview",
+      "passed": true
+    },
+    {
+      "name": "left endpoint applies zero gate",
+      "passed": true
+    },
+    {
+      "name": "game voice slider allows 200 percent",
+      "passed": true
+    },
+    {
+      "name": "game restores 200 percent from lobby",
+      "passed": true
+    },
+    {
+      "name": "game uses input meter",
+      "passed": true
+    },
+    {
+      "name": "game has no mic icon preview",
+      "passed": true
+    },
+    {
+      "name": "game restores lobby zero",
+      "passed": true
+    },
+    {
+      "name": "quarter scale applies -60 dB",
+      "passed": true
+    },
+    {
+      "name": "restart restores -60 dB threshold",
+      "passed": true
+    }
+  ],
+  "error": null
+}
