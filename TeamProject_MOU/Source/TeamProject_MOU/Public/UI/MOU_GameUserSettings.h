@@ -64,6 +64,7 @@ public:
 	float GetVoiceVolume() const { return VoiceVolume; }
 
 	UFUNCTION(BlueprintCallable, Category = "Settings|Audio")
+	// [VOICEVOL-001] 수신 음성 배율을 0~200% 범위로 저장하고 즉시 변경을 알린다.
 	void SetVoiceVolume(float InVolume);
 
 	UFUNCTION(BlueprintPure, Category = "Settings|Audio")

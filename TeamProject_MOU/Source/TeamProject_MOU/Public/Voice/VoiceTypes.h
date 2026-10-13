@@ -104,9 +104,9 @@ enum class EVoiceRoute : uint8
 namespace MOUVoice
 {
 	/** 일반 음성의 수신 재생 게인. 거리 및 NPC 판정에는 적용하지 않는다. */
-	inline constexpr float ProximityPlaybackGain = 2.0f;
+	inline constexpr float ProximityPlaybackGain = 6.0f;
 	/** 기존 무전 필터를 통과한 출력에 적용할 수신 재생 게인. */
-	inline constexpr float RadioPlaybackGain = 2.5f;
+	inline constexpr float RadioPlaybackGain = 5.0f;
 	/** 환경설정 슬라이더의 실제 VAD 임계값 상한 및 기본값. */
 	inline constexpr float SettingsMicThresholdMax = 1.f;
 

@@ -116,9 +116,10 @@ void UMOU_GameUserSettings::SetSFXVolume(float InVolume)
 	OnAudioSettingsChanged.Broadcast();
 }
 
+// [VOICEVOL-001] 수신 음성 배율을 0~200% 범위로 저장하고 즉시 변경을 알린다.
 void UMOU_GameUserSettings::SetVoiceVolume(float InVolume)
 {
-	VoiceVolume = FMath::Clamp(InVolume, 0.0f, 1.0f);
+	VoiceVolume = FMath::Clamp(InVolume, 0.0f, 2.0f);
 	OnAudioSettingsChanged.Broadcast();
 }
 

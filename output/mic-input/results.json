@@ -9,6 +9,14 @@
       "passed": true
     },
     {
+      "name": "lobby voice slider allows 200 percent",
+      "passed": true
+    },
+    {
+      "name": "voice percentage format retained",
+      "passed": true
+    },
+    {
       "name": "lobby uses input meter",
       "passed": true
     },
@@ -18,6 +26,14 @@
     },
     {
       "name": "left endpoint applies zero gate",
+      "passed": true
+    },
+    {
+      "name": "game voice slider allows 200 percent",
+      "passed": true
+    },
+    {
+      "name": "game restores 200 percent from lobby",
       "passed": true
     },
     {
