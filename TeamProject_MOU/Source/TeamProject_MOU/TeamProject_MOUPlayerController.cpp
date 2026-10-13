@@ -18,6 +18,7 @@
 #include "Base/ProjectGameInstanceBase.h"
 #include "AbilitySystemComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerState.h"
 #include "Engine/DataTable.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
@@ -51,6 +52,43 @@ void ATeamProject_MOUPlayerController::ServerReportLobbyEntryReady_Implementatio
 {
 	if (ATeamProject_MOUGameMode* Mode = GetWorld()->GetAuthGameMode<ATeamProject_MOUGameMode>())
 		Mode->ReportLobbyEntryReady(this, UserId);
+}
+
+// [LEVELREADY-001] 이동 전후 동일한 참여자 키를 서버에서 구한다.
+FString ATeamProject_MOUPlayerController::GetLevelReadyParticipantKey() const
+{
+	if (!PlaySessionId.IsEmpty()) return TEXT("Session:") + PlaySessionId;
+	if (IsLocalController() && HasAuthority()) return TEXT("Host");
+	return PlayerState ? TEXT("Player:") + PlayerState->GetPlayerName() : FString();
+}
+
+// [LEVELREADY-002] 서버가 현재 맵의 준비 확인을 소유 클라이언트에 요청한다.
+void ATeamProject_MOUPlayerController::ClientBeginLevelReadyWait_Implementation()
+{
+	bLevelReadyReportPending = true;
+}
+
+// [LEVELREADY-003] 소유 클라이언트의 준비 완료를 서버에 보고한다.
+void ATeamProject_MOUPlayerController::ServerReportLevelReady_Implementation()
+{
+	if (ATeamProject_MOUGameMode* Mode = GetWorld()->GetAuthGameMode<ATeamProject_MOUGameMode>())
+		Mode->ReportLevelReady(this);
+}
+
+// [LEVELREADY-004] 맵과 소유 캐릭터의 필수 복제가 준비되면 보고한다.
+void ATeamProject_MOUPlayerController::UpdateLevelReadyWait()
+{
+	if (!IsLocalController() || !bLevelReadyReportPending) return;
+	const UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance());
+	const AProjectGameStateBase* State = GetWorld()->GetGameState<AProjectGameStateBase>();
+	const AMainCharacter* ReadyPawn = Cast<AMainCharacter>(GetPawn());
+	const UAbilitySystemComponent* ASC = ReadyPawn ? ReadyPawn->GetAbilitySystemComponent() : nullptr;
+	if (!Instance || !Instance->MapLoaded || GetWorld()->IsInSeamlessTravel()
+		|| !State || !State->HasLobbyEntryStorage() || !PlayerState || !ReadyPawn
+		|| !ReadyPawn->HasActorBegunPlay() || !ReadyPawn->IsLocallyControlled()
+		|| ReadyPawn->GetPlayerState() != PlayerState || !ASC || ASC->GetAvatarActor() != ReadyPawn) return;
+	bLevelReadyReportPending = false;
+	ServerReportLevelReady();
 }
 
 // [LOBBYLOAD-010] 소유 Pawn과 필수 복제 데이터가 준비되었는지 검사합니다.
@@ -563,6 +601,7 @@ bool ATeamProject_MOUPlayerController::ShouldUseTouchControls() const
 // [LATEJOIN-011] 복제된 합류 제한에 따라 관전을 시작하고 기존 카메라를 갱신합니다.
 void ATeamProject_MOUPlayerController::PlayerTick(float DeltaTime)
 {
+	UpdateLevelReadyWait();
 	UpdateLobbyEntryWait();
 	Super::PlayerTick(DeltaTime);
     if (HasAuthority() && bWaitForSafeLobby)

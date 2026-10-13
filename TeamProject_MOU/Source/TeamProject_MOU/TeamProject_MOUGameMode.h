@@ -20,8 +20,11 @@ class ATeamProject_MOUGameMode : public AGameModeBase
 	GENERATED_BODY()
     friend class FLateJoinRegressionTest;
 	friend class FLobbyEntryReadyRegressionTest;
+	friend class FLevelReadyRegressionTest;
 
 public:
+	// [LEVELREADY-005] 소유 클라이언트의 준비 보고를 집계하여 시작 조건을 검사한다.
+	void ReportLevelReady(class ATeamProject_MOUPlayerController* PC);
 	// [LOBBYLOAD-006] 예상 참여자의 소유 Pawn과 준비 보고를 검증하고 전원 준비를 집계합니다.
 	void ReportLobbyEntryReady(class ATeamProject_MOUPlayerController* PC, int64 UserId);
 	TMap<int64, TWeakObjectPtr<class ATeamProject_MOUPlayerController>> LobbyEntryReadyMembers;
@@ -85,6 +88,16 @@ protected:
 	void OnAllPlayersConfirmedSettlement(APlayerController* TravelRequester);
 
 private:
+	TSet<FString> ExpectedLevelParticipants;
+	TSet<TWeakObjectPtr<class ATeamProject_MOUPlayerController>> ReadyLevelPlayers;
+	TSet<TWeakObjectPtr<class ATeamProject_MOUPlayerController>> RequestedLevelPlayers;
+	FTimerHandle LevelReadyWaitHandle;
+	bool bWaitingForLevelReady = false;
+	bool bLevelTimerStarted = false;
+	// [LEVELREADY-006] 이동 참여자 전원의 로컬 준비 보고를 기다린다.
+	void BeginLevelReadyWait();
+	// [LEVELREADY-007] 새 컨트롤러에 준비 요청을 보내고 전원 준비 시 타이머를 시작한다.
+	void CheckLevelReadyWait();
 	UPROPERTY()
 	TObjectPtr<class ARunState> RunState;
 

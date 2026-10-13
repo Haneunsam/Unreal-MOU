@@ -13,6 +13,11 @@ class TEAMPROJECT_MOU_API UProjectGameInstanceBase : public UGameInstance
 	GENERATED_BODY()
 
 public:
+	// 이동 전 참여자 식별자를 서버 GameInstance에 보관한다.
+	TSet<FString> LevelTravelParticipants;
+	FDelegateHandle LevelTravelTearDownHandle;
+	// [LEVELREADY-000] 월드 종료 직전 서버의 이동 참여자를 기록한다.
+	void CaptureLevelTravelParticipants(UWorld* World);
 	// [LOBBYLOAD-001] 최초 로비 입장의 참여 예정 명단과 전용 로딩을 시작합니다.
 	void BeginLobbyEntryWait(const TArray<int64>& Members);
 	// [LOBBYLOAD-002] 현재 월드에 전용 로딩 위젯을 표시합니다.
