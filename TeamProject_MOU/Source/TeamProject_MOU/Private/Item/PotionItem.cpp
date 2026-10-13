@@ -14,8 +14,22 @@
 #include "TeamProject_MOU.h" // LogTeamProject_MOU
 #include "Engine/Engine.h"   // GEngine->AddOnScreenDebugMessage
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraSystem.h"
 #include "Sound/SoundBase.h"
 #include "UObject/ConstructorHelpers.h"
+
+namespace
+{
+	struct FActiveSpeedPotionBuff
+	{
+		float AppliedDelta = 0.0f;
+		FTimerHandle ExpirationTimer;
+	};
+
+	// 대상별·포션 클래스별로 현재 적용 중인 이동속도 수치와 만료 타이머를 보관한다.
+	// 포션 액터가 소비되어 사라진 뒤에도 대상 캐릭터의 타이머가 효과를 관리한다.
+	TMap<TWeakObjectPtr<ACharacterBase>, TMap<TWeakObjectPtr<UClass>, FActiveSpeedPotionBuff>> ActiveSpeedPotionBuffs;
+}
 
 // [POTION-DEBUG] 화면 + 로그 동시 출력용 임시 매크로 (원인 파악 후 제거)
 #define POTION_DEBUG(Color, Fmt, ...) \
@@ -24,7 +38,7 @@
 		if (GEngine) { GEngine->AddOnScreenDebugMessage(-1, 6.0f, Color, FString::Printf(TEXT("[Potion] " Fmt), ##__VA_ARGS__)); } \
 	} while (0)
 
-// [POTION-000] 포션 공통 설정과 작은 메시의 바닥 관통 방지용 CCD를 초기화한다.
+// [POTION-000] 포션 공통 설정, 기본 사용 이펙트와 작은 메시의 바닥 관통 방지용 CCD를 초기화한다.
 APotionItem::APotionItem()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -38,6 +52,13 @@ APotionItem::APotionItem()
 
 	// 포션은 자기 자신에게 효과를 준다 (치료 도구 등은 FocusedTarget으로 override)
 	TargetMode = EConsumeTarget::SelfOnly;
+
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> UseEffectFinder(
+		TEXT("/Game/04_JJO/NIagara/NG_Energy.NG_Energy"));
+	if (UseEffectFinder.Succeeded())
+	{
+		UseEffect = UseEffectFinder.Object;
+	}
 
 	RollingAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("RollingAudioComponent"));
 	RollingAudioComponent->SetupAttachment(MeshComponent);
@@ -251,7 +272,7 @@ void APotionItem::ExecutePendingImpactThrow()
 	bThrowAsUse = false;
 }
 
-// 실제 GE 적용 + 상태이상 태그 제거를 한 대상에게 수행 (자기 사용 / 광역 공용)
+// [POTION-022] 같은 종류의 지속 포션은 수치를 중첩하지 않고 지속시간만 초기화해 대상에게 적용한다.
 void APotionItem::ApplyPotionEffectToTarget(AActor* Target)
 {
 	if (!Target)
@@ -279,6 +300,23 @@ void APotionItem::ApplyPotionEffectToTarget(AActor* Target)
 				continue;
 			}
 
+			const UGameplayEffect* EffectCDO = EffectClass->GetDefaultObject<UGameplayEffect>();
+			if (EffectCDO && EffectCDO->DurationPolicy != EGameplayEffectDurationType::Instant)
+			{
+				// 같은 포션 GE가 이미 적용 중이면 먼저 제거한다. 새 Spec을 한 번 적용하면서
+				// 능력치 배수 증가는 막고 지속시간은 처음부터 다시 시작한다.
+				const TArray<FActiveGameplayEffectHandle> ActiveEffectHandles =
+					TargetASC->GetActiveEffects(FGameplayEffectQuery());
+				for (const FActiveGameplayEffectHandle& ActiveHandle : ActiveEffectHandles)
+				{
+					const FActiveGameplayEffect* ActiveEffect = TargetASC->GetActiveGameplayEffect(ActiveHandle);
+					if (ActiveEffect && ActiveEffect->Spec.Def && ActiveEffect->Spec.Def->GetClass() == EffectClass)
+					{
+						TargetASC->RemoveActiveGameplayEffect(ActiveHandle);
+					}
+				}
+			}
+
 			FGameplayEffectSpecHandle SpecHandle = TargetASC->MakeOutgoingSpec(EffectClass, EffectLevel, Context);
 			if (SpecHandle.IsValid())
 			{
@@ -288,29 +326,62 @@ void APotionItem::ApplyPotionEffectToTarget(AActor* Target)
 	}
 
 	// 이동속도 가감 (신속 +/슬로우 -). GE로 MoveSpeed를 바꾸면 UpdateCharacterSpeed가 덮어쓰므로
-	// CharacterBase의 SpeedBuffFlat에 직접 가감하고 지속시간 후 도로 뺀다.
+	// CharacterBase의 SpeedBuffFlat에 직접 반영한다. 같은 포션을 다시 쓰면 수치는 유지하고 만료 시간만 초기화한다.
 	if (SpeedFlatDelta != 0.0f)
 	{
 		if (ACharacterBase* TargetCharacter = Cast<ACharacterBase>(Target))
 		{
-			TargetCharacter->SpeedBuffFlat += SpeedFlatDelta;
-			TargetCharacter->UpdateCharacterSpeed(); // 즉시 반영
+			// 종료된 PIE 월드 등에서 남은 무효 대상을 다음 적용 시 정리한다.
+			for (auto TargetIt = ActiveSpeedPotionBuffs.CreateIterator(); TargetIt; ++TargetIt)
+			{
+				if (!TargetIt.Key().IsValid())
+				{
+					TargetIt.RemoveCurrent();
+				}
+			}
 
-			// 지속시간 후 원복 (더한 만큼 도로 빼기). 대상 캐릭터 타이머라 포션이 소멸돼도 유지된다.
+			TWeakObjectPtr<ACharacterBase> WeakTarget = TargetCharacter;
+			TWeakObjectPtr<UClass> PotionClass = GetClass();
+			TMap<TWeakObjectPtr<UClass>, FActiveSpeedPotionBuff>& TargetBuffs =
+				ActiveSpeedPotionBuffs.FindOrAdd(WeakTarget);
+			FActiveSpeedPotionBuff& ActiveBuff = TargetBuffs.FindOrAdd(PotionClass);
+
+			// 기존 적용분과 새 설정값의 차이만 반영한다. 같은 값이면 능력치는 그대로 유지된다.
+			TargetCharacter->SpeedBuffFlat += SpeedFlatDelta - ActiveBuff.AppliedDelta;
+			ActiveBuff.AppliedDelta = SpeedFlatDelta;
+			TargetCharacter->UpdateCharacterSpeed();
+
+			TargetCharacter->GetWorldTimerManager().ClearTimer(ActiveBuff.ExpirationTimer);
+
+			// 지속시간 후 현재 적용된 한 번분만 원복한다. 동일 포션 재사용 시 SetTimer가 만료 시점을 갱신한다.
 			if (SpeedBuffDuration > 0.0f)
 			{
-				TWeakObjectPtr<ACharacterBase> WeakTarget = TargetCharacter;
-				const float DeltaToRevert = SpeedFlatDelta;
-				FTimerDelegate RevertDelegate = FTimerDelegate::CreateLambda([WeakTarget, DeltaToRevert]()
+				FTimerDelegate RevertDelegate = FTimerDelegate::CreateLambda([WeakTarget, PotionClass]()
 				{
-					if (WeakTarget.IsValid())
+					TMap<TWeakObjectPtr<UClass>, FActiveSpeedPotionBuff>* TargetBuffsPtr =
+						ActiveSpeedPotionBuffs.Find(WeakTarget);
+					if (!TargetBuffsPtr)
 					{
-						WeakTarget->SpeedBuffFlat -= DeltaToRevert;
-						WeakTarget->UpdateCharacterSpeed();
+						return;
+					}
+
+					if (FActiveSpeedPotionBuff* ExpiredBuff = TargetBuffsPtr->Find(PotionClass))
+					{
+						if (WeakTarget.IsValid())
+						{
+							WeakTarget->SpeedBuffFlat -= ExpiredBuff->AppliedDelta;
+							WeakTarget->UpdateCharacterSpeed();
+						}
+						TargetBuffsPtr->Remove(PotionClass);
+					}
+
+					if (TargetBuffsPtr->IsEmpty())
+					{
+						ActiveSpeedPotionBuffs.Remove(WeakTarget);
 					}
 				});
-				FTimerHandle TmpHandle;
-				TargetCharacter->GetWorldTimerManager().SetTimer(TmpHandle, RevertDelegate, SpeedBuffDuration, false);
+				TargetCharacter->GetWorldTimerManager().SetTimer(
+					ActiveBuff.ExpirationTimer, RevertDelegate, SpeedBuffDuration, false);
 			}
 		}
 	}

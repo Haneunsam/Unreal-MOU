@@ -6,6 +6,7 @@
 #include "Animation/AnimInstance.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Sound/SoundBase.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -194,6 +195,21 @@ void AConsumableItemBase::ApplyEffect_Implementation()
 // (몽타주는 GA_UsePotion이 재생 - SendUseAbilityEvent 참고)
 void AConsumableItemBase::MulticastPlayUseEffect_Implementation()
 {
+	if (UseEffect && GetNetMode() != NM_DedicatedServer)
+	{
+		// 월드에 독립적으로 생성해 소비 직후 아이템이 파괴되어도 이펙트가 끝까지 재생되게 한다.
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			this,
+			UseEffect,
+			GetActorLocation(),
+			GetActorRotation(),
+			UseEffectScale,
+			true,
+			true,
+			ENCPoolMethod::AutoRelease,
+			true);
+	}
+
 	// PlaySoundAtLocation은 독립된 오디오 컴포넌트를 만들기 때문에 이 아이템이
 	// 같은 프레임에 소진되어 Destroy되더라도 사운드는 끝까지 재생된다.
 	if (UseSound && GetNetMode() != NM_DedicatedServer)
