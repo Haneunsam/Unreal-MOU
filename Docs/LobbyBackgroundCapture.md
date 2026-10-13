@@ -8,7 +8,7 @@
 
 ## 준비된 에셋
 
-콘텐츠 브라우저의 `/Game/Cinematics/LobbyBackgrounds` 폴더:
+콘텐츠 브라우저의 `/Game/02_JSY/Cinematics/LobbyBackgrounds` 폴더:
 
 - `LS_BG_TrashTown_Spot01`: 60초, 30fps, 위치 고정 및 Yaw +360도 선형 회전.
 - `MRP_BG_1080p30_MP4`: 1920×1080, 30fps, PNG 원본과 H.264 MP4 출력 프리셋.
