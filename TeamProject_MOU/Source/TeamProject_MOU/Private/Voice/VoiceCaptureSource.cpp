@@ -7,6 +7,7 @@
 
 #include "Interfaces/VoiceCapture.h"
 #include "VoiceModule.h"
+#include "HAL/IConsoleManager.h"
 
 DEFINE_LOG_CATEGORY(LogMOUVoice);
 
@@ -22,6 +23,7 @@ FVoiceCaptureSource::~FVoiceCaptureSource()
 	Shutdown();
 }
 
+// [MICCAP-001] 엔진 선행 게이트를 해제하고 원본 마이크 입력을 시작한다.
 bool FVoiceCaptureSource::Start()
 {
 	if (bReady)
@@ -39,6 +41,14 @@ bool FVoiceCaptureSource::Start()
 	}
 
 	// DeviceName 을 비우면 시스템 기본 마이크를 쓴다.
+	// 엔진의 선행 게이트가 조용한 음성을 지우지 않도록 게임 VAD 한 곳에서만 차단한다.
+	for (const TCHAR* Name : { TEXT("voice.SilenceDetectionThreshold"), TEXT("voice.MicNoiseGateThreshold") })
+	{
+		if (IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Name))
+		{
+			Variable->Set(-1.f, ECVF_SetByCode);
+		}
+	}
 	VoiceCapture = FVoiceModule::Get().CreateVoiceCapture(
 		FString(), MOUVoice::SampleRate, MOUVoice::NumChannels);
 
@@ -71,6 +81,7 @@ bool FVoiceCaptureSource::Start()
 	return true;
 }
 
+// [MICCAP-002] 캡처 장치와 이전 발화 상태를 함께 초기화한다.
 void FVoiceCaptureSource::Shutdown()
 {
 	if (VoiceCapture.IsValid())
@@ -82,6 +93,8 @@ void FVoiceCaptureSource::Shutdown()
 	}
 
 	bReady = false;
+	bSpeaking = false;
+	SilenceStartedAt = 0.0;
 	PendingBytes.Reset();
 
 	LoudnessEnvelope = 0.f;
@@ -118,6 +131,7 @@ void FVoiceCaptureSource::Poll(TArray<FMOUVoiceFrame>& OutFrames)
 	DrainPendingSamples(OutFrames);
 }
 
+// [MICCAP-003] 원본 RMS를 측정한 뒤 사용자 임계값과 말끝 유지 시간을 적용한다.
 void FVoiceCaptureSource::DrainPendingSamples(TArray<FMOUVoiceFrame>& OutFrames)
 {
 	// 20ms(=640바이트) 단위로 정확히 잘라낸다. 남는 꼬리는 다음 회차로 넘긴다.
@@ -148,7 +162,7 @@ void FVoiceCaptureSource::DrainPendingSamples(TArray<FMOUVoiceFrame>& OutFrames)
 		// 말끝이 잘리고 NPC 소음 이벤트도 잘게 쪼개진다.
 		const double Now = FPlatformTime::Seconds();
 
-		if (Frame.Loudness >= VadThreshold)
+		if (Frame.Loudness > VadThreshold)
 		{
 			bSpeaking = true;
 			SilenceStartedAt = 0.0;

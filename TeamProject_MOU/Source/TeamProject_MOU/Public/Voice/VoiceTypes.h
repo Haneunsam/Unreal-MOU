@@ -103,6 +103,26 @@ enum class EVoiceRoute : uint8
  */
 namespace MOUVoice
 {
+	/** 일반 음성의 수신 재생 게인. 거리 및 NPC 판정에는 적용하지 않는다. */
+	inline constexpr float ProximityPlaybackGain = 6.0f;
+	/** 기존 무전 필터를 통과한 출력에 적용할 수신 재생 게인. */
+	inline constexpr float RadioPlaybackGain = 5.0f;
+	/** 환경설정 슬라이더의 실제 VAD 임계값 상한 및 기본값. */
+	inline constexpr float SettingsMicThresholdMax = 1.f;
+
+	// [MICDB-001] 원본 RMS를 -80~0 dBFS 입력 게이지 좌표로 변환한다.
+	inline float MicRmsToSlider(float Rms)
+	{
+		return Rms <= 0.f ? 0.f : FMath::Clamp((20.f * FMath::LogX(10.f, Rms) + 80.f) / 80.f, 0.f, 1.f);
+	}
+
+	// [MICDB-002] 게이지 좌표를 RMS 임계값으로 복원하며 맨 왼쪽은 차단 없음이다.
+	inline float MicSliderToRms(float Value)
+	{
+		return Value <= 0.f ? 0.f : FMath::Pow(10.f, (FMath::Clamp(Value, 0.f, 1.f) * 80.f - 80.f) / 20.f);
+	}
+	inline constexpr float SettingsMicThresholdDefault = 0.005f;
+
 	/**
 	 * 16kHz 모노.
 	 *
@@ -608,6 +628,15 @@ namespace MOUVoice
 	 *                          그대로 넣으면 원이 떨린다.
 	 * @param VadThreshold      이 클라의 VAD 기준. 조절 구간의 시작점.
 	 */
+	// [VOICELEVEL-003] 개발자 상한으로 정규화하며 감도가 상한 이상이면 작은 유효 구간을 확보한다.
+	inline float NormalizeLoudnessWithCeiling(float LoudnessEnvelope, float VadThreshold, float Ceiling)
+	{
+		const float Floor = FMath::Max(VadThreshold, 0.f);
+		const float SafeCeiling = FMath::Clamp(Ceiling, 0.001f, 1.f);
+		const float Span = SafeCeiling > Floor ? SafeCeiling - Floor : FMath::Max(0.001f, SafeCeiling * 0.1f);
+		return FMath::Clamp((LoudnessEnvelope - Floor) / Span, 0.f, 1.f);
+	}
+
 	inline float NormalizeLoudness(float LoudnessEnvelope, float VadThreshold)
 	{
 		const float Floor = FMath::Max(VadThreshold, 0.f);

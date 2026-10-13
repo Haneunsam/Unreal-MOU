@@ -236,6 +236,7 @@ private:
 	 *
 	 * @return 쓸 수 있는 사운드. 대상을 못 찾으면 null.
 	 */
+	// [VOICE-002] 수신 Synth를 준비하고 사용자 볼륨과 라우트별 출력 게인을 적용한다.
 	UVoiceSynthComponent* EnsureSynthForStream(FVoiceStream& Stream, int32 SpeakerId, EVoiceMode Mode);
 
 	/**

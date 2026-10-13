@@ -1,9 +1,13 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/SettingsMenuWidget.h"
+#include "UI/MicSensitivitySlider.h"
+#include "Components/PanelWidget.h"
 #include "UI/KeyBindingMenuWidget.h"
 #include "UI/MOU_GameUserSettings.h"
 #include "Voice/VoiceSubsystem.h"
+#include "Voice/VoiceTypes.h"
+#include "Voice/VoiceStatusWidget.h"
 #include "Components/Button.h"
 #include "Components/Slider.h"
 #include "Components/CheckBox.h"
@@ -12,9 +16,35 @@
 #include "Components/TextBlock.h"
 #include "Components/WidgetSwitcher.h"
 #include "Components/InputKeySelector.h"
+#include "Components/ScrollBox.h"
+#include "Components/ScrollBoxSlot.h"
+#include "Components/SizeBox.h"
 #include "Animation/WidgetAnimation.h"
 #include "Kismet/KismetSystemLibrary.h"
 
+// [MIC-014] Slate 생성 전에 두 설정 화면의 감도 슬라이더를 원본 입력 게이지로 교체한다.
+void USettingsMenuWidget::NativeOnInitialized()
+{
+	Super::NativeOnInitialized();
+	if (Slider_MicSensitivity && !Cast<UMicSensitivitySlider>(Slider_MicSensitivity))
+	{
+		if (UPanelWidget* Parent = Slider_MicSensitivity->GetParent())
+		{
+			UMicSensitivitySlider* Meter = NewObject<UMicSensitivitySlider>(this);
+			if (Parent->ReplaceChildAt(Parent->GetChildIndex(Slider_MicSensitivity), Meter))
+			{
+				Slider_MicSensitivity = Meter;
+			}
+		}
+	}
+	if (MicPreview)
+	{
+		MicPreview->RemoveFromParent();
+		MicPreview = nullptr;
+	}
+}
+
+// [MIC-013] 설정 화면의 입력 이벤트와 저장된 설정값을 연결한다.
 void USettingsMenuWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -173,21 +203,6 @@ void USettingsMenuWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
-void USettingsMenuWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
-{
-	Super::NativeTick(MyGeometry, InDeltaTime);
-
-	// 마이크 레벨 프로그레스바 실시간 갱신 (옵션 창이 열려 있는 동안)
-	if (ProgressBar_MicLevel)
-	{
-		if (UVoiceSubsystem* VoiceSubsystem = UVoiceSubsystem::Get(GetWorld()))
-		{
-			float Loudness = VoiceSubsystem->GetCurrentLoudness();
-			ProgressBar_MicLevel->SetPercent(FMath::Clamp(Loudness, 0.0f, 1.0f));
-		}
-	}
-}
-
 FReply USettingsMenuWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
 	if (InKeyEvent.GetKey() == EKeys::Escape)
@@ -290,6 +305,7 @@ void USettingsMenuWidget::SetupFrameRateLimits()
 	ComboBox_FrameRateLimit->AddOption(TEXT("144 FPS"));
 }
 
+// [MIC-000] 저장된 설정을 표시하고 마이크 임계값을 0~1 슬라이더에 매핑한다.
 void USettingsMenuWidget::RefreshUIFromSettings()
 {
 	UMOU_GameUserSettings* UserSettings = GetUserSettings();
@@ -405,6 +421,9 @@ void USettingsMenuWidget::RefreshUIFromSettings()
 
 	if (Slider_VoiceVolume)
 	{
+		Slider_VoiceVolume->SetMinValue(0.f);
+		Slider_VoiceVolume->SetMaxValue(2.f);
+		Slider_VoiceVolume->SetStepSize(0.01f);
 		Slider_VoiceVolume->SetValue(UserSettings->GetVoiceVolume());
 	}
 	if (Text_VoiceVolume)
@@ -414,11 +433,16 @@ void USettingsMenuWidget::RefreshUIFromSettings()
 
 	if (Slider_MicSensitivity)
 	{
-		Slider_MicSensitivity->SetValue(UserSettings->GetMicSensitivity());
+		Slider_MicSensitivity->SetMinValue(0.f);
+		Slider_MicSensitivity->SetMaxValue(1.f);
+		Slider_MicSensitivity->SetStepSize(0.01f);
+		Slider_MicSensitivity->SetValue(MicThresholdToSlider(UserSettings->GetMicSensitivity()));
+		Slider_MicSensitivity->SetToolTipText(NSLOCTEXT("Settings", "MicThresholdHelp",
+			"흰 손잡이를 움직여 입력 차단 기준을 조절합니다. 노란 영역은 차단, 초록 영역은 전달됩니다. 왼쪽 끝은 차단 없음입니다. (-80~0 dBFS)"));
 	}
 	if (Text_MicSensitivity)
 	{
-		Text_MicSensitivity->SetText(FText::AsPercent(UserSettings->GetMicSensitivity()));
+		Text_MicSensitivity->SetText(FormatMicSensitivity(UserSettings->GetMicSensitivity()));
 	}
 
 	// 7. 조작 및 화면
@@ -714,14 +738,38 @@ void USettingsMenuWidget::OnVoiceVolumeChanged(float Value)
 	}
 }
 
+// [MIC-004] 실제 마이크 임계값을 슬라이더의 0~1 좌표로 변환한다.
+float USettingsMenuWidget::MicThresholdToSlider(float Threshold)
+{
+	return MOUVoice::MicRmsToSlider(Threshold);
+}
+
+// [MIC-005] 슬라이더의 0~1 좌표를 실제 마이크 임계값으로 변환한다.
+float USettingsMenuWidget::MicSliderToThreshold(float SliderValue)
+{
+	return MOUVoice::MicSliderToRms(SliderValue);
+}
+
+// [MIC-006] 실제 마이크 임계값을 dB 또는 차단 없음으로 표시한다.
+FText USettingsMenuWidget::FormatMicSensitivity(float Threshold)
+{
+	FNumberFormattingOptions Options;
+	Options.MinimumFractionalDigits = 2;
+	Options.MaximumFractionalDigits = 2;
+	return Threshold <= 0.f ? NSLOCTEXT("Settings", "MicGateOff", "차단 없음")
+		: FText::Format(NSLOCTEXT("Settings", "MicDb", "{0} dB"), FText::AsNumber(20.f * FMath::LogX(10.f, Threshold), &Options));
+}
+
+// [MIC-001] 로그 음량 슬라이더 값을 실제 RMS 임계값으로 변환해 적용한다.
 void USettingsMenuWidget::OnMicSensitivityChanged(float Value)
 {
 	if (UMOU_GameUserSettings* UserSettings = GetUserSettings())
 	{
-		UserSettings->SetMicSensitivity(Value);
+		const float Threshold = MicSliderToThreshold(Value);
+		UserSettings->SetMicSensitivity(Threshold);
 		if (Text_MicSensitivity)
 		{
-			Text_MicSensitivity->SetText(FText::AsPercent(Value));
+			Text_MicSensitivity->SetText(FormatMicSensitivity(UserSettings->GetMicSensitivity()));
 		}
 	}
 }

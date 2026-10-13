@@ -39,6 +39,10 @@ void UVoiceStatusWidget::NativePreConstruct()
 void UVoiceStatusWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	if (UVoiceSubsystem* Voice = GetVoiceSubsystem())
+	{
+		Voice->SetMaximumVoiceRms(MaximumVoiceRms);
+	}
 
 	// ChatWidgetBase 와 같은 패턴: 별도 입력 에셋 없이 소유 플레이어의
 	// InputComponent 에 직접 건다. EnhancedInput 이 붙어 있어도 레거시
@@ -83,9 +87,38 @@ void UVoiceStatusWidget::NativeDestruct()
 void UVoiceStatusWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (UVoiceSubsystem* Voice = GetVoiceSubsystem())
+	{
+		Voice->SetMaximumVoiceRms(MaximumVoiceRms);
+	}
 
 	ApplyMicState(EvaluateMicState());
 	UpdateLevelBar(InDeltaTime);
+}
+
+// [VUI-015] 설정 화면 미리보기처럼 입력을 소유하지 않는 인스턴스의 음소거 키 바인딩을 해제한다.
+void UVoiceStatusWidget::SetMuteKeyBindingEnabled(const bool bEnabled)
+{
+	bBindMuteKeyToOwningPlayer = bEnabled;
+	if (!bEnabled)
+	{
+		if (APlayerController* PC = GetOwningPlayer())
+		{
+			if (PC->InputComponent != nullptr)
+			{
+				PC->InputComponent->KeyBindings.RemoveAll([this](const FInputKeyBinding& Binding)
+				{
+					return Binding.KeyDelegate.GetUObject() == this;
+				});
+			}
+		}
+	}
+}
+
+// [VUI-016] 이 위젯이 음소거 입력을 직접 소유하는지 조회한다.
+bool UVoiceStatusWidget::IsMuteKeyBindingEnabled() const
+{
+	return bBindMuteKeyToOwningPlayer;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,13 +318,8 @@ void UVoiceStatusWidget::UpdateLevelBar(float InDeltaTime)
 		return;
 	}
 
-	const float Threshold = FMath::Max(Voice->GetMicSensitivity(), 0.f);
-	const float Ceiling = FMath::Max(
-		Threshold * LevelBarHeadroom, Threshold + KINDA_SMALL_NUMBER);
-
-	// 발화 기준 이하는 0, 상한 이상은 1로 환산한다.
-	const float Target = FMath::Clamp(
-		(Voice->GetLoudnessEnvelope() - Threshold) / (Ceiling - Threshold), 0.f, 1.f);
+	// 전송되는 발화 강도와 같은 계산을 사용한다. 임계값 0에서도 표시 범위가 사라지지 않는다.
+	const float Target = Voice->GetCurrentIntensity();
 
 	// 비대칭 보간: 올라갈 땐 빠르게, 내려올 땐 천천히.
 	const float Speed = (Target > DisplayLevel) ? GLevelAttackSpeed : GLevelReleaseSpeed;

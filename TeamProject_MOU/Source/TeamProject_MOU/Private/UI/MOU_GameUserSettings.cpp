@@ -6,14 +6,16 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Voice/VoiceSubsystem.h"
+#include "Voice/VoiceTypes.h"
 
+// [MIC-007] 음성 출력과 마이크 인식 임계값의 기본 설정을 초기화한다.
 UMOU_GameUserSettings::UMOU_GameUserSettings()
 {
 	MasterVolume = 0.5f;
 	BGMVolume = 0.5f;
 	SFXVolume = 0.5f;
-	VoiceVolume = 0.5f;
-	MicSensitivity = 0.05f;
+	VoiceVolume = 1.0f;
+	MicSensitivity = MOUVoice::SettingsMicThresholdDefault;
 
 	MouseSensitivity = 1.0f;
 	bInvertY = false;
@@ -25,6 +27,7 @@ UMOU_GameUserSettings* UMOU_GameUserSettings::GetMOUGameUserSettings()
 	return Cast<UMOU_GameUserSettings>(UGameUserSettings::GetGameUserSettings());
 }
 
+// [MIC-008] 기본 설정 및 음성 설정 버전을 복원한다.
 void UMOU_GameUserSettings::SetToDefaults()
 {
 	Super::SetToDefaults();
@@ -43,17 +46,18 @@ void UMOU_GameUserSettings::SetToDefaults()
 	MasterVolume = 0.5f;
 	BGMVolume = 0.5f;
 	SFXVolume = 0.5f;
-	VoiceVolume = 0.5f;
-	MicSensitivity = 0.05f;
+	VoiceVolume = 1.0f;
+	MicSensitivity = MOUVoice::SettingsMicThresholdDefault;
 
 	MouseSensitivity = 1.0f;
 	bInvertY = false;
 	FieldOfView = 90.0f;
 
 	CustomKeyBindings.Empty();
-	MOUSettingsVersion = 1;
+	MOUSettingsVersion = 2;
 }
 
+// [MIC-002] 기존 설정을 읽고 구버전 음성 볼륨과 마이크 임계값을 한 번 보정한다.
 void UMOU_GameUserSettings::LoadSettings(bool bForceReload)
 {
 	Super::LoadSettings(bForceReload);
@@ -61,7 +65,16 @@ void UMOU_GameUserSettings::LoadSettings(bool bForceReload)
 	if (MOUSettingsVersion < 1)
 	{
 		SetToDefaults();
-		MOUSettingsVersion = 1;
+		SaveSettings();
+		return;
+	}
+
+	if (MOUSettingsVersion < 2)
+	{
+		// 기존 음성 볼륨은 출력에 연결되지 않았으므로 새 기본값으로 시작한다.
+		VoiceVolume = 1.0f;
+		MicSensitivity = MOUVoice::SettingsMicThresholdDefault;
+		MOUSettingsVersion = 2;
 		SaveSettings();
 	}
 }
@@ -103,22 +116,18 @@ void UMOU_GameUserSettings::SetSFXVolume(float InVolume)
 	OnAudioSettingsChanged.Broadcast();
 }
 
+// [VOICEVOL-001] 수신 음성 배율을 0~200% 범위로 저장하고 즉시 변경을 알린다.
 void UMOU_GameUserSettings::SetVoiceVolume(float InVolume)
 {
-	VoiceVolume = FMath::Clamp(InVolume, 0.0f, 1.0f);
+	VoiceVolume = FMath::Clamp(InVolume, 0.0f, 2.0f);
 	OnAudioSettingsChanged.Broadcast();
 }
 
+// [MIC-003] 수동 마이크 임계값을 0~0.01로 제한하고 캡처에 적용한다.
 void UMOU_GameUserSettings::SetMicSensitivity(float InSensitivity)
 {
-	MicSensitivity = FMath::Clamp(InSensitivity, 0.0f, 1.0f);
-	if (GEngine)
-	{
-		if (UVoiceSubsystem* VoiceSubsystem = UVoiceSubsystem::Get(GEngine->GetWorld()))
-		{
-			VoiceSubsystem->SetMicSensitivity(MicSensitivity);
-		}
-	}
+	MicSensitivity = FMath::Clamp(InSensitivity, 0.0f, MOUVoice::SettingsMicThresholdMax);
+	// 각 로컬 플레이어의 VoiceSubsystem이 구독하여 실제 캡처에 즉시 반영한다.
 	OnAudioSettingsChanged.Broadcast();
 }
 
