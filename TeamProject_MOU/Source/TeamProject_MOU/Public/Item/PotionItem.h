@@ -30,7 +30,7 @@ class TEAMPROJECT_MOU_API APotionItem : public AConsumableItemBase
 	GENERATED_BODY()
 
 public:
-	// [POTION-000] 포션 공통 설정과 작은 메시의 바닥 관통 방지용 CCD를 초기화한다.
+	// [POTION-000] 포션 공통 설정, 기본 사용 이펙트와 작은 메시의 바닥 관통 방지용 CCD를 초기화한다.
 	APotionItem();
 
 	// [POTION-016] Q 투척 후 굴러가는 속도에 맞춰 유리 굴림음을 갱신한다.
@@ -196,7 +196,7 @@ private:
 	void OnImpact(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
 		FVector NormalImpulse, const FHitResult& Hit);
 
-	// 실제 GE 적용 + 태그 제거를 한 대상에게 수행 (자기 사용 / 광역 공용)
+	// [POTION-022] 같은 종류의 지속 포션은 수치를 중첩하지 않고 지속시간만 초기화해 대상에게 적용한다.
 	void ApplyPotionEffectToTarget(AActor* Target);
 
 	// 중복 발동 방지 (OnComponentHit이 여러 번 불릴 수 있음)
