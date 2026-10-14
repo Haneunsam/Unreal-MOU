@@ -1,18 +1,18 @@
-#include "MiniGame/MiniGameTokenItem.h"
+ï»¿#include "MiniGame/MiniGameTokenItem.h"
 
 #include "MiniGame/MiniGameTokenReceiver.h"
 #include "Kismet/GameplayStatics.h"
 
 AMiniGameTokenItem::AMiniGameTokenItem()
 {
-	// ÅäÅ« ¾ÆÀÌÅÛ ÀÚÃ¼´Â ÇÑ ¹ø¸¸ »ç¿ë
+	// ï¿½ï¿½Å« ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½
 	MaxUseCount = 1;
 	CurrentUseCount = 1;
 
-	// ÅäÅ« ÇÏ³ª´ç ¹Ì´Ï°ÔÀÓ ÇÃ·¹ÀÌ °¡´É È½¼ö
+	// ï¿½ï¿½Å« ï¿½Ï³ï¿½ï¿½ï¿½ ï¿½Ì´Ï°ï¿½ï¿½ï¿½ ï¿½Ã·ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ È½ï¿½ï¿½
 	GrantedPlayCount = 2;
 
-	// ÀÎº¥Åä¸®¿¡ º¸°ü °¡´ÉÇÑ ¾ÆÀÌÅÛ
+	// ï¿½Îºï¿½ï¿½ä¸®ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	bCanBeStoredInInventory = true;
 }
 
@@ -23,19 +23,19 @@ bool AMiniGameTokenItem::CanUseToken() const
 
 AActor* AMiniGameTokenItem::ResolveTokenUser() const
 {
-	// ÀÎº¥Åä¸® º¸°ü »óÅÂ¶ó¸é ÇÃ·¹ÀÌ¾î¿¡°Ô AttachµÇ¾î ÀÖÀ¸¹Ç·Î ¿ì¼± È®ÀÎ
+	// ï¿½Îºï¿½ï¿½ä¸® ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Â¶ï¿½ï¿½ ï¿½Ã·ï¿½ï¿½Ì¾î¿¡ï¿½ï¿½ Attachï¿½Ç¾ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ç·ï¿½ ï¿½ì¼± È®ï¿½ï¿½
 	if (AActor* AttachedActor = GetAttachParentActor())
 	{
 		return AttachedActor;
 	}
 
-	// ItemBase¿¡¼­ ¸¶Áö¸·À¸·Î ¾ÆÀÌÅÛÀ» ¼ÒÀ¯Çß´ø ÇÃ·¹ÀÌ¾î
+	// ItemBaseï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ß´ï¿½ ï¿½Ã·ï¿½ï¿½Ì¾ï¿½
 	if (LastOwner)
 	{
 		return LastOwner.Get();
 	}
 
-	// º°µµ·Î Owner°¡ ¼³Á¤µÇ¾î ÀÖ´Â °æ¿ì
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Ownerï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ç¾ï¿½ ï¿½Ö´ï¿½ ï¿½ï¿½ï¿½
 	if (AActor* OwnerActor = GetOwner())
 	{
 		return OwnerActor;
@@ -46,24 +46,60 @@ AActor* AMiniGameTokenItem::ResolveTokenUser() const
 
 void AMiniGameTokenItem::OnUse_Implementation()
 {
-	// ÅäÅ« ¹× ¸Ó½Å »óÅÂ º¯°æÀº ¼­¹ö¿¡¼­¸¸ Ã³¸®
-	if (!HasAuthority())
+	if (HasAuthority())
 	{
-		return;
+		UseTokenOnServer(ResolveTokenUser());
 	}
+	else
+	{
+		ServerUseToken();
+	}
+}
 
+void AMiniGameTokenItem::ServerUseToken_Implementation()
+{
 	UseTokenOnServer(ResolveTokenUser());
 }
 
+void AMiniGameTokenItem::PickUp_Implementation(AActor* Picker)
+{
+	Super::PickUp_Implementation(Picker);
+
+	if (HasAuthority() && IsValid(Picker))
+	{
+		SetOwner(Picker);
+	}
+}
+
+void AMiniGameTokenItem::OnEquipped_Implementation(AActor* Equipper)
+{
+	Super::OnEquipped_Implementation(Equipper);
+
+	if (HasAuthority() && IsValid(Equipper))
+	{
+		SetOwner(Equipper);
+		LastOwner = Equipper;
+	}
+}
+
+void AMiniGameTokenItem::Drop_Implementation(FVector DropLocation, AActor* Dropper)
+{
+	if (HasAuthority())
+	{
+		SetOwner(nullptr);
+	}
+
+	Super::Drop_Implementation(DropLocation, Dropper);
+}
 void AMiniGameTokenItem::UseTokenOnServer(AActor* UserActor)
 {
-	// ÅäÅ« ¹× ¸Ó½Å »óÅÂ º¯°æÀº ¼­¹ö¿¡¼­¸¸ Ã³¸®
+	// ï¿½ï¿½Å« ï¿½ï¿½ ï¿½Ó½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Ã³ï¿½ï¿½
 	if (!HasAuthority())
 	{
 		return;
 	}
 
-	// ÀÌ¹Ì ¼ÒºñµÈ ÅäÅ«
+	// ï¿½Ì¹ï¿½ ï¿½Òºï¿½ï¿½ ï¿½ï¿½Å«
 	if (!CanUseToken())
 	{
 		return;
@@ -75,7 +111,7 @@ void AMiniGameTokenItem::UseTokenOnServer(AActor* UserActor)
 		return;
 	}
 
-	// ÅäÅ«À» ¹ÞÀ» ¼ö ÀÖ´Â ¸ðµç ¹Ì´Ï°ÔÀÓ ¸Ó½Å °Ë»ö
+	// ï¿½ï¿½Å«ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½Ö´ï¿½ ï¿½ï¿½ï¿½ ï¿½Ì´Ï°ï¿½ï¿½ï¿½ ï¿½Ó½ï¿½ ï¿½Ë»ï¿½
 	TArray<AActor*> MiniGameMachines;
 
 	UGameplayStatics::GetAllActorsWithInterface(
@@ -91,8 +127,8 @@ void AMiniGameTokenItem::UseTokenOnServer(AActor* UserActor)
 			continue;
 		}
 
-		// ½ÇÁ¦ »ç¿ë °¡´É ¿©ºÎ´Â °¢ ¸Ó½ÅÀÌ ÆÇ´Ü
-		// StockMachine¿¡¼­´Â UseArea ¾È¿¡ ÀÖ´ÂÁöµµ ¿©±â¼­ °Ë»ç
+		// ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Î´ï¿½ ï¿½ï¿½ ï¿½Ó½ï¿½ï¿½ï¿½ ï¿½Ç´ï¿½
+		// StockMachineï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ UseArea ï¿½È¿ï¿½ ï¿½Ö´ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½â¼­ ï¿½Ë»ï¿½
 		const bool bAccepted =
 			IMiniGameTokenReceiver::Execute_TryActivateMiniGameToken(
 				Machine,
@@ -105,7 +141,7 @@ void AMiniGameTokenItem::UseTokenOnServer(AActor* UserActor)
 			continue;
 		}
 
-		// ¸Ó½ÅÀÌ ÅäÅ« »ç¿ëÀ» ½ÂÀÎÇßÀ» ¶§¸¸ ÅäÅ« ¼Òºñ
+		// ï¿½Ó½ï¿½ï¿½ï¿½ ï¿½ï¿½Å« ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Å« ï¿½Òºï¿½
 		CurrentUseCount =
 			FMath::Max(0, CurrentUseCount - 1);
 
@@ -116,14 +152,14 @@ void AMiniGameTokenItem::UseTokenOnServer(AActor* UserActor)
 			GrantedPlayCount
 		);
 
-		// ÃßÈÄ Inventory Á¦°Å Ã³¸®
+		// ï¿½ï¿½ï¿½ï¿½ Inventory ï¿½ï¿½ï¿½ï¿½ Ã³ï¿½ï¿½
 		OnTokenConsumed(UserActor);
 
 		return;
 	}
 
-	// ¾î¶² ¸Ó½Å¿¡¼­µµ ½ÂÀÎÇÏÁö ¾ÊÀº °æ¿ì
-	// ÅäÅ«Àº ¼ÒºñµÇÁö ¾ÊÀ½
+	// ï¿½î¶² ï¿½Ó½Å¿ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½
+	// ï¿½ï¿½Å«ï¿½ï¿½ ï¿½Òºï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
 	UE_LOG(
 		LogTemp,
 		Log,
