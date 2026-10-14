@@ -78,6 +78,11 @@ protected:
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastPlayUseEffect();
 
+	// [CONSUME-017] 일반 소비 효과를 효과 대상의 루트 컴포넌트에 부착해 이동을 따라가게 재생한다.
+	// 대상이 없거나 부착할 수 없으면 아이템의 현재 월드 위치에서 재생한다.
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlayUseEffectAttached(AActor* EffectTarget);
+
 	// [CONSUME-006] 효과 연출 BP 훅 (나이아가라/사운드 등을 BP에서 연결)
 	UFUNCTION(BlueprintImplementableEvent, Category = "Consumable")
 	void OnUseEffect();

@@ -206,7 +206,8 @@ private:
 	// Q(단순 투척)는 이 플래그가 false라 어떤 포션이든 절대 안 터진다.
 	bool bThrowAsUse = false;
 
-	// 좌클릭 후 투척 몽타주의 Potion Throw Notify를 기다리는 중인지 여부 (서버 권한 상태).
+	// 좌클릭 사용 투척의 중복 실행을 막고 실제 Throw 실행 가능 상태를 나타낸다 (서버 권한 상태).
+	// 현재는 Q 투척처럼 몽타주 시작 직후 즉시 소비되며, 기존 Anim Notify 호출은 안전하게 무시된다.
 	bool bWaitingForThrowNotify = false;
 #pragma endregion
 };

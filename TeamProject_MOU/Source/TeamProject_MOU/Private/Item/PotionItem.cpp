@@ -186,14 +186,13 @@ void APotionItem::OnUse_Implementation()
 		bWaitingForThrowNotify = true;
 		if (UseMontage)
 		{
-			// 실제 투척은 몽타주의 UAnimNotify_PotionThrow가 호출할 때 실행한다.
+			// Q 투척과 동일하게 몽타주는 시각 연출로 재생하고, 물리 투척은 바로 실행한다.
 			MulticastPlayThrowMontage(Cast<ACharacterBase>(OwnerActor));
 		}
-		else
-		{
-			// 몽타주가 지정되지 않은 포션은 사용 불능 상태가 되지 않도록 즉시 투척한다.
-			ExecutePendingImpactThrow();
-		}
+
+		// Q의 GA_ThrowItem과 동일하게 CarryingComponent::Throw를 즉시 호출한다.
+		// bThrowAsUse는 ExecutePendingImpactThrow 안에서 설정되어 충돌 시에만 포션 효과가 발동한다.
+		ExecutePendingImpactThrow();
 		return;
 	}
 
