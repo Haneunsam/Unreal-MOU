@@ -6,6 +6,7 @@
 #include "ConsumableItemBase.generated.h"
 
 class UAnimMontage;
+class UNiagaraSystem;
 class USoundBase;
 
 /**
@@ -77,6 +78,11 @@ protected:
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastPlayUseEffect();
 
+	// [CONSUME-017] 일반 소비 효과를 효과 대상의 루트 컴포넌트에 부착해 이동을 따라가게 재생한다.
+	// 대상이 없거나 부착할 수 없으면 아이템의 현재 월드 위치에서 재생한다.
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlayUseEffectAttached(AActor* EffectTarget);
+
 	// [CONSUME-006] 효과 연출 BP 훅 (나이아가라/사운드 등을 BP에서 연결)
 	UFUNCTION(BlueprintImplementableEvent, Category = "Consumable")
 	void OnUseEffect();
@@ -97,6 +103,14 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Consumable|Audio", meta = (ClampMin = "0.0"))
 	float UseSoundVolume = 1.0f;
+
+	// 사용 성공 시 아이템 위치에서 모든 플레이어에게 재생할 Niagara 이펙트.
+	// 자식 BP에서 포션 종류별 이펙트로 교체할 수 있다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Consumable|FX")
+	TObjectPtr<UNiagaraSystem> UseEffect;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Consumable|FX")
+	FVector UseEffectScale = FVector::OneVector;
 
 private:
 	// [CONSUME-008] 클라이언트에서 눌렀을 때 서버로 소비 위임 (서버에서 차감+효과)

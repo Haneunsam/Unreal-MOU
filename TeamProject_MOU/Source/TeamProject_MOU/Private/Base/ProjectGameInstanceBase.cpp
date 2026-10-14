@@ -12,6 +12,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameViewportClient.h"
 #include "UObject/UnrealType.h"
+#include "GameFramework/PlayerState.h"
 
 // [LOBBYLOAD-001] 최초 로비 입장의 참여 예정 명단과 전용 로딩을 시작합니다.
 void UProjectGameInstanceBase::BeginLobbyEntryWait(const TArray<int64>& Members)
@@ -63,6 +64,8 @@ void UProjectGameInstanceBase::FinishLobbyEntryWait()
 void UProjectGameInstanceBase::Init()
 {
 	Super::Init();
+	LevelTravelTearDownHandle = FWorldDelegates::OnWorldBeginTearDown.AddUObject(
+		this, &UProjectGameInstanceBase::CaptureLevelTravelParticipants);
 
 	if (UMOU_GameUserSettings* UserSettings = UMOU_GameUserSettings::GetMOUGameUserSettings())
 	{
@@ -87,6 +90,7 @@ void UProjectGameInstanceBase::Init()
 
 void UProjectGameInstanceBase::Shutdown()
 {
+	FWorldDelegates::OnWorldBeginTearDown.Remove(LevelTravelTearDownHandle);
 	FinishLobbyEntryWait();
 	// GameInstance가 종료될 때 등록했던 델리게이트를 반드시 해제
 	if (PreLoadMapHandle.IsValid())
@@ -100,6 +104,19 @@ void UProjectGameInstanceBase::Shutdown()
 	}
 
 	Super::Shutdown();
+}
+
+// [LEVELREADY-000] 월드 종료 직전 서버의 이동 참여자를 기록한다.
+void UProjectGameInstanceBase::CaptureLevelTravelParticipants(UWorld* World)
+{
+	if (!World || World != GetWorld() || World->GetNetMode() == NM_Client) return;
+	LevelTravelParticipants.Reset();
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		const ATeamProject_MOUPlayerController* PC = Cast<ATeamProject_MOUPlayerController>(It->Get());
+		if (PC && !PC->bWaitForSafeLobby && PC->PlayerState)
+			LevelTravelParticipants.Add(PC->GetLevelReadyParticipantKey());
+	}
 }
 
 void UProjectGameInstanceBase::SaveStoredItems(const TArray<FStoredItemData>& InStoredItems)
