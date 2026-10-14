@@ -94,7 +94,7 @@ AGrabGun::AGrabGun()
 	// 링크가 매달리는 루트 + 총구 지점 (GLB 실측 linkage_root = 7.0, 1.1, 0)
 	LinkageRoot = CreateDefaultSubobject<USceneComponent>(TEXT("LinkageRoot"));
 	LinkageRoot->SetupAttachment(MeshComponent);
-	LinkageRoot->SetRelativeLocation(LinkageRootOffset);
+	LinkageRoot->SetRelativeLocation(MakeLocal(LinkageRootOffset.X, LinkageRootOffset.Y, LinkageRootOffset.Z));
 
 	MuzzlePoint = CreateDefaultSubobject<USceneComponent>(TEXT("MuzzlePoint"));
 	MuzzlePoint->SetupAttachment(MeshComponent);
@@ -179,8 +179,8 @@ UStaticMesh* AGrabGun::LoadPartMesh(const FString& PartName) const
 // [GRAB-033] 부품의 로컬 위치 벡터 구성
 FVector AGrabGun::MakeLocal(float X, float Y, float Z) const
 {
-	// GLB matrix 실측값을 그대로 UE 로컬로 사용한다. (Interchange가 축 변환 처리)
-	return FVector(X, Y, Z);
+	// Interchange가 축 변환을 처리하므로 방향은 유지하고, Static Mesh Build Scale만 좌표에 반영한다.
+	return FVector(X, Y, Z) * AssemblyScale;
 }
 
 // [GRAB-034] 부품의 로컬 Yaw 회전 구성
@@ -237,8 +237,8 @@ void AGrabGun::BuildLinkageComponents()
 	// 집게 끝 접촉 판정 콜라이더 (end_yoke 자식). 평소 꺼두고 펴질 때만 켠다.
 	JawGrabCollider = CreateDefaultSubobject<USphereComponent>(TEXT("JawGrabCollider"));
 	JawGrabCollider->SetupAttachment(EndYoke);
-	JawGrabCollider->SetRelativeLocation(JawColliderOffset);
-	JawGrabCollider->SetSphereRadius(JawColliderRadius);
+	JawGrabCollider->SetRelativeLocation(MakeLocal(JawColliderOffset.X, JawColliderOffset.Y, JawColliderOffset.Z));
+	JawGrabCollider->SetSphereRadius(JawColliderRadius * AssemblyScale);
 	JawGrabCollider->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	JawGrabCollider->SetGenerateOverlapEvents(false);
 	JawGrabCollider->SetCollisionResponseToAllChannels(ECR_Overlap);
@@ -251,7 +251,7 @@ void AGrabGun::BuildLinkageComponents()
 	//     jaw_pin_* (identity)
 	// TOP
 	JawPivotTop = MakeScene(TEXT("jaw_pivot_top"), EndYoke,
-		MakeLocal(0.6f, +2.62f, 0.0f), MakeYawRot(+10.03f));
+		MakeLocal(JawPivotOffset.X, +JawPivotOffset.Y, JawPivotOffset.Z), MakeYawRot(+10.03f));
 	{
 		USceneComponent* Reach = MakeScene(TEXT("jaw_reach_top"), JawPivotTop, FVector::ZeroVector, FRotator::ZeroRotator);
 		JawBladeTop = MakeMesh(TEXT("jaw_blade_top"), TEXT("jaw_blade_top"), Reach, FVector::ZeroVector, FRotator::ZeroRotator);
@@ -260,7 +260,7 @@ void AGrabGun::BuildLinkageComponents()
 	}
 	// BOTTOM (Y·회전 부호 반대)
 	JawPivotBottom = MakeScene(TEXT("jaw_pivot_bottom"), EndYoke,
-		MakeLocal(0.6f, -2.62f, 0.0f), MakeYawRot(-10.03f));
+		MakeLocal(JawPivotOffset.X, -JawPivotOffset.Y, JawPivotOffset.Z), MakeYawRot(-10.03f));
 	{
 		USceneComponent* Reach = MakeScene(TEXT("jaw_reach_bottom"), JawPivotBottom, FVector::ZeroVector, FRotator::ZeroRotator);
 		JawBladeBottom = MakeMesh(TEXT("jaw_blade_bottom"), TEXT("jaw_blade_bottom"), Reach, FVector::ZeroVector, FRotator::ZeroRotator);
@@ -270,7 +270,8 @@ void AGrabGun::BuildLinkageComponents()
 
 	// 트리거 피벗 (body_shell=MeshComponent 직속). GLB 실측 trigger_pivot (-0.2, -0.8, 0).
 	// trigger 메시 위치/회전은 Details(TriggerMeshOffset/Rot)로 조정. (Update에서 갱신)
-	TriggerPivot = MakeScene(TEXT("trigger_pivot"), MeshComponent, MakeLocal(-0.2f, -0.8f, 0.0f), FRotator::ZeroRotator);
+	TriggerPivot = MakeScene(TEXT("trigger_pivot"), MeshComponent,
+		MakeLocal(TriggerPivotOffset.X, TriggerPivotOffset.Y, TriggerPivotOffset.Z), FRotator::ZeroRotator);
 	TriggerMesh = MakeMesh(TEXT("trigger"), TEXT("trigger"), TriggerPivot, FVector::ZeroVector, FRotator::ZeroRotator);
 }
 
@@ -469,7 +470,7 @@ void AGrabGun::UpdateLinkagePose(float Alpha)
 	// trigger(방아쇠) 메시 위치·회전 (Details에서 조정).
 	if (TriggerMesh)
 	{
-		TriggerMesh->SetRelativeLocation(TriggerMeshOffset);
+		TriggerMesh->SetRelativeLocation(MakeLocal(TriggerMeshOffset.X, TriggerMeshOffset.Y, TriggerMeshOffset.Z));
 		TriggerMesh->SetRelativeRotation(TriggerMeshRot);
 	}
 	// 트리거 당김: t=alpha

@@ -87,6 +87,9 @@ protected:
 #pragma endregion
 
 #pragma region [GRAB] 팬터그래프 연출 설정 (GLB matrix 실측 기반)
+	// Static Mesh Build Scale과 동일한 조립 좌표 배율. 모든 부품 에셋에 적용한 값과 함께 유지한다.
+	static constexpr float AssemblyScale = 5.0f;
+
 	// 셀(가위 링크) 개수. 임포트된 bar_up_0..8 / pin_*_0..8 기준 9칸.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GrabGun|Linkage")
 	int32 CellCount = 12;
