@@ -75,6 +75,57 @@ bool FLobbyEntryReadyRegressionTest::RunTest(const FString& Parameters)
 	Instance->Shutdown();
 	return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLevelReadyRegressionTest, "MOU.LevelTimer.ReadyBarrier",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+// [LEVELREADY-008] 늦은 참여자와 중복 보고를 검사하고 전원 준비 후 한 번만 시작되는지 검증한다.
+bool FLevelReadyRegressionTest::RunTest(const FString& Parameters)
+{
+	TGuardValue<bool> AllowActorEvents(GAllowActorScriptExecutionInEditor, true);
+	UProjectGameInstanceBase* Instance = NewObject<UProjectGameInstanceBase>(GEngine);
+	Instance->InitializeStandalone();
+	UWorld* World = Instance->GetWorld();
+	UClass* ModeClass = LoadClass<ATeamProject_MOUGameMode>(nullptr,
+		TEXT("/Game/01_LDJ/GameSystem/BP/BP_Gamemode.BP_Gamemode_C"));
+	if (!TestNotNull(TEXT("Production game mode"), ModeClass)) { Instance->Shutdown(); return false; }
+	auto* Mode = World->SpawnActor<ATeamProject_MOUGameMode>(ModeClass);
+	auto* Host = World->SpawnActor<ATeamProject_MOUPlayerController>(Mode->PlayerControllerClass);
+	Host->PlaySessionId = TEXT("ready-host");
+	Host->bWaitForSafeLobby = false;
+	World->AddController(Host);
+	if (!Host->PlayerState) Host->PlayerState = World->SpawnActor<APlayerState>();
+	auto* HostPawn = World->SpawnActor<AMainCharacter>();
+	Host->Possess(HostPawn);
+	Mode->ExpectedLevelParticipants = { TEXT("Session:ready-host"), TEXT("Session:ready-guest") };
+	Mode->bWaitingForLevelReady = true;
+	Mode->ReportLevelReady(Host);
+	TestEqual(TEXT("Unrequested report ignored"), Mode->ReadyLevelPlayers.Num(), 0);
+	Mode->CheckLevelReadyWait();
+	Mode->ReportLevelReady(Host);
+	Mode->ReportLevelReady(Host);
+	TestFalse(TEXT("Host cannot start before late guest arrives"), Mode->bLevelTimerStarted);
+	TestEqual(TEXT("Duplicate reports counted once"), Mode->ReadyLevelPlayers.Num(), 1);
+	auto* Guest = World->SpawnActor<ATeamProject_MOUPlayerController>(Mode->PlayerControllerClass);
+	Guest->PlaySessionId = TEXT("ready-guest");
+	Guest->bWaitForSafeLobby = false;
+	World->AddController(Guest);
+	if (!Guest->PlayerState) Guest->PlayerState = World->SpawnActor<APlayerState>();
+	Mode->CheckLevelReadyWait();
+	Mode->ReportLevelReady(Guest);
+	TestFalse(TEXT("Guest without pawn cannot start timer"), Mode->bLevelTimerStarted);
+	auto* GuestPawn = World->SpawnActor<AMainCharacter>();
+	Guest->Possess(GuestPawn);
+	Mode->ReportLevelReady(Guest);
+	TestTrue(TEXT("All participants ready starts timer"), Mode->bLevelTimerStarted);
+	TestFalse(TEXT("Waiting ends once"), Mode->bWaitingForLevelReady);
+	Mode->ReportLevelReady(Guest);
+	TestEqual(TEXT("Completion ignores repeat reports"), Mode->ReadyLevelPlayers.Num(), 2);
+	Instance->CaptureLevelTravelParticipants(World);
+	TestTrue(TEXT("Host retained across travel"), Instance->LevelTravelParticipants.Contains(TEXT("Session:ready-host")));
+	TestTrue(TEXT("Guest retained across travel"), Instance->LevelTravelParticipants.Contains(TEXT("Session:ready-guest")));
+	Host->Destroy(); Guest->Destroy(); HostPawn->Destroy(); GuestPawn->Destroy(); Mode->Destroy();
+	Instance->Shutdown();
+	return true;
+}
 #endif
 
 ATeamProject_MOUGameMode::ATeamProject_MOUGameMode()
@@ -104,12 +155,73 @@ void ATeamProject_MOUGameMode::InitGameState()
 void ATeamProject_MOUGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+	BeginLevelReadyWait();
+}
+
+// [LEVELREADY-006] 이동 참여자 전원의 로컬 준비 보고를 기다린다.
+void ATeamProject_MOUGameMode::BeginLevelReadyWait()
+{
+	float Duration = 0.0f;
+	if (!LevelTimerConfig || !LevelTimerState || !LevelTimerConfig->FindTimeLimitForMap(
+		UGameplayStatics::GetCurrentLevelName(this, true), Duration)) return;
+	if (UProjectGameInstanceBase* Instance = Cast<UProjectGameInstanceBase>(GetGameInstance()))
+	{
+		ExpectedLevelParticipants = MoveTemp(Instance->LevelTravelParticipants);
+		Instance->LevelTravelParticipants.Reset();
+	}
+	bWaitingForLevelReady = true;
+	GetWorldTimerManager().SetTimer(LevelReadyWaitHandle, this,
+		&ATeamProject_MOUGameMode::CheckLevelReadyWait, 1.0f, true);
+	CheckLevelReadyWait();
+}
+
+// [LEVELREADY-005] 소유 클라이언트의 준비 보고를 집계하여 시작 조건을 검사한다.
+void ATeamProject_MOUGameMode::ReportLevelReady(ATeamProject_MOUPlayerController* PC)
+{
+	if (!bWaitingForLevelReady || !IsValid(PC) || !PC->GetPawn() || !PC->PlayerState
+		|| !RequestedLevelPlayers.Contains(PC)) return;
+	ReadyLevelPlayers.Add(PC);
+	CheckLevelReadyWait();
+}
+
+// [LEVELREADY-007] 새 컨트롤러에 준비 요청을 보내고 전원 준비 시 타이머를 시작한다.
+void ATeamProject_MOUGameMode::CheckLevelReadyWait()
+{
+	if (!bWaitingForLevelReady || bLevelTimerStarted) return;
+	TSet<FString> ReadyKeys;
+	int32 PlayerCount = 0;
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		ATeamProject_MOUPlayerController* PC = Cast<ATeamProject_MOUPlayerController>(It->Get());
+		if (!PC || PC->bWaitForSafeLobby) continue;
+		++PlayerCount;
+		if (!ReadyLevelPlayers.Contains(PC))
+		{
+			RequestedLevelPlayers.Add(PC);
+			PC->ClientBeginLevelReadyWait();
+		}
+		if (ReadyLevelPlayers.Contains(PC)) ReadyKeys.Add(PC->GetLevelReadyParticipantKey());
+	}
+	if (!bWaitingForLevelReady || bLevelTimerStarted || PlayerCount == 0 || GetWorld()->IsInSeamlessTravel()) return;
+	for (const FString& Expected : ExpectedLevelParticipants)
+		if (!ReadyKeys.Contains(Expected)) return;
+	if (ReadyKeys.Num() < PlayerCount) return;
+	bWaitingForLevelReady = false;
+	bLevelTimerStarted = true;
+	GetWorldTimerManager().ClearTimer(LevelReadyWaitHandle);
+	UE_LOG(LogTemp, Log, TEXT("[LevelReady] All %d players ready; starting level timer."), PlayerCount);
 	TryStartLevelTimer();
 }
 
 // [SETTLEMENT-005] 접속 종료된 플레이어를 확인 대상에서 제거하고 남은 인원을 다시 검사합니다.
 void ATeamProject_MOUGameMode::Logout(AController* Exiting)
 {
+	if (ATeamProject_MOUPlayerController* PC = Cast<ATeamProject_MOUPlayerController>(Exiting))
+	{
+		ExpectedLevelParticipants.Remove(PC->GetLevelReadyParticipantKey());
+		ReadyLevelPlayers.Remove(PC);
+		RequestedLevelPlayers.Remove(PC);
+	}
 	for (auto It = LobbyEntryReadyMembers.CreateIterator(); It; ++It)
 		if (It.Value().Get() == Exiting) It.RemoveCurrent();
 	if (Exiting)
@@ -121,6 +233,7 @@ void ATeamProject_MOUGameMode::Logout(AController* Exiting)
 	}
 
 	Super::Logout(Exiting);
+	CheckLevelReadyWait();
 	CheckAllPlayersConfirmedSettlement();
 }
 

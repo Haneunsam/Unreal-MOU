@@ -34,6 +34,17 @@ class ATeamProject_MOUPlayerController : public APlayerController
 	GENERATED_BODY()
 
 public:
+	// [LEVELREADY-001] 이동 전후 동일한 참여자 키를 서버에서 구한다.
+	FString GetLevelReadyParticipantKey() const;
+	// [LEVELREADY-002] 서버가 현재 맵의 준비 확인을 소유 클라이언트에 요청한다.
+	UFUNCTION(Client, Reliable)
+	void ClientBeginLevelReadyWait();
+	// [LEVELREADY-003] 소유 클라이언트의 준비 완료를 서버에 보고한다.
+	UFUNCTION(Server, Reliable)
+	void ServerReportLevelReady();
+	// [LEVELREADY-004] 맵과 소유 캐릭터의 필수 복제가 준비되면 보고한다.
+	void UpdateLevelReadyWait();
+	bool bLevelReadyReportPending = false;
 	// [LOBBYLOAD-007] 소유 클라이언트가 최초 로비 플레이 준비 완료를 서버에 보고합니다.
 	UFUNCTION(Server, Reliable)
 	void ServerReportLobbyEntryReady(int64 UserId);
