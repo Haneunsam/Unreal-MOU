@@ -6,6 +6,7 @@
 #include "Animation/AnimInstance.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Sound/SoundBase.h"
 #include "UObject/ConstructorHelpers.h"
@@ -107,8 +108,9 @@ void AConsumableItemBase::TryConsumeOnServer()
 	// 사용 애니메이션 GA 트리거 (소유 캐릭터에게 GameplayEvent → GA_UsePotion이 몽타주 재생)
 	SendUseAbilityEvent();
 
-	// 효과 연출(VFX/사운드)을 모든 클라에서 재생
-	MulticastPlayUseEffect();
+	// 일반 소비 연출은 효과 대상에게 부착해 이동을 따라가게 모든 클라이언트에서 재생한다.
+	// 투척 충돌 연출은 APotionItem::OnImpact에서 기존 MulticastPlayUseEffect를 사용해 충돌 위치에 남긴다.
+	MulticastPlayUseEffectAttached(ResolveEffectTarget());
 
 	// 다 쓰면 손을 비운 뒤 아이템 소멸
 	if (ConsumeUseCount <= 0)
@@ -215,6 +217,54 @@ void AConsumableItemBase::MulticastPlayUseEffect_Implementation()
 	if (UseSound && GetNetMode() != NM_DedicatedServer)
 	{
 		UGameplayStatics::PlaySoundAtLocation(this, UseSound, GetActorLocation(), UseSoundVolume);
+	}
+
+	OnUseEffect();
+}
+
+// [CONSUME-017] 일반 소비 효과를 효과 대상에게 부착하고, 대상이 없으면 기존 월드 위치 방식으로 재생한다.
+void AConsumableItemBase::MulticastPlayUseEffectAttached_Implementation(AActor* EffectTarget)
+{
+	const bool bCanPlayEffect = UseEffect && GetNetMode() != NM_DedicatedServer;
+	USceneComponent* AttachComponent = IsValid(EffectTarget) ? EffectTarget->GetRootComponent() : nullptr;
+
+	if (bCanPlayEffect && AttachComponent)
+	{
+		if (UNiagaraComponent* SpawnedEffect = UNiagaraFunctionLibrary::SpawnSystemAttached(
+			UseEffect,
+			AttachComponent,
+			NAME_None,
+			FVector::ZeroVector,
+			FRotator::ZeroRotator,
+			EAttachLocation::SnapToTarget,
+			true,
+			true,
+			ENCPoolMethod::AutoRelease,
+			true))
+		{
+			SpawnedEffect->SetRelativeScale3D(UseEffectScale);
+		}
+	}
+	else if (bCanPlayEffect)
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			this,
+			UseEffect,
+			GetActorLocation(),
+			GetActorRotation(),
+			UseEffectScale,
+			true,
+			true,
+			ENCPoolMethod::AutoRelease,
+			true);
+	}
+
+	if (UseSound && GetNetMode() != NM_DedicatedServer)
+	{
+		const FVector SoundLocation = IsValid(EffectTarget)
+			? EffectTarget->GetActorLocation()
+			: GetActorLocation();
+		UGameplayStatics::PlaySoundAtLocation(this, UseSound, SoundLocation, UseSoundVolume);
 	}
 
 	OnUseEffect();
