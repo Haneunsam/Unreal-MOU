@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 
 #include "CoreMinimal.h"
 #include "Base/ItemBase.h"
@@ -12,11 +12,11 @@ class TEAMPROJECT_MOU_API AMiniGameTokenItem : public AItemBase
 public:
 	AMiniGameTokenItem();
 
-	// ÇöÀç ÅäÅ« »ç¿ë °¡´É ¿©ºÎ
+	// ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Å« ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
 	UFUNCTION(BlueprintPure, Category = "MiniGame|Token")
 	bool CanUseToken() const;
 
-	// ÀÌ ÅäÅ« 1°³°¡ ¸Ó½Å¿¡ Á¦°øÇÏ´Â ÇÃ·¹ÀÌ È½¼ö
+	// ï¿½ï¿½ ï¿½ï¿½Å« 1ï¿½ï¿½ï¿½ï¿½ ï¿½Ó½Å¿ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ ï¿½Ã·ï¿½ï¿½ï¿½ È½ï¿½ï¿½
 	UFUNCTION(BlueprintPure, Category = "MiniGame|Token")
 	int32 GetGrantedPlayCount() const
 	{
@@ -24,23 +24,29 @@ public:
 	}
 
 protected:
-	// ÁÂÅ¬¸¯ ÅäÅ« »ç¿ë
+	// ï¿½ï¿½Å¬ï¿½ï¿½ ï¿½ï¿½Å« ï¿½ï¿½ï¿½
 	virtual void OnUse_Implementation() override;
+	UFUNCTION(Server, Reliable)
+	void ServerUseToken();
+
+	virtual void PickUp_Implementation(AActor* Picker) override;
+	virtual void OnEquipped_Implementation(AActor* Equipper) override;
+	virtual void Drop_Implementation(FVector DropLocation, AActor* Dropper) override;
 
 	UFUNCTION(BlueprintCallable, Category = "MiniGame|Token")
 	void UseTokenOnServer(AActor* UserActor);
 
-	// ÅäÅ« 1°³ »ç¿ë ¼º°ø ½Ã ¸Ó½Å¿¡ Á¦°øÇÒ ÇÃ·¹ÀÌ È½¼ö
+	// ï¿½ï¿½Å« 1ï¿½ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½Ó½Å¿ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ã·ï¿½ï¿½ï¿½ È½ï¿½ï¿½
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MiniGame|Token",
 		meta = (ClampMin = "1"))
 	int32 GrantedPlayCount = 2;
 
-	// ÅäÅ« ¼Òºñ ¼º°ø ÈÄ È£Ãâ
-	// ÃßÈÄ Inventory¿¡¼­ ÅäÅ« Á¦°Å Ã³¸® ¿¬°á¿ë
+	// ï¿½ï¿½Å« ï¿½Òºï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ È£ï¿½ï¿½
+	// ï¿½ï¿½ï¿½ï¿½ Inventoryï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Å« ï¿½ï¿½ï¿½ï¿½ Ã³ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½
 	UFUNCTION(BlueprintImplementableEvent, Category = "MiniGame|Token")
 	void OnTokenConsumed(AActor* UserActor);
 
 private:
-	// ÇöÀç ÅäÅ«À» °¡Áö°í ÀÖ´Â ÇÃ·¹ÀÌ¾î Ã£±â
+	// ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Å«ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ö´ï¿½ ï¿½Ã·ï¿½ï¿½Ì¾ï¿½ Ã£ï¿½ï¿½
 	AActor* ResolveTokenUser() const;
 };

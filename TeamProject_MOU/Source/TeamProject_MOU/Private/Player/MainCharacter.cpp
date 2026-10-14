@@ -1246,23 +1246,18 @@ void AMainCharacter::OnThrowReleased()
 
 		if (AbilitySystemComponent)
 		{
-			bool bActivated = false;
 			if (ThrowAbilitySpecHandle.IsValid())
 			{
-				bActivated = AbilitySystemComponent->TryActivateAbility(ThrowAbilitySpecHandle);
+				AbilitySystemComponent->TryActivateAbility(ThrowAbilitySpecHandle);
 			}
 			else
 			{
 				static const FGameplayTagContainer ThrowTagContainer(FGameplayTag::RequestGameplayTag(FName("Ability.Player.Throw")));
-				bActivated = AbilitySystemComponent->TryActivateAbilitiesByTag(ThrowTagContainer);
-			}
-
-			if (!bActivated)
-			{
-				CarryingComponent->FinishThrowCharge();
+				AbilitySystemComponent->TryActivateAbilitiesByTag(ThrowTagContainer);
 			}
 		}
-		else
+
+		if (CarryingComponent)
 		{
 			CarryingComponent->FinishThrowCharge();
 		}
