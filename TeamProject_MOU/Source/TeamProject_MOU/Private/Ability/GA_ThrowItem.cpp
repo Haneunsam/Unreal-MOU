@@ -68,12 +68,6 @@ void UGA_ThrowItem::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
 		{
 			Char->PlayAnimMontage(ThrowMontage);
 		}
-
-		UCarryingComponent* CarryingComp = Char->FindComponentByClass<UCarryingComponent>();
-		if (CarryingComp)
-		{
-			CarryingComp->Throw();
-		}
 	}
 
 	EndAbility(Handle, ActorInfo, ActivationInfo, false, false);

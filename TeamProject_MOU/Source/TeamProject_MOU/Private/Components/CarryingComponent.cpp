@@ -424,19 +424,19 @@ void UCarryingComponent::ThrowWithForce(const FVector& CustomThrowDir, float InT
 		}
 	}
 
-	// [포물선 궤적 보정] 시선이 바닥을 향하더라도 최소한의 상향 아크를 보장하여 자연스럽고 시원하게 날아가도록 Z 보정
-	FVector ThrowDir = AimDir;
-	ThrowDir.Z = FMath::Max(ThrowDir.Z, 0.0f) + ThrowUpwardBias;
-	ThrowDir.Normalize();
-
 	const float FinalForce = FMath::Clamp(InThrowForce, MinThrowForce, MaxThrowForce);
 
 	if (!GetOwner()->HasAuthority())
 	{
-		ServerThrowWithForce(ThrowDir, FinalForce);
+		ServerThrowWithForce(AimDir, FinalForce);
 		CancelThrowCharge();
 		return;
 	}
+
+	// [포물선 궤적 보정] 시선이 바닥을 향하더라도 최소한의 상향 아크를 보장하여 자연스럽고 시원하게 날아가도록 Z 보정 (서버에서 1회만 적용)
+	FVector ThrowDir = AimDir;
+	ThrowDir.Z = FMath::Max(ThrowDir.Z, 0.0f) + ThrowUpwardBias;
+	ThrowDir.Normalize();
 
 	if (IsCarrying())
 	{

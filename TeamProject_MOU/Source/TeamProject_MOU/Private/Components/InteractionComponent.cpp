@@ -9,6 +9,8 @@
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Engine/World.h"
 #include "Player/MainCharacter.h"
+#include "Cannon/Cannon.h"
+#include "Item/VehicleBase.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "DrawDebugHelpers.h"
 
@@ -73,12 +75,9 @@ void UInteractionComponent::PerformInteraction()
 		{
 			if (!OwnerActorPtr->HasAuthority())
 			{
-				if (const AItemDrone* Drone = Cast<AItemDrone>(FocusedActor))
+				if (!FocusedActor->IsA<AVehicleBase>() && !FocusedActor->IsA<ACannon>())
 				{
-					if (Drone->bIsDeployed)
-					{
-						ServerRunInteract(FocusedActor);
-					}
+					ServerRunInteract(FocusedActor);
 				}
 			}
 		}
