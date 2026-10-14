@@ -30,10 +30,23 @@ void USettingsMenuWidget::NativeOnInitialized()
 	{
 		if (UPanelWidget* Parent = Slider_MicSensitivity->GetParent())
 		{
-			UMicSensitivitySlider* Meter = NewObject<UMicSensitivitySlider>(this);
-			if (Parent->ReplaceChildAt(Parent->GetChildIndex(Slider_MicSensitivity), Meter))
+			const int32 ChildIndex = Parent->GetChildIndex(Slider_MicSensitivity);
+			USlider* OriginalSlider = Slider_MicSensitivity;
+			UPanelSlot* OriginalSlot = OriginalSlider->Slot;
+			if (ChildIndex != INDEX_NONE && OriginalSlot)
 			{
-				Slider_MicSensitivity = Meter;
+				UMicSensitivitySlider* Meter = NewObject<UMicSensitivitySlider>(this);
+				if (Parent->RemoveChildAt(ChildIndex))
+				{
+					if (Parent->InsertChildAt(ChildIndex, Meter, OriginalSlot))
+					{
+						Slider_MicSensitivity = Meter;
+					}
+					else
+					{
+						Parent->InsertChildAt(ChildIndex, OriginalSlider, OriginalSlot);
+					}
+				}
 			}
 		}
 	}
